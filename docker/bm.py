@@ -1,16 +1,31 @@
 #!/usr/bin/env python
 # coding: utf-8
+import os
 
-# In[1]:
+aws_access_key = os.environ['AWS_ACCESS_KEY']
+aws_secret_key = os.environ['AWS_ACCESS_SECRET']
+# Get a token from https://urs.earthdata.nasa.gov/
+earthdata_token = os.environ['EARTH_DATA_TOKEN']
 
+lat1 = os.environ['LAT1']
+long1 = os.environ['LONG1']
+lat2 = os.environ['LAT2']
+long2 = os.environ['LONG2']
+
+year = os.environ['YEAR']
+month = os.environ['MONTH']
+day = os.environ['DAY']
+
+# In[3]:
+
+
+
+# In[4]:
 
 try:
     import gdal
 except ImportError:
     from osgeo import gdal
-
-# In[3]:
-
 
 import glob
 import numpy as np
@@ -34,19 +49,8 @@ import os.path
 from pyproj import Proj
 import json
 
-aws_access_key = os.environ['AWS_ACCESS_KEY']
-aws_secret_key = os.environ['AWS_ACCESS_SECRET']
-# Get a token from https://urs.earthdata.nasa.gov/
-earthdata_token = os.environ['EARTH_DATA_TOKEN']
 
-lat1 = os.environ['LAT1']
-long1 = os.environ['LONG1']
-lat2 = os.environ['LAT2']
-long2 = os.environ['LONG2']
-
-year = os.environ['YEAR']
-month = os.environ['MONTH']
-day = os.environ['DAY']
+# In[5]:
 
 
 def get_geo(f, band):
@@ -193,7 +197,7 @@ def subset_raster(inputRaster, outputRaster, minX, maxY, maxX, minY, scale):
   os.remove('new1.tif')
 
 
-# In[5]:
+# In[6]:
 
 
 # https://github.com/robintw/LatLongToWRS/blob/master/get_wrs.py
@@ -231,6 +235,9 @@ class LandsatUtil:
         [{'path': 201, 'row': 25}, {'path': 202, 'row': 25}]
 
     """
+
+    dir_cache = {}
+
     def __init__(self, shapefile="./WRS2_descending.shp"):
         """Create a new instance of the ConvertToWRS class,
         and load the shapefiles into memory.
@@ -296,17 +303,25 @@ class LandsatUtil:
         month = str(month).zfill(2)
         day = str(day).zfill(2)
 
-        session = boto3.Session( aws_access_key_id= aws_access_key, aws_secret_access_key= aws_secret_key)
+        prefix = 'collection02/level-2/standard/oli-tirs/' + str(year) + '/' + path + '/' + row + '/'
 
-        s3 = session.client('s3')
+        directories = []
+        if prefix in self.dir_cache:
+            print("Found directories in cache for path ", prefix)
+            directories = self.dir_cache[prefix]
+        else:
+            session = boto3.Session( aws_access_key_id= aws_access_key, aws_secret_access_key= aws_secret_key)
 
-        directories = s3.list_objects_v2(
-            Bucket='usgs-landsat',
-            Prefix='collection02/level-2/standard/oli-tirs/' + str(year) + '/' + path + '/' + row + '/',
-            RequestPayer='requester',
-            Delimiter='/'
-        )['CommonPrefixes']
+            s3 = session.client('s3')
 
+            directories = s3.list_objects_v2(
+                Bucket='usgs-landsat',
+                Prefix=prefix,
+                RequestPayer='requester',
+                Delimiter='/'
+            )['CommonPrefixes']
+
+            self.dir_cache[prefix] = directories
 
         selected_start_date = None
         selected_end_date = None
@@ -364,25 +379,31 @@ class LandsatUtil:
         s3.download_file('usgs-landsat', band_file, output_path, ExtraArgs = {"RequestPayer": "requester"})
 
 
-# In[6]:
+# In[7]:
 
 
 class OSMUtil:
 
-    def create_road_raster(self, lat1, long1, lat2, long2,
+    def create_road_raster_flattened(self, lat1, long1, lat2, long2, raster_value = 5,
                            reference_raster = "outputs/ntl.tif",
-                           output_path= "outputs/osm.tif", path_thickness = 0.0005):
-
-        G = ox.graph_from_bbox(max(lat1, lat2), min(lat1, lat2), max(long1, long2), min(long1, long2), network_type="drive")
-        ox.save_graph_shapefile(G, "roads")
+                           output_path= "outputs/osm.tif", path_thickness = 0.00005):
 
         with rasterio.open(reference_raster) as f:
-            height = f.height
-            width = f.width
-            crs = f.crs.to_string()
-            transform = f.transform
-            crs = f.crs.to_string()
-            profile = f.profile
+                    height = f.height
+                    width = f.width
+                    crs = f.crs.to_string()
+                    transform = f.transform
+                    crs = f.crs.to_string()
+                    profile = f.profile
+
+        G = ox.graph_from_bbox(max(lat1, lat2),
+                               min(lat1, lat2),
+                               max(long1, long2),
+                               min(long1, long2),
+                               retain_all=True,
+                               network_type="all")
+
+        ox.save_graph_shapefile(G, "roads")
 
         roads_shapefile_fn =  "roads/edges.shp"
 
@@ -409,8 +430,74 @@ class OSMUtil:
         with rasterio.open(output_path, "w", **profile) as f:
             f.write(mask, 1)
 
+    def create_road_raster(self, lat1, long1, lat2, long2, raster_value = 5,
+                           reference_raster = "outputs/ntl.tif",
+                           output_path= "outputs/osm.tif", path_thickness = 0.00005):
 
-# In[7]:
+        with rasterio.open(reference_raster) as f:
+                    height = f.height
+                    width = f.width
+                    crs = f.crs.to_string()
+                    transform = f.transform
+                    crs = f.crs.to_string()
+                    profile = f.profile
+
+        base = np.zeros((height, width))
+        filters = ['["highway"~"primary_link|primary|secondary|secondary_link|tertiary|tertiary_link"]',
+                   '["highway"~"motorway|motorway_link"]',
+                   '["highway"~"residential"]',
+                   '["highway"~"trunk|trunk_link"]',
+                   '["highway"~"service|unclassified|road|busway"]'
+                  ]
+
+        for idx, filter in enumerate(filters):
+
+            try:
+                G = ox.graph_from_bbox(max(lat1, lat2),
+                                       min(lat1, lat2),
+                                       max(long1, long2),
+                                       min(long1, long2),
+                                       retain_all=True,
+                                       network_type="all",
+                                       custom_filter=filter)
+                ox.save_graph_shapefile(G, "roads")
+
+
+                roads_shapefile_fn =  "roads/edges.shp"
+
+                road_shapes = []
+                with fiona.open(roads_shapefile_fn) as f:
+                    for row in f:
+                        geom = row["geometry"]
+                        #geom = fiona.transform.transform_geom("epsg:4326", crs, geom)
+                        shape = shapely.geometry.shape(geom)
+                        shape = shape.buffer(path_thickness) # buffer the linestrings in angles
+                        road_shapes.append(shapely.geometry.mapping(shape))
+
+                mask = rasterio.features.rasterize(road_shapes,
+                                                   out_shape=(height, width),
+                                                   fill=0,
+                                                   transform=transform,
+                                                   all_touched=False,
+                                                   default_value=idx + 1,
+                                                   dtype=np.uint8)
+
+                for row in range(height):
+                    for col in range(width):
+                        if mask[row][col] > base[row][col]:
+                            base[row][col] = mask[row][col]
+
+            except:
+                print("No data for filter " + filter)
+
+        profile["count"] = 1
+        profile["dtype"] = "uint8"
+        #profile["nodata"] = 0
+        with rasterio.open(output_path, "w", **profile) as f:
+            f.write(base, 1)
+
+
+# In[8]:
 
 
 class VNP46A2Util:
@@ -486,7 +573,7 @@ class VNP46A2Util:
         gdal.Translate(outputFile,rlayer, options=translateoptions)
 
 
-# In[8]:
+# In[9]:
 
 
 def get_test_coord():
@@ -509,7 +596,7 @@ def turkey():
 
 
 
-# In[9]:
+# In[10]:
 
 
 def download_tiles_for_band(band, year, month, day, lat1, long1, lat2, long2, ignore_missing = False):
@@ -539,21 +626,29 @@ def download_tiles_for_band(band, year, month, day, lat1, long1, lat2, long2, ig
             local_path = "outputs/temp/" + dir.split('/')[-2] + "_SR_B" + str(band) + ".TIF"
             if not os.path.exists(local_path):
                 landsat.download_landsat_band(dir, band, local_path)
+            else:
+                print("File ", local_path, " exists..")
             downloaded_files.append(local_path)
 
             local_path = "outputs/temp/" + dir.split('/')[-2] + "QA_PIXEL.TIF"
             if not os.path.exists(local_path):
                 landsat.download_landsat_band(dir, "QA_PIXEL", local_path)
+            else:
+                print("File ", local_path, " exists..")
             pixel_files.append(local_path)
 
             local_path = "outputs/temp/" + dir.split('/')[-2] + "QA_RADSAT.TIF"
             if not os.path.exists(local_path):
                 landsat.download_landsat_band(dir, "QA_RADSAT", local_path)
+            else:
+                print("File ", local_path, " exists..")
             radsat_files.append(local_path)
 
             local_path = "outputs/temp/" + dir.split('/')[-2] + "QA_AEROSOL.TIF"
             if not os.path.exists(local_path):
                 landsat.download_landsat_band(dir, "QA_AEROSOL", local_path)
+            else:
+                print("File ", local_path, " exists..")
             aerosol_files.append(local_path)
 
     return downloaded_files, pixel_files, radsat_files, aerosol_files
@@ -574,7 +669,7 @@ def download_tiles_for_band_with_composites(band, year, month, day, lat1, long1,
     return tiles
 
 
-# In[87]:
+# In[11]:
 
 
 def wkt_to_json(wkt_string):
@@ -631,13 +726,32 @@ def get_utm_zone(latitude, longitude):
     utm_info = utm.from_latlon(latitude, longitude)
     return utm_info
 
-# In[39]:
+
+# In[12]:
+
+
+import utm
+
+
+# In[13]:
 
 
 #lat1,long1,lat2,long2 =  get_peurto_coord()
 
 #lat1,long1,lat2,long2 = turkey()
 
+#lat1,long1,lat2,long2 =  get_test_coord()
+#year = 2023
+#month = 1
+#day = 24
+
+#x1 = 526070.974
+#y1 = 3655166.432
+#x2 = 680429.765
+#y2 = 3593707.569
+
+
+# (33.034682, 21.279194, 32.465949, 22.919832)
 x1, y1, _, _ = get_utm_zone(lat1,long1)
 x2, y2, _, _ = get_utm_zone(lat2,long2)
 
@@ -656,7 +770,13 @@ x2, y2, _, _ = get_utm_zone(lat2,long2)
 #day = 6
 
 
-# In[46]:
+# In[37]:
+
+
+
+
+
+# In[38]:
 
 
 lat1,long1,lat2,long2
@@ -687,6 +807,8 @@ bbox_area = calculate_bounding_box_area(min_lon, min_lat, max_lon, max_lat)
 print(f"Area of the bounding box is approximately {bbox_area:.2f} square meters")
 
 
+# In[15]:
+
 b3_path = "outputs/B3_Merged_"
 b4_path = "outputs/B4_Merged_"
 b5_path = "outputs/B5_Merged_"
@@ -704,27 +826,36 @@ def process_band_data(band, year, month, day, lat1, long1, lat2, long2, output_p
     for i in range(len(b_files)):
         output_files.append(output_prefix + str(i) + ".TIFF")
         downloaded_files, pixel_files, radsat_files, aerosol_files = b_files[i]
+
+        print("Merging base")
         g = gdal.Warp(output_prefix + str(i) + ".TIFF",
                       downloaded_files, format="GTiff", options=["COMPRESS=LZW", "TILED=YES"],
-                      resampleAlg='bilinear') # if you want
+                      resampleAlg='bilinear', multithread=True) # if you want
         g = None
 
         p_f.append(output_prefix + str(i) + "P.TIFF")
+
+        print("Merging P")
+
         g = gdal.Warp(output_prefix + str(i) + "P.TIFF",
                       pixel_files, format="GTiff", options=["COMPRESS=LZW", "TILED=YES"],
-                      resampleAlg='bilinear', srcNodata= 1, dstNodata = 0) # if you want
+                      resampleAlg='bilinear', srcNodata= 1, dstNodata = 0, multithread=True) # if you want
         g = None
 
         r_f.append(output_prefix + str(i) + "R.TIFF")
+
+        print("Merging R")
         g = gdal.Warp(output_prefix + str(i) + "R.TIFF",
                       radsat_files, format="GTiff", options=["COMPRESS=LZW", "TILED=YES"],
-                      resampleAlg='bilinear', srcNodata= 1, dstNodata = 0) # if you want
+                      resampleAlg='bilinear', srcNodata= 1, dstNodata = 0, multithread=True) # if you want
         g = None
 
         a_f.append(output_prefix + str(i) + "A.TIFF")
+
+        print("Merging A")
         g = gdal.Warp(output_prefix + str(i) + "A.TIFF",
                       aerosol_files, format="GTiff", options=["COMPRESS=LZW", "TILED=YES"],
-                      resampleAlg='bilinear', srcNodata= 1, dstNodata = 0) # if you want
+                      resampleAlg='bilinear', srcNodata= 1, dstNodata = 0, multithread=True) # if you want
         g = None
     return output_files, p_f, r_f, a_f
 
@@ -746,8 +877,9 @@ b4_outputs, b4_p, b4_r, b4_a = process_band_data(4, year, month, day, lat1, long
 
 b5_outputs, b5_p, b5_r, b5_a = process_band_data(5, year, month, day, lat1, long1, lat2, long2, b5_path)
 
+print("All landsat data was dowloaded")
 
-# In[59]:
+# In[20]:
 
 
 b3_final = []
@@ -782,7 +914,7 @@ for i in range(len(b3_a)):
     a_final.append('outputs/A_' + str(i) + '.TIFF')
 
 
-# In[88]:
+# In[21]:
 
 
 def fill_gaps(pxs):
@@ -826,6 +958,15 @@ def mark_radsat(r_px):
 
 
 
+# In[ ]:
+
+
+
+
+
+# In[22]:
+print("Stacking images...")
+
 b3_pxs = []
 b4_pxs = []
 b5_pxs = []
@@ -852,29 +993,31 @@ for i in range(len(b3_final)):
     b5_pxs.append(np.array(b5_px))
 
 
-# In[62]:
+# In[23]:
 
+print("Generating merged output .....")
 
 b3 = np.nanmedian(np.where(np.stack(b3_pxs) == 0, np.nan, np.stack(b3_pxs)), axis=0)
 b4 = np.nanmedian(np.where(np.stack(b4_pxs) == 0, np.nan, np.stack(b4_pxs)), axis=0)
 b5 = np.nanmedian(np.where(np.stack(b5_pxs) == 0, np.nan, np.stack(b5_pxs)), axis=0)
 
 
-# In[63]:
+# In[24]:
 
 
 save_geotiff_single("outputs/B3.TIFF", b3, projref, in_geo)
 save_geotiff_single("outputs/B4.TIFF", b4, projref, in_geo)
 save_geotiff_single("outputs/B5.TIFF", b5, projref, in_geo)
 
+print("Converting all to WGS84 .....")
+
 # Convert to
 convert_to_wgs84("outputs/B3.TIFF", "outputs/B3_WGS84.TIFF", long1, lat1, long2, lat2)
 convert_to_wgs84("outputs/B4.TIFF", "outputs/B4_WGS84.TIFF", long1, lat1, long2, lat2)
 convert_to_wgs84("outputs/B5.TIFF", "outputs/B5_WGS84.TIFF", long1, lat1, long2, lat2)
 
-
 # Download night images
-
+print("Downloading night images....")
 download_file = "VNP46A2.h5"
 
 vnp46Util = VNP46A2Util()
@@ -889,6 +1032,7 @@ minY = min(lat1, lat2)
 maxX = max(long1, long2)
 minX = min(long1, long2)
 scale = 0.00011111111
+#scale = 0.00025
 
 subset_raster_normal("ntl.tif", "outputs/ntl.tif", minX, maxY, maxX, minY, scale)
 subset_raster_normal("lunar_irradiance.tif", "outputs/lunar_irradiance.tif", minX, maxY, maxX, minY, scale)
@@ -903,23 +1047,28 @@ img_lunar_irradiance =  np.where(lunar_irradiance > 65530, 0, lunar_irradiance)
 
 adjusted_ntl = img_ntl * ((mandatory_quality_flag == 0) & ~(mandatory_quality_flag == 2)).astype(float) - img_lunar_irradiance
 save_geotiff_single("outputs/adjusted_ntl.TIFF", adjusted_ntl, projref, in_geo)
+save_geotiff_single("outputs/img_ntl.TIFF", img_ntl, projref, in_geo)
 
 
-# In[29]:
+# In[27]:
 
 
 colormap = plt.cm.jet  # Choose a colormap (you can use other colormaps as well)
 
+sea_line = (mandatory_quality_flag == 0).astype(float)
+plt.imshow(img_ntl, cmap=colormap, vmin=0, vmax=1.0)
+plt.colorbar(label='NDVI')
 
-# In[30]:
 
 
-# Download openstreet maps
+print("Download openstreet maps ...")
+
 osm_utl = OSMUtil()
-osm_utl.create_road_raster(lat1, long1, lat2, long2, path_thickness = 0.00005)
+osm_utl.create_road_raster(lat1, long1, lat2, long2,  output_path="outputs/osm.tif", raster_value = 1, path_thickness = 0.00005)
+#osm_utl.create_road_raster_flattened(lat1, long1, lat2, long2,  output_path="outputs/osm.tif", raster_value = 1, path_thickness = 0.00005)
 
 
-# In[83]:
+# In[29]:
 
 
 def rescale_bands(band_data):
@@ -927,8 +1076,25 @@ def rescale_bands(band_data):
     band_data =  np.where(band_data > 43636, 0, band_data)
     return band_data * 0.0000275 -0.2
 
-# In[84]:
+def prepare_refernce_images(long1, lat1, long2, lat2):
 
+    ndvi_reference = 'NDVI/finalNDVI_Daniel_Large.tif'
+
+    min_x = min(long1, long2)
+    max_x = max(long1, long2)
+    min_y = min(lat1, lat2)
+    max_y = max(lat1, lat2)
+    ds = gdal.Open(ndvi_reference)
+
+    ds = gdal.Translate("outputs/ndvi_reference.tiff", ds, projWin = [min_x, max_y, max_x, min_y], resampleAlg='bilinear')
+    ds = None
+
+#prepare_refernce_images(long1, lat1, long2, lat2)
+
+
+# In[30]:
+
+print("Rescaling all images....")
 
 input_files = ['outputs/B3_WGS84.TIFF', 'outputs/B4_WGS84.TIFF', 'outputs/B5_WGS84.TIFF',
                'outputs/ntl.tif', 'outputs/osm.tif']  # Add your file names
@@ -955,7 +1121,7 @@ for i, input_file in enumerate(input_files):
     input_dataset = None
 
 
-b3_final_px, _, _ = get_geo('outputs/final/B3.TIFF', 1)
+b3_final_px, in_geo, projref = get_geo('outputs/final/B3.TIFF', 1)
 b4_final_px, _, _ = get_geo('outputs/final/B4.TIFF', 1)
 b5_final_px, _, _ = get_geo('outputs/final/B5.TIFF', 1)
 osm_final_px, _, _ = get_geo('outputs/final/osm.tif', 1)
@@ -969,9 +1135,16 @@ b5_final_px = rescale_bands(gaps_filed_stack[2])
 osm_final_px = gaps_filed_stack[3]
 ntl_final_px = gaps_filed_stack[4]
 
+b3 = None
+b4 = None
+b5 = None
+b3_pxs = None
+b4_pxs = None
+b5_px = None
 
-# In[85]:
+# In[31]:
 
+print("Generating HD image")
 
 ndvi = (b5_final_px - b4_final_px) / (b5_final_px + b4_final_px + 0.000001)
 ndwi = (b3_final_px - b5_final_px) / (b3_final_px + b5_final_px + 0.000001)
@@ -983,7 +1156,7 @@ ndwi = np.where(ndwi > 1, 1.0, ndwi)
 ndwi = np.where(ndwi < -1, -1.0, ndwi)
 
 
-# In[71]:
+# In[32]:
 
 
 ntl_floor = 0.1
@@ -1052,5 +1225,3 @@ post_gg = g[img_ndui_scale]
 post_bb = b[img_ndui_scale]
 
 save_geotiff_rgb(output_Inferno, post_rr, post_gg, post_bb, projref, in_geo)
-
-print("Done")
