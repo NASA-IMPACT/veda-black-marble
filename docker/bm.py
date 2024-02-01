@@ -7,14 +7,14 @@ aws_secret_key = os.environ['AWS_ACCESS_SECRET']
 # Get a token from https://urs.earthdata.nasa.gov/
 earthdata_token = os.environ['EARTH_DATA_TOKEN']
 
-lat1 = os.environ['LAT1']
-long1 = os.environ['LONG1']
-lat2 = os.environ['LAT2']
-long2 = os.environ['LONG2']
+lat1 = float(os.environ['LAT1'])
+long1 = float(os.environ['LONG1'])
+lat2 = float(os.environ['LAT2'])
+long2 = float(os.environ['LONG2'])
 
-year = os.environ['YEAR']
-month = os.environ['MONTH']
-day = os.environ['DAY']
+year = int(os.environ['YEAR'])
+month = int(os.environ['MONTH'])
+day = int(os.environ['DAY'])
 
 # In[3]:
 
@@ -1225,3 +1225,5 @@ post_gg = g[img_ndui_scale]
 post_bb = b[img_ndui_scale]
 
 save_geotiff_rgb(output_Inferno, post_rr, post_gg, post_bb, projref, in_geo)
+
+print("Completed creating HD image...")
