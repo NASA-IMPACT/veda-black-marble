@@ -100,7 +100,7 @@ class BlackMarbleRunner:
         ecs_client = boto3.client('ecs', aws_access_key_id=self.access_key, aws_secret_access_key=self.secret_key, region_name='us-west-2')
 
         response = ecs_client.stop_task(
-            cluster='BMWorkloadCluster',
-            task='arn:aws:ecs:us-west-2:018923174646:task/BMWorkloadCluster/84638226007747efb7e177d7d259a7c8',
+            cluster=self.cluster,
+            task=task_arn,
             reason='Manually stopping'
         )
