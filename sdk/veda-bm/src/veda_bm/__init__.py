@@ -25,6 +25,9 @@ class BlackMarbleRunner:
 
     def run_bm_task(self, lat1, lat2, long1, long2, year, month, day,
                     cpu = 8, memory = 32, memory_reservation = 24):
+
+        ecs_client = boto3.client('ecs', aws_access_key_id=self.access_key, aws_secret_access_key=self.secret_key, region_name='us-west-2')
+
         response = ecs_client.run_task(
             cluster=self.cluster,
             count=1,
@@ -91,3 +94,13 @@ class BlackMarbleRunner:
             }
         )
         return response['tasks'][0]['taskArn']
+
+    def stop_bm_task(self, task_arn):
+
+        ecs_client = boto3.client('ecs', aws_access_key_id=self.access_key, aws_secret_access_key=self.secret_key, region_name='us-west-2')
+
+        response = ecs_client.stop_task(
+            cluster='BMWorkloadCluster',
+            task='arn:aws:ecs:us-west-2:018923174646:task/BMWorkloadCluster/84638226007747efb7e177d7d259a7c8',
+            reason='Manually stopping'
+        )
