@@ -1,3 +1,4 @@
+#
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -14,28 +15,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-[metadata]
-name = veda_bm
-version = 0.0.1-alpha2
-author = VEDA Developers
-author_email = dimuthuw@gatech.edu
-description = Python SDK for VEDA Black Marble Executions
-long_description = Python SDK for VEDA Black Marble Executions
-url = https://github.com/NASA-IMPACT/veda-black-marble
-project_urls =
-    Bug Tracker = https://github.com/NASA-IMPACT/veda-black-marble/issues
-classifiers =
-    Programming Language :: Python :: 3
-    License :: OSI Approved :: Apache Software License
-    Operating System :: OS Independent
 
-[options]
-package_dir =
-    = src
-packages = find:
-python_requires = >=3.6
-install_requires=
-    boto3>=1.28.82
-
-[options.packages.find]
-where = src
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
