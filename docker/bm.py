@@ -956,7 +956,11 @@ def mark_radsat(r_px):
     b5_r_px = check_values(r_px & 16, [16])
     return b3_r_px, b4_r_px, b5_r_px
 
-
+def create_cog(input_tiff_path, output_tiff_path):
+    input_ds = gdal.Open(input_tiff_path)
+    options = ['TILED=YES', 'COPY_SRC_OVERVIEWS=YES']
+    gdal.Translate(output_tiff_path, input_ds, options=options)
+    input_ds = None
 
 # In[ ]:
 
@@ -1205,7 +1209,7 @@ ndui = np.where((img_road == 2)|(img_road == 3)|(img_road == 5)|(img_road == 6),
 ndui = ndui / 1.3
 
 output_Inferno = "outputs/final/ndui.tif"
-
+output_co = "outputs/final/ndui-co.tif"
 #### Output Image Scale Range from 0 to 1 (Best display value 0.3 - 0.8)##############
 min_value = 0.3
 max_value = 0.8
@@ -1227,3 +1231,9 @@ post_bb = b[img_ndui_scale]
 save_geotiff_rgb(output_Inferno, post_rr, post_gg, post_bb, projref, in_geo)
 
 print("Completed creating HD image...")
+
+print("Converting to cloud optimized version")
+
+create_cog(output_Inferno, output_co)
+
+print("Successfully created the cloud optimized version")
