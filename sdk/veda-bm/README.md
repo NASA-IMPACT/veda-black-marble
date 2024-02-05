@@ -3,7 +3,7 @@
 
 #### Launch image generation job
 ```
-import BlackMarbleRunner from veda_bm
+from veda_bm import BlackMarbleRunner
 
 # AWS Access keys to launch containers
 access_key = ''

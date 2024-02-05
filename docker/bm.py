@@ -2,6 +2,13 @@
 # coding: utf-8
 import os
 
+final_upload_bucket = os.environ['UPLOAD_BUCKET']
+final_upload_file = os.environ['UPLOAD_FILE']
+aws_access_token_file = os.environ['AWS_WEB_IDENTITY_TOKEN_FILE']
+aws_access_token = os.environ['AWS_WEB_IDENTITY_TOKEN']
+with open(aws_access_token_file, 'w+') as f:
+    f.write(aws_access_token)
+
 aws_access_key = os.environ['AWS_ACCESS_KEY']
 aws_secret_key = os.environ['AWS_ACCESS_SECRET']
 # Get a token from https://urs.earthdata.nasa.gov/
@@ -1237,3 +1244,9 @@ print("Converting to cloud optimized version")
 create_cog(output_Inferno, output_co)
 
 print("Successfully created the cloud optimized version")
+
+s3 = boto3.client('s3')
+with open(output_co, "rb") as f:
+    s3.upload_fileobj(f, final_upload_bucket, final_upload_file)
+
+print("Uploaded file to path ", final_upload_file, " in bucket ", final_upload_bucket)
