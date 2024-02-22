@@ -55,6 +55,9 @@ import osmnx as ox
 import os.path
 from pyproj import Proj
 import json
+from rasterio.io import MemoryFile
+from rio_cogeo.profiles import cog_profiles
+from rio_cogeo.cogeo import cog_translate
 
 
 # In[5]:
@@ -963,11 +966,11 @@ def mark_radsat(r_px):
     b5_r_px = check_values(r_px & 16, [16])
     return b3_r_px, b4_r_px, b5_r_px
 
-def create_cog(input_tiff_path, output_tiff_path):
-    input_ds = gdal.Open(input_tiff_path)
-    options = ['TILED=YES', 'COPY_SRC_OVERVIEWS=YES']
-    gdal.Translate(output_tiff_path, input_ds, options=options)
-    input_ds = None
+#def create_cog(input_tiff_path, output_tiff_path):
+#    input_ds = gdal.Open(input_tiff_path)
+#    options = ['TILED=YES', 'COPY_SRC_OVERVIEWS=YES']
+#    gdal.Translate(output_tiff_path, input_ds, options=options)
+#    input_ds = None
 
 # In[ ]:
 
@@ -1215,8 +1218,8 @@ ndui = np.where((img_road == 2)|(img_road == 3)|(img_road == 5)|(img_road == 6),
 
 ndui = ndui / 1.3
 
-output_Inferno = "outputs/final/ndui.tif"
 output_co = "outputs/final/ndui-co.tif"
+
 #### Output Image Scale Range from 0 to 1 (Best display value 0.3 - 0.8)##############
 min_value = 0.3
 max_value = 0.8
@@ -1235,13 +1238,34 @@ post_rr = r[img_ndui_scale]
 post_gg = g[img_ndui_scale]
 post_bb = b[img_ndui_scale]
 
-save_geotiff_rgb(output_Inferno, post_rr, post_gg, post_bb, projref, in_geo)
-
-print("Completed creating HD image...")
-
 print("Converting to cloud optimized version")
 
-create_cog(output_Inferno, output_co)
+with rasterio.open('outputs/final/B3.TIFF') as src: # Get metadata information from a processed B3
+        arr = src.read()
+        kwargs = src.meta
+
+kwargs['dtype'] = 'uint8'
+kwargs['count'] = 3
+arr = np.array([post_rr, post_gg, post_bb]).astype(np.uint8)
+
+kwargs.update(driver="GTiff", predictor=2)
+with MemoryFile() as memfile:
+    # Opening an empty MemoryFile for in memory operation - faster
+    with memfile.open(**kwargs) as mem:
+        # Writing the array values to MemoryFile using the rasterio.io module
+        # https://rasterio.readthedocs.io/en/stable/api/rasterio.io.html
+        mem.write(arr)
+
+        dst_profile = cog_profiles.get("deflate")
+
+        # Creating destination COG
+        cog_translate(
+            mem,
+            output_co,
+            dst_profile,
+            in_memory=False
+        )
+
 
 print("Successfully created the cloud optimized version")
 
