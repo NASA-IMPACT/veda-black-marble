@@ -135,8 +135,8 @@ def scale_image(input_array: np.ndarray, min_value: Union[int, float], max_value
     arr = np.where(arr < min_value, min_value, arr)
 
     # Handle potential division by zero if min == max after clamping
-    arr_min = np.min(arr)
-    arr_max = np.max(arr)
+    arr_min = arr.min()
+    arr_max = arr.max()
     if arr_max == arr_min:
         # Return an array of zeros or a constant value, depending on desired behavior
         return np.zeros_like(arr, dtype='uint8')

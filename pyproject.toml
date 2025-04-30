@@ -1,5 +1,5 @@
 [project]
-name = "veda-black-marble"
+name = "blackmarble"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -11,9 +11,21 @@ dependencies = [
     "geopy>=2.4.1",
     "numpy>=2.2.5",
     "osmnx>=2.0.2",
+    "pytest>=8.3.5",
     "rasterio>=1.4.3",
     "requests>=2.32.3",
     "rio-cogeo>=5.4.1",
     "shapely>=2.1.0",
+    "typer>=0.15.3",
     "utm>=0.8.1",
 ]
+
+[project.scripts]
+blackmarble = "blackmarble.cli:app"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["blackmarble"]
