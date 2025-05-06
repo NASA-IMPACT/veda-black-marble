@@ -1,7 +1,11 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "blackmarble"
 version = "0.1.0"
-description = "Add your description here"
+description = "Black Marble NDUI processing"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -9,6 +13,7 @@ dependencies = [
     "fiona>=1.10.1",
     "gdal==3.10.1",
     "geopy>=2.4.1",
+    "mypy-boto3-s3>=1.38.0",
     "numpy>=2.2.5",
     "osmnx>=2.0.2",
     "pytest>=8.3.5",
@@ -21,11 +26,24 @@ dependencies = [
 ]
 
 [project.scripts]
-blackmarble = "blackmarble.cli:app"
-
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+blackmarble-cli = "blackmarble.cli:app"
 
 [tool.setuptools]
 packages = ["blackmarble"]
+
+[tool.setuptools.package-data]
+folder1 = ["data/*.npy", "data/WRS2_descending_0/*"]
+
+# ───────────────────────────────────────────────────────────────
+# Dev / test extras
+# ───────────────────────────────────────────────────────────────
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "ruff",
+  "mypy",
+]
+
+[tool.pytest.ini_options]
+addopts = "-raqs"
+testpaths = ["tests"]

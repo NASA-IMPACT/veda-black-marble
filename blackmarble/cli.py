@@ -4,26 +4,6 @@ import os
 import sys
 from typing import Optional
 
-# Ensure the blackmarble package is importable
-try:
-    # First try direct import
-    from blackmarble.pipeline import run_pipeline
-except ImportError:
-    # If that fails, try to find the package relative to this file
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(current_dir)
-    sys.path.insert(0, parent_dir)
-    try:
-        # Try importing directly (not from blackmarble.pipeline)
-        from pipeline import run_pipeline
-    except ImportError:
-        try:
-            # Try one more approach - import from parent package
-            from blackmarble.pipeline import run_pipeline
-        except ImportError:
-            print("Error: Could not import the blackmarble package. Make sure it's installed or run from the project root.", file=sys.stderr)
-            sys.exit(1)
-
 app = typer.Typer(help="Command-line interface for the VEDA Black Marble processing pipeline.")
 
 @app.callback(invoke_without_command=True)
@@ -62,6 +42,8 @@ def run(
     """
     Runs the Black Marble processing pipeline for a given area and date.
     """
+    from blackmarble.pipeline import run_pipeline
+
     if not earthdata_token:
         typer.echo("Error: Earthdata token is required. Provide via --earthdata-token or EARTH_DATA_TOKEN environment variable.", err=True)
         raise typer.Exit(code=1)
