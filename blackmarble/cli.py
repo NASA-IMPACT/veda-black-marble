@@ -6,12 +6,6 @@ from typing import Optional
 
 app = typer.Typer(help="Command-line interface for the VEDA Black Marble processing pipeline.")
 
-@app.callback(invoke_without_command=True)
-def callback(ctx: typer.Context):
-    """Run the default command if no subcommand is provided."""
-    if ctx.invoked_subcommand is None:
-        ctx.invoke(run)
-
 @app.command()
 def run(
     lat1: float = typer.Option(..., "--lat1", help="Latitude of the first corner (e.g., North)."),

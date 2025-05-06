@@ -192,7 +192,7 @@ def run_pipeline(
     vert: int; horz: int
     vert, horz = vnp.coordinates_to_tile_id(lat1, lon1)
     download_file: str = os.path.join(temp_dir, 'VNP46A2.h5')
-    vnp.download_h5(earthdata_token, year, month, day, vert, horz, download_file)
+    vnp.download_h5(earthdata_token, year, month, day, vert, horz, target_filepath=download_file)
     ntl_temp_tif = os.path.join(temp_dir, 'ntl_raw.tif')
     vnp.convert_hdf_to_tiff(download_file, ntl_temp_tif, layer=0)
     # subset to area + scale

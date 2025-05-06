@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.scripts]
-blackmarble-cli = "blackmarble.cli:app"
+blackmarble = "blackmarble.cli:app"
 
 [tool.setuptools]
 packages = ["blackmarble"]
