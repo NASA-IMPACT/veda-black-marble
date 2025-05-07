@@ -386,6 +386,8 @@ class LandsatUtil:
 
         print("Downloading file " + band_file + " to path "  + output_path)
 
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
         s3.download_file('usgs-landsat', band_file, output_path, ExtraArgs = {"RequestPayer": "requester"})
 
 
@@ -1127,6 +1129,9 @@ for i, input_file in enumerate(input_files):
 
     # Open the input dataset
     input_dataset = gdal.Open(input_file)
+
+
+    os.makedirs(os.path.dirname('outputs/final/'), exist_ok=True)
 
     # Perform the resampling to the desired resolution
     gdal.Warp(output_file, input_dataset, format='GTiff', xRes=desired_resolution[0], yRes=desired_resolution[1])

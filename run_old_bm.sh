@@ -99,8 +99,8 @@ docker build -t "$DOCKER_IMAGE_NAME" "$DOCKERFILE_DIR"
 echo "Running Black Marble processing in Docker..."
 
 # Add volume to store intermediate files + outputs locally
-#  -v "$(pwd)/$LOCAL_OUTPUT_DIR:/root/outputs" \
 docker run --rm \
+  -v "$(pwd)/$LOCAL_OUTPUT_DIR:/root/outputs" \
   -e LAT1="$LAT1" \
   -e LONG1="$LONG1" \
   -e LAT2="$LAT2" \

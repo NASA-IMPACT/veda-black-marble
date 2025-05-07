@@ -32,7 +32,7 @@ blackmarble = "blackmarble.cli:app"
 packages = ["blackmarble"]
 
 [tool.setuptools.package-data]
-folder1 = ["data/*.npy", "data/WRS2_descending_0/*"]
+blackmarble = ["data/*.npy", "data/WRS2_descending_0/*"]
 
 # ───────────────────────────────────────────────────────────────
 # Dev / test extras

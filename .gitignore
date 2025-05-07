@@ -175,5 +175,8 @@ cython_debug/
 
 .idea
 notebooks/outputs
-outputs
 .DS_Store
+
+# transient job outputs
+outputs
+bm_outputs
