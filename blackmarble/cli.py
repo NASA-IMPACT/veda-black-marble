@@ -64,7 +64,7 @@ def run(
         typer.echo(f"\nPipeline completed successfully!")
         typer.echo(f"Final output generated at: {final_output_path}")
     except Exception as e:
-        typer.echo(f"\nPipeline failed with error: {e}", err=True)
+        typer.echo(f"Pipeline failed with error: {str(e)} - Please check inputs and logs.", err=True)
         raise typer.Exit(code=1)
 
 if __name__ == "__main__":

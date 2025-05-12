@@ -68,27 +68,14 @@ def save_image(array: np.ndarray, geotransform: Tuple[float, ...], projection: s
     dst = None
 
 def save_geotiff_rgb(out_path: str, r: np.ndarray, g: np.ndarray, b: np.ndarray, projection: str, geotransform: Tuple[float, ...]) -> None:
-    """
-    Saves three NumPy arrays (red, green, blue) as a 3-band RGB GeoTIFF file (8-bit).
-
-    Args:
-        out_path (str): The file path where the GeoTIFF will be saved.
-        r (numpy.ndarray): The 2D NumPy array for the red band.
-        g (numpy.ndarray): The 2D NumPy array for the green band.
-        b (numpy.ndarray): The 2D NumPy array for the blue band.
-        projection (str): The projection information in WKT format.
-        geotransform (tuple): The GDAL GeoTransform tuple (6 elements).
-
-    Raises:
-        RuntimeError: If the GDAL 'GTiff' driver is not found.
-    """
     rows, cols = r.shape
     driver = gdal.GetDriverByName('GTiff')
-    if driver is None:
-        raise RuntimeError("GDAL driver 'GTiff' not found")
     dst = driver.Create(out_path, cols, rows, 3, gdal.GDT_Byte)
     dst.SetProjection(projection)
     dst.SetGeoTransform(geotransform)
+    dst.GetRasterBand(1).SetNoDataValue(0)
+    dst.GetRasterBand(2).SetNoDataValue(0)
+    dst.GetRasterBand(3).SetNoDataValue(0)
     dst.GetRasterBand(1).WriteArray(r)
     dst.GetRasterBand(2).WriteArray(g)
     dst.GetRasterBand(3).WriteArray(b)

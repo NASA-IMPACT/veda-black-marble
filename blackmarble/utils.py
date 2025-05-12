@@ -22,13 +22,12 @@ def readVariables(file_path: str) -> Dict[str, str]:  # Add type hints
             variables[key.strip()] = val.strip()
     return variables
 
-def removeFiles(folder: str) -> None:  # Add type hint
-    """Remove all files in the given folder."""
+def removeFiles(folder: str) -> None:
     for f in glob.glob(os.path.join(folder, '*')):
         try:
             os.remove(f)
-        except OSError:
-            pass
+        except OSError as e:
+            print(f"Error removing file {f}: {e}")
 
 def fill_gaps(pxs: List[np.ndarray]) -> np.ndarray:  # Add type hint
     """Stack arrays of differing shapes by zero-padding to the max shape."""

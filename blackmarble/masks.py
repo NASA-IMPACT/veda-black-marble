@@ -19,9 +19,9 @@ def mark_cloud2(p_px):
 
 def mark_cloud(p_px):
     """Mask cloud pixels (keep only clear land/water codes)."""
-    # keep only values 21824 and 21952
-    valid = list(range(1, 21823)) + list(range(21825, 21951)) + list(range(21953, 65535))
-    return check_values(valid, p_px)
+    # TODO: Make values configurable?
+    valid_values = list(range(1, 21823)) + list(range(21825, 21951)) + list(range(21953, 65535))  # Example; consider moving to config
+    return check_values(valid_values, p_px)
 
 def mark_aerosol2(a_px):
     """Mask aerosol pixels using extended QA set."""

@@ -45,6 +45,10 @@ from blackmarble.utils import fill_gaps, rescale_bands
 from blackmarble.vnp import VNP46A2Util
 from blackmarble.osm import OSMUtil
 
+NTL_FLOOR = 0.1
+NTL_CEILING = 10
+NDUI_FLOOR = 0.02
+
 def run_pipeline(
     lat1: float, lon1: float, lat2: float, lon2: float,
     year: int, month: int, day: int,
@@ -209,10 +213,9 @@ def run_pipeline(
     osm = OSMUtil()
     osm_path = os.path.join(output_dir, 'osm.tif')
     osm.create_road_raster(lat1, lon1, lat2, lon2,
-                           raster_value=1,
-                           reference_raster=ntl_subset_path, # Use subsetted NTL as reference
+                           reference_raster=ntl_subset_path,
                            output_path=osm_path,
-                           output_dir=output_dir) # Pass output_dir for temp shapefiles
+                           output_dir=output_dir)
 
     # 8) Resample all to final resolution
     print("Resampling to final resolution...")
@@ -263,12 +266,9 @@ def run_pipeline(
     ndwi = np.clip(ndwi, -1.0, 1.0)
 
     # NTL scaling
-    ntl_floor: float = 0.1; ntl_ceiling: float = 10; ndui_floor: float = 0.02
     img_ntl: np.ndarray = np.where(ntl_px > 65530, 0.0, ntl_px).astype(float) / 10.0
-    img_ntl = np.where(img_ntl > ntl_ceiling, ntl_ceiling, img_ntl)
-    img_ntl = np.where(img_ntl < ntl_floor, 0.0, img_ntl)
-    img_ntl = img_ntl / ntl_ceiling
-
+    img_ntl = np.where(img_ntl > NTL_CEILING, NTL_CEILING, img_ntl)
+    img_ntl = np.where(img_ntl < NTL_FLOOR, 0.0, img_ntl)
     img_ndvi: np.ndarray = ndvi
     img_ndwi: np.ndarray = ndwi
     img_road: np.ndarray = osm_px
@@ -277,7 +277,7 @@ def run_pipeline(
     ndui: np.ndarray = (img_ntl - img_ndvi) / (img_ntl + img_ndvi + 1e-5)
     ndui = np.clip(ndui, -1.0, 1.0)
     ndui = np.abs((ndui + 1.0)) / 2.0
-    ndui = np.where(ndui < ndui_floor, 0.0, ndui)
+    ndui = np.where(ndui < NDUI_FLOOR, 0.0, ndui)
     # road enhancement
     ndui = np.where((img_road == 1) | (img_road == 4), ndui * 1.3, ndui)
     ndui = np.where((img_road == 2) | (img_road == 3) |

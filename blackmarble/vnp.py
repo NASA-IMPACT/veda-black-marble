@@ -119,150 +119,21 @@ class VNP46A2Util:
         except OSError as e: # Catch file operation errors
             raise RuntimeError(f"File operation failed for {target_filepath}: {e}")
 
-    def convert_hdf_to_tiff(self, h5_file: str, output_file: str, layer: int = 0) -> None: # Add type hints
-        """Convert a specified subdataset layer of HDF to GeoTIFF."""
-        # Try GDAL-based HDF to GeoTIFF conversion via subdatasets
-        print(f"Converting HDF5 {h5_file} (layer {layer}) to TIFF {output_file}...")
+    def convert_hdf_to_tiff(self, h5_file: str, output_file: str, layer: int = 0) -> None:
         hdflayer = gdal.Open(h5_file, gdal.GA_ReadOnly)
-        if hdflayer is not None:
-            try:
-                subdatasets = hdflayer.GetSubDatasets()
-                if layer < 0 or layer >= len(subdatasets):
-                     raise IndexError(f"Layer index {layer} out of range for subdatasets in {h5_file}")
-                sub = subdatasets[layer][0]
-                print(f"Using subdataset: {sub}")
-                rlayer = gdal.Open(sub, gdal.GA_ReadOnly)
-
-                # Attempt to get metadata for georeferencing
-                meta = rlayer.GetMetadata_Dict()
-                hNum_str = meta.get('HorizontalTileNumber')
-                vNum_str = meta.get('VerticalTileNumber')
-
-                if hNum_str is None or vNum_str is None:
-                    print("Warning: Could not read tile numbers from HDF metadata. Georeferencing might be incorrect.")
-                    # Fallback or default values if needed, or rely on GDAL's internal handling
-                    hNum = 0
-                    vNum = 0
-                else:
-                    hNum = int(hNum_str)
-                    vNum = int(vNum_str)
-
-                west = (10 * hNum) - 180
-                north = 90 - (10 * vNum)
-                east = west + 10
-                south = north - 10
-
-                # Ensure output directory exists
-                os.makedirs(os.path.dirname(output_file), exist_ok=True)
-
-                opts = gdal.TranslateOptions(
-                    gdal.ParseCommandLine(
-                        f'-a_srs EPSG:4326 -a_ullr {west} {north} {east} {south}'
-                    )
-                )
-                gdal.Translate(output_file, rlayer, options=opts)
-                print("Conversion using GDAL subdatasets successful.")
-                # Close datasets
-                rlayer = None
-                hdflayer = None
-                return
-            except Exception as e:
-                print(f"GDAL subdataset conversion failed: {e}. Falling back to h5py/rasterio.")
-                # Ensure datasets are closed on failure
-                rlayer = None
-                hdflayer = None
-                # Fall through to h5py/rasterio fallback
-
-        # Fallback: read HDF5 file directly with h5py + rasterio
-        try:
-            import h5py
-            import numpy as np
-            import rasterio
-            from rasterio.transform import from_bounds
-        except ImportError as e:
-            raise RuntimeError("h5py and rasterio are required for HDF5 fallback") from e
-
-        print("Attempting conversion using h5py and rasterio...")
-        with h5py.File(h5_file, 'r') as hf:
-            # Navigate the typical VNP46A2 structure
-            grid_group = hf.get('HDFEOS/GRIDS/VNP_Grid_DNB')
-            if grid_group is None:
-                 raise RuntimeError("'HDFEOS/GRIDS/VNP_Grid_DNB' group not found in HDF file")
-            data_fields = grid_group.get('Data Fields') # Note space in 'Data Fields'
-            if data_fields is None:
-                raise RuntimeError("'Data Fields' group not found in HDF file")
-
-            # Determine dataset name based on layer index (common layers)
-            # Layer 0: DNB_BRDF-Corrected_NTL
-            # Layer 1: DNB_Lunar_Irradiance
-            # Layer 2: Latest_High_Quality_Retrieval (sometimes different name/location)
-            # Layer 3: Mandatory_Quality_Flag
-            # Layer 4: Snow_Flag
-            # ... and others
-            # This mapping might need adjustment based on exact product version
-            common_layers = [
-                'DNB_BRDF-Corrected_NTL',
-                'DNB_Lunar_Irradiance',
-                'Latest_High_Quality_Retrieval', # Check exact name if needed
-                'Mandatory_Quality_Flag',
-                'Snow_Flag'
-            ]
-
-            if layer < 0 or layer >= len(common_layers): # Adjust if more layers are expected
-                 raise IndexError(f"Layer index {layer} out of range for common VNP46A2 layers")
-
-            ds_name = common_layers[layer]
-            dataset = data_fields.get(ds_name)
-            if dataset is None:
-                 raise RuntimeError(f"Dataset '{ds_name}' (layer {layer}) not found in HDF file")
-
-            arr = dataset[()]
-            print(f"Read array for {ds_name}, shape: {arr.shape}, dtype: {arr.dtype}")
-            # mask out extreme fill values if applicable (check _FillValue attribute)
-            fill_value = dataset.attrs.get('_FillValue')
-            if fill_value is not None:
-                 print(f"Applying fill value: {fill_value}")
-                 arr = np.where(arr == fill_value, 0, arr) # Replace fill with 0, adjust if needed
-            else:
-                 # Default masking for common NTL fill values if attribute missing
-                 arr = np.where(arr > 65530, 0, arr)
-
-            # Get georeferencing info from HDF attributes
-            hNum_attr = hf['HDFEOS INFORMATION'].get('StructMetadata.0')
-            # Need to parse this string metadata to get tile numbers reliably
-            # Example parsing (may need adjustment):
-            hNum = 0
-            vNum = 0
-            if hNum_attr:
-                 meta_str = hNum_attr[()].decode('utf-8')
-                 try:
-                     hNum = int(meta_str.split('HorizontalTileNumber=')[1].split('\n')[0])
-                     vNum = int(meta_str.split('VerticalTileNumber=')[1].split('\n')[0])
-                     print(f"Read tile numbers from metadata string: H={hNum}, V={vNum}")
-                 except (IndexError, ValueError):
-                     print("Warning: Could not parse tile numbers from HDF metadata string. Georeferencing might be incorrect.")
-
-
-            west = hNum * 10 - 180
-            north = 90 - vNum * 10
-            east = west + 10
-            south = north - 10
-            transform = from_bounds(west, south, east, north,
-                                    arr.shape[1], arr.shape[0])
-            profile = {
-                'driver': 'GTiff',
-                'height': arr.shape[0],
-                'width': arr.shape[1],
-                'count': 1,
-                'dtype': arr.dtype,
-                'crs': 'EPSG:4326',
-                'transform': transform,
-                'nodata': 0 # Assuming 0 is nodata after fill value replacement
-            }
-
-            # Ensure output directory exists
-            os.makedirs(os.path.dirname(output_file), exist_ok=True)
-
-            with rasterio.open(output_file, 'w', **profile) as dst:
-                dst.write(arr, 1)
-            print("Conversion using h5py/rasterio successful.")
+        subdatasets = hdflayer.GetSubDatasets()
+        sub = subdatasets[layer][0]
+        rlayer = gdal.Open(sub, gdal.GA_ReadOnly)
+        meta = rlayer.GetMetadata_Dict()
+        hNum = int(meta.get('HorizontalTileNumber', 0))
+        vNum = int(meta.get('VerticalTileNumber', 0))
+        west = (10 * hNum) - 180
+        north = 90 - (10 * vNum)
+        east = west + 10
+        south = north - 10
+        opts = gdal.TranslateOptions(
+            gdal.ParseCommandLine(
+                f'-a_srs EPSG:4326 -a_ullr {west} {north} {east} {south}'
+            )
+        )
+        gdal.Translate(output_file, rlayer, options=opts)

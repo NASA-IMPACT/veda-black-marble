@@ -180,3 +180,7 @@ notebooks/outputs
 # transient job outputs
 outputs
 bm_outputs
+
+# scalene profiles
+profile.html
+profile.json

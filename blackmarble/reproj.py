@@ -13,21 +13,17 @@ from typing import Tuple, Dict, Any, Optional
 from .coords import wkt_to_json
 
 def subset_raster_normal(input_raster: str, output_raster: str, minX: float, maxY: float, maxX: float, minY: float, scale: float, temp_dir: str) -> None:
-    """Crop and resample via two interim files within temp_dir."""
-    # Define intermediate file paths within temp_dir
     temp_file1 = os.path.join(temp_dir, 'new1_subset.tif')
+    if os.path.exists(temp_file1):
+        os.remove(temp_file1)
     temp_file2 = os.path.join(temp_dir, 'new2_subset.tif')
-
-    # Extended BBox
-    # Step 1: initial crop
+    if os.path.exists(temp_file2):
+        os.remove(temp_file2)
     ds = gdal.Translate(temp_file1, input_raster,
-                       projWin=[minX, maxY, maxX, minY],
-                       resampleAlg='bilinear')
+                        projWin=[minX, maxY, maxX, minY],
+                        resampleAlg='bilinear')
     ds = None
-
-    # Step 2: resample
     ds = gdal.Open(temp_file1)
-    # Resample to target resolution
     warp_opts = gdal.WarpOptions(
         xRes=scale,
         yRes=scale,
@@ -35,20 +31,11 @@ def subset_raster_normal(input_raster: str, output_raster: str, minX: float, max
     )
     ds = gdal.Warp(temp_file2, ds, options=warp_opts)
     ds = None
-
-    # Step 3: final crop
     ds = gdal.Open(temp_file2)
     ds = gdal.Translate(output_raster, ds,
-                       projWin=[minX, maxY, maxX, minY],
-                       resampleAlg='bilinear')
+                        projWin=[minX, maxY, maxX, minY],
+                        resampleAlg='bilinear')
     ds = None
-
-    # Clean up
-    try:
-        os.remove(temp_file1)
-        os.remove(temp_file2)
-    except OSError as e:
-        print(f"Warning: Could not remove temporary file: {e}")
 
 
 def subset_raster(input_raster: str, output_raster: str, minX: float, maxY: float, maxX: float, minY: float, scale: float, temp_dir: str) -> None:
@@ -100,6 +87,8 @@ def convert_to_wgs84(input_path: str, output_path: str, lon1: float, lat1: float
 
     # Define intermediate file path within output_dir (or its temp subdir)
     temp_conv_path = os.path.join(output_dir, 'conv.tiff') # Place in main output dir for simplicity
+    if os.path.exists(temp_conv_path):
+        os.remove(temp_conv_path)
 
     # Reproject to WGS84
     warp_opts_list = [

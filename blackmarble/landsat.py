@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import List, Dict, Tuple, Optional, Any, Union
 from boto3.session import Session
 from mypy_boto3_s3.client import S3Client
+import collections
 
 # Default path to WRS2 descending shapefile bundled with this package
 DEFAULT_WRS_SHAPEFILE: str = str(
@@ -33,7 +34,8 @@ aws_secret_key: Optional[str] = os.environ.get('AWS_ACCESS_SECRET')
 
 class LandsatUtil:
     """Perform conversion between lat/lon and WRS-2 + download bands from USGS S3."""
-    dir_cache: Dict[str, List[Dict[str, str]]] = {}
+    dir_cache: collections.OrderedDict[str, List[Dict[str, str]]] = collections.OrderedDict()
+    MAX_CACHE_SIZE = 100
     shapefile: ogr.DataSource
     layer: ogr.Layer
     polygons: List[Tuple[shapely.geometry.Polygon, int, int]]
@@ -63,7 +65,6 @@ class LandsatUtil:
         return res
 
     def filter_landsat_data_dir(self, year: int, month: int, day: int, path: str, row: str) -> Optional[str]:
-        """Select the USGS S3 prefix for the given date and path/row."""
         yr: str = str(year)
         mo: str = str(month).zfill(2)
         da: str = str(day).zfill(2)
@@ -71,23 +72,16 @@ class LandsatUtil:
         if prefix in self.dir_cache:
             directories: List[Dict[str, str]] = self.dir_cache[prefix]
         else:
-            # Use provided AWS keys or default credential chain
-            session: Session
-            if aws_access_key and aws_secret_key:
-                session = boto3.Session(
-                    aws_access_key_id=aws_access_key,
-                    aws_secret_access_key=aws_secret_key
-                )
-            else:
-                session = boto3.Session()
+            session = boto3.Session()
             s3: S3Client = session.client('s3')
             resp = s3.list_objects_v2(
                 Bucket='usgs-landsat', Prefix=prefix,
                 RequestPayer='requester', Delimiter='/'
             )
             directories = resp.get('CommonPrefixes', [])
+            if len(self.dir_cache) >= self.MAX_CACHE_SIZE:
+                self.dir_cache.popitem(last=False)
             self.dir_cache[prefix] = directories
-
         target: datetime = datetime.strptime(yr + mo + da, '%Y%m%d')
         selected: Optional[str] = None
         for entry in directories:

@@ -17,91 +17,69 @@ class OSMUtil:
     """Rasterize OpenStreetMap roads into a uint8 mask."""
 
     def create_road_raster_flattened(self, lat1: float, lon1: float, lat2: float, lon2: float,
-                                     raster_value: int = 5,
-                                     reference_raster: str = 'outputs/ntl.tif', # Keep default for reference if needed outside pipeline context
-                                     output_path: str = 'outputs/osm.tif', # Keep default for output if needed outside pipeline context
-                                     output_dir: str = 'outputs', # Add output_dir
-                                     path_thickness: float = 0.00005) -> None:  # Add type hints
+                                     reference_raster: str = 'outputs/ntl.tif',
+                                     output_path: str = 'outputs/osm.tif',
+                                     output_dir: str = 'outputs',
+                                     path_thickness: float = 0.00005) -> None:
         """Rasterize all roads to a single mask value."""
         with rasterio.open(reference_raster) as src:
-            height: int = src.height  # Add type hint
-            width: int = src.width  # Add type hint
-            transform: rasterio.Affine = src.transform  # Add type hint
-            profile: Dict[str, Any] = src.profile.copy()  # Add type hint
-
-        # Define shapefile output path within output_dir/temp
+            height: int = src.height
+            width: int = src.width
+            transform: rasterio.Affine = src.transform
+            profile: Dict[str, Any] = src.profile.copy()
         temp_dir = os.path.join(output_dir, 'temp')
         os.makedirs(temp_dir, exist_ok=True)
         shapefile_dir = os.path.join(temp_dir, 'roads_osm_flat')
-
-        # Download/Ox graph for full bbox
         try:
             G = ox.graph_from_bbox(max(lat1, lat2), min(lat1, lat2),
-                                   max(lon1, lon2), min(lon1, lon2),
-                                   retain_all=True, network_type='all')
+                               max(lon1, lon2), min(lon1, lon2),
+                               retain_all=True, network_type='all')
             if G.number_of_edges() == 0:
-                 print("Warning: No road edges found in the specified bounding box.")
-                 # Create an empty mask and return
-                 mask = np.zeros((height, width), dtype=np.uint8)
+                mask = np.zeros((height, width), dtype=np.uint8)
             else:
-                ox.save_graph_shapefile(G, filepath=shapefile_dir) # Use filepath argument
-
-                shp: str = os.path.join(shapefile_dir, 'edges.shp')  # Add type hint
-                road_shapes: List[Dict[str, Any]] = []  # Add type hint
+                ox.save_graph_shapefile(G, filepath=shapefile_dir)
+                shp: str = os.path.join(shapefile_dir, 'edges.shp')
+                road_shapes: List[Dict[str, Any]] = []
                 with fiona.open(shp) as feats:
                     for feat in feats:
-                        geom: Dict[str, Any] = feat['geometry']  # Add type hint
-                        poly: shapely.geometry.Polygon = shapely.geometry.shape(geom).buffer(path_thickness)  # Add type hint
+                        geom: Dict[str, Any] = feat['geometry']
+                        poly: shapely.geometry.Polygon = shapely.geometry.shape(geom).buffer(path_thickness)
                         road_shapes.append(shapely.geometry.mapping(poly))
-
-                mask: np.ndarray = rasterio.features.rasterize(  # Add type hint
+                mask: np.ndarray = rasterio.features.rasterize(
                     road_shapes,
                     out_shape=(height, width),
                     transform=transform,
                     fill=0,
                     all_touched=False,
-                    default_value=raster_value,
+                    default_value=5,
                     dtype=np.uint8)
         except Exception as e:
-             print(f"Error during OSM download/processing (flattened): {e}. Creating empty mask.")
-             mask = np.zeros((height, width), dtype=np.uint8)
-
-
-        # Prepare output profile: single-band uint8 with no nodata value
+            print(e)
+            mask = np.zeros((height, width), dtype=np.uint8)
         profile.pop('nodata', None)
         profile.update(count=1, dtype='uint8')
         with rasterio.open(output_path, 'w', **profile) as dst:
             dst.write(mask, 1)
-
-        # Clean up temporary shapefile directory
         if os.path.exists(shapefile_dir):
-            try:
-                shutil.rmtree(shapefile_dir)
-            except OSError as e:
-                print(f"Warning: Could not remove temporary OSM shapefile directory {shapefile_dir}: {e}")
+            shutil.rmtree(shapefile_dir)
 
 
     def create_road_raster(self, lat1: float, lon1: float, lat2: float, lon2: float,
-                           raster_value: int = 5,  # Note: raster_value seems unused here?
-                           reference_raster: str = 'outputs/ntl.tif', # Keep default
-                           output_path: str = 'outputs/osm.tif', # Keep default
-                           output_dir: str = 'outputs', # Add output_dir
-                           path_thickness: float = 0.00005) -> None:  # Add type hints
+                           reference_raster: str = 'outputs/ntl.tif',
+                           output_path: str = 'outputs/osm.tif',
+                           output_dir: str = 'outputs',
+                           path_thickness: float = 0.00005) -> None:
         """Rasterize roads by type, layering higher-index roads over lower."""
         with rasterio.open(reference_raster) as src:
-            height: int = src.height  # Add type hint
-            width: int = src.width  # Add type hint
-            transform: rasterio.Affine = src.transform  # Add type hint
-            profile: Dict[str, Any] = src.profile.copy()  # Add type hint
-
-        # Define shapefile output path within output_dir/temp
+            height: int = src.height
+            width: int = src.width
+            transform: rasterio.Affine = src.transform
+            profile: Dict[str, Any] = src.profile.copy()
         temp_dir = os.path.join(output_dir, 'temp')
         os.makedirs(temp_dir, exist_ok=True)
         shapefile_dir = os.path.join(temp_dir, 'roads_osm_typed')
-
-
-        base: np.ndarray = np.zeros((height, width), dtype=np.uint8)  # Add type hint
-        filters: List[str] = [  # Add type hint
+        base: np.ndarray = np.zeros((height, width), dtype=np.uint8)
+        filters: List[str] = [
             '["highway"~"primary_link|primary|secondary|secondary_link|tertiary|tertiary_link"]',
             '["highway"~"motorway|motorway_link"]',
             '["highway"~"residential"]',
@@ -110,33 +88,24 @@ class OSMUtil:
         ]
         for idx, custom_filter in enumerate(filters, start=1):
             try:
-                print(f"Downloading OSM data for filter: {custom_filter}")
                 G = ox.graph_from_bbox(max(lat1, lat2), min(lat1, lat2),
-                                       max(lon1, lon2), min(lon1, lon2),
-                                       retain_all=True,
-                                       network_type='all',
-                                       custom_filter=custom_filter)
-
+                                   max(lon1, lon2), min(lon1, lon2),
+                                   retain_all=True,
+                                   network_type='all',
+                                   custom_filter=custom_filter)
                 if G.number_of_edges() == 0:
-                    print(f'No data for filter {custom_filter}')
-                    continue # Skip if no edges found for this filter
-
-                # Clean previous shapefile dir for this type if it exists
+                    continue
                 if os.path.exists(shapefile_dir):
-                     shutil.rmtree(shapefile_dir)
-
-                ox.save_graph_shapefile(G, filepath=shapefile_dir) # Use filepath argument
-
-                shp: str = os.path.join(shapefile_dir, 'edges.shp')  # Add type hint
-                shapes: List[Dict[str, Any]] = []  # Add type hint
+                    shutil.rmtree(shapefile_dir)
+                ox.save_graph_shapefile(G, filepath=shapefile_dir)
+                shp: str = os.path.join(shapefile_dir, 'edges.shp')
+                shapes: List[Dict[str, Any]] = []
                 with fiona.open(shp) as feats:
                     for feat in feats:
-                        geom: Dict[str, Any] = feat['geometry']  # Add type hint
-                        poly: shapely.geometry.Polygon = shapely.geometry.shape(geom).buffer(path_thickness)  # Add type hint
+                        geom: Dict[str, Any] = feat['geometry']
+                        poly: shapely.geometry.Polygon = shapely.geometry.shape(geom).buffer(path_thickness)
                         shapes.append(shapely.geometry.mapping(poly))
-
-                print(f"Rasterizing {len(shapes)} shapes for filter index {idx}...")
-                mask: np.ndarray = rasterio.features.rasterize(  # Add type hint
+                mask: np.ndarray = rasterio.features.rasterize(
                     shapes,
                     out_shape=(height, width),
                     transform=transform,
@@ -144,22 +113,13 @@ class OSMUtil:
                     all_touched=False,
                     default_value=idx,
                     dtype=np.uint8)
-                # overlay
                 base = np.maximum(base, mask)
-                print(f"Finished rasterizing for filter index {idx}.")
-
             except Exception as e:
-                print(f'Error processing filter {custom_filter}: {e}')
-
-        # Prepare output profile: single-band uint8 with no nodata value
+                print(e)
+                continue
         profile.pop('nodata', None)
         profile.update(count=1, dtype='uint8')
         with rasterio.open(output_path, 'w', **profile) as dst:
             dst.write(base, 1)
-
-        # Clean up temporary shapefile directory
         if os.path.exists(shapefile_dir):
-            try:
-                shutil.rmtree(shapefile_dir)
-            except OSError as e:
-                print(f"Warning: Could not remove temporary OSM shapefile directory {shapefile_dir}: {e}")
+            shutil.rmtree(shapefile_dir)
