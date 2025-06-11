@@ -12,7 +12,7 @@ import numpy as np
 import boto3
 from importlib.resources import files
 from datetime import datetime
-from typing import Optional, Any, Union
+from typing import Any, Union
 from boto3.session import Session
 from mypy_boto3_s3.client import S3Client
 import collections
@@ -29,8 +29,8 @@ import shapely.wkt
 import shapely.geometry
 
 # Read AWS credentials from environment
-aws_access_key: Optional[str] = os.environ.get('AWS_ACCESS_KEY')
-aws_secret_key: Optional[str] = os.environ.get('AWS_ACCESS_SECRET')
+aws_access_key: str | None = os.environ.get('AWS_ACCESS_KEY')
+aws_secret_key: str | None = os.environ.get('AWS_ACCESS_SECRET')
 
 class LandsatUtil:
     """Perform conversion between lat/lon and WRS-2 + download bands from USGS S3."""
@@ -40,7 +40,7 @@ class LandsatUtil:
     layer: ogr.Layer
     polygons: list[tuple[shapely.geometry.Polygon, int, int]]
 
-    def __init__(self, shapefile: Optional[str] = None) -> None:
+    def __init__(self, shapefile: str | None = None) -> None:
         # Use bundled default WRS-2 shapefile if none provided
         if shapefile is None:
             shapefile = DEFAULT_WRS_SHAPEFILE
@@ -64,7 +64,7 @@ class LandsatUtil:
                 res.append({'path': path, 'row': row})
         return res
 
-    def filter_landsat_data_dir(self, year: int, month: int, day: int, path: str, row: str) -> Optional[str]:
+    def filter_landsat_data_dir(self, year: int, month: int, day: int, path: str, row: str) -> str | None:
         yr: str = str(year)
         mo: str = str(month).zfill(2)
         da: str = str(day).zfill(2)
@@ -83,7 +83,7 @@ class LandsatUtil:
                 self.dir_cache.popitem(last=False)
             self.dir_cache[prefix] = directories
         target: datetime = datetime.strptime(yr + mo + da, '%Y%m%d')
-        selected: Optional[str] = None
+        selected: str | None = None
         for entry in directories:
             dr: list[str] = entry['Prefix'].split('/')[-2].split('_')[3:5]
             start: datetime = datetime.strptime(dr[0], '%Y%m%d')
@@ -136,7 +136,7 @@ def download_tiles_for_band(band: Union[int, str], year: int, month: int, day: i
     aerosol: list[str] = []
     for p in paths:
         for r in rows:
-            d: Optional[str] = landsat.filter_landsat_data_dir(year, month, day,
+            d: str | None = landsat.filter_landsat_data_dir(year, month, day,
                                                 str(p).zfill(3), str(r).zfill(3))
             if not d:
                 if ignore_missing:

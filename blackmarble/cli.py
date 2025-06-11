@@ -2,7 +2,6 @@
 import typer
 import os
 import sys
-from typing import Optional
 
 app = typer.Typer(help="Command-line interface for the VEDA Black Marble processing pipeline.")
 
@@ -15,7 +14,7 @@ def run(
     year: int = typer.Option(..., "--year", help="Target year for data."),
     month: int = typer.Option(..., "--month", help="Target month for data."),
     day: int = typer.Option(..., "--day", help="Target day for data."),
-    earthdata_token: Optional[str] = typer.Option(
+    earthdata_token: str | None = typer.Option(
         None, "--earthdata-token", "-t",
         help="NASA Earthdata login token. If not provided, reads from EARTH_DATA_TOKEN environment variable.",
         envvar="EARTH_DATA_TOKEN" # Automatically read from env var if not provided
@@ -24,11 +23,11 @@ def run(
         "outputs", "--output-dir", "-o",
         help="Base directory for all output and temporary files."
     ),
-    upload_bucket: Optional[str] = typer.Option(
+    upload_bucket: str | None = typer.Option(
         None, "--upload-bucket", "-b",
         help="S3 bucket name for uploading the final COG output."
     ),
-    upload_key: Optional[str] = typer.Option(
+    upload_key: str | None = typer.Option(
         None, "--upload-key", "-k",
         help="S3 key (path/filename) for uploading the final COG output."
     )

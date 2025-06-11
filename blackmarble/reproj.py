@@ -9,7 +9,7 @@ Reprojection & subsetting utilities:
 import os
 from osgeo import gdal
 from pyproj import Proj
-from typing import Any, Optional
+from typing import Any
 from .coords import wkt_to_json
 
 def subset_raster_normal(input_raster: str, output_raster: str, minX: float, maxY: float, maxX: float, minY: float, scale: float, temp_dir: str) -> None:
@@ -76,7 +76,7 @@ def convert_to_wgs84(input_path: str, output_path: str, lon1: float, lat1: float
     srs_wkt: str = ds.GetProjection()
 
     json_data: dict[str, Any] = wkt_to_json(srs_wkt)
-    src_srs_code: Optional[int] = None # Initialize
+    src_srs_code: int | None = None  # Initialize
     if 'id' in json_data and 'code' in json_data['id']:
         src_srs_code = json_data['id']['code']
     else:
