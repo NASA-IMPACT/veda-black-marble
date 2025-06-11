@@ -8,9 +8,9 @@ app = typer.Typer(help="Command-line interface for the VEDA Black Marble process
 @app.command()
 def run(
     lat1: float = typer.Option(..., "--lat1", help="Latitude of the first corner (e.g., North)."),
-    lon1: float = typer.Option(..., "--long1", help="Longitude of the first corner (e.g., West)."),
+    lon1: float = typer.Option(..., "--lon1", help="Longitude of the first corner (e.g., West)."),
     lat2: float = typer.Option(..., "--lat2", help="Latitude of the second corner (e.g., South)."),
-    lon2: float = typer.Option(..., "--long2", help="Longitude of the second corner (e.g., East)."),
+    lon2: float = typer.Option(..., "--lon2", help="Longitude of the second corner (e.g., East)."),
     year: int = typer.Option(..., "--year", help="Target year for data."),
     month: int = typer.Option(..., "--month", help="Target month for data."),
     day: int = typer.Option(..., "--day", help="Target day for data."),
