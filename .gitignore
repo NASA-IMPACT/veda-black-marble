@@ -184,3 +184,6 @@ bm_outputs
 # scalene profiles
 profile.html
 profile.json
+
+__pycache__
+*.pyc

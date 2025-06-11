@@ -8,7 +8,6 @@ Coordinate & projection helpers:
 # Imports
 import utm
 from pyproj import Proj
-from geopy.distance import geodesic
 from typing import Any
 import pyproj
 
@@ -21,11 +20,22 @@ def get_utm_zone(latitude: float, longitude: float) -> tuple[float, float, int, 
     """Return (easting, northing, zone_number, zone_letter) for given lat/lon."""
     return utm.from_latlon(latitude, longitude)
 
-def calculate_bounding_box_area(min_lon: float, min_lat: float, max_lon: float, max_lat: float) -> float:
-    geodesic = pyproj.Geod(ellps='WGS84')
-    polygon = [(min_lon, min_lat), (max_lon, min_lat), (max_lon, max_lat), (min_lon, max_lat), (min_lon, min_lat)]
-    area_km2, _ = geodesic.polygon_area_perimeter(polygon)
-    return abs(area_km2) / 1e6
+def calculate_bounding_box_area(min_lon: float, min_lat: float,
+                                max_lon: float, max_lat: float) -> float:
+    """
+    Calculate the geodesic area (km²) of an axis-aligned bounding box
+    defined by its corner coordinates.
+    """
+    geod = pyproj.Geod(ellps='WGS84')
+
+    # Vertices of the rectangle, closing the polygon by repeating the first
+    lons = [min_lon, max_lon, max_lon, min_lon, min_lon]
+    lats = [min_lat, min_lat, max_lat, max_lat, min_lat]
+
+    # polygon_area_perimeter returns area in square metres (may be negative
+    # depending on vertex order) and perimeter in metres.
+    area_m2, _ = geod.polygon_area_perimeter(lons, lats)
+    return abs(area_m2) / 1_000_000  # convert to km²
 
 def get_test_coord() -> tuple[float, float, float, float]:
     """Example bbox (test)."""
@@ -40,4 +50,5 @@ def get_fort_myers() -> tuple[float, float, float, float]:
     return 26.718905, -82.103920, 26.520302, -81.833752
 
 def turkey() -> tuple[float, float, float, float]:
-    return 38.256313, 35.385847, 42.448697, 36.448697
+    """Hard-coded bounding box covering most of Türkiye."""
+    return 38.256313, 35.385847, 36.448697, 36.448697

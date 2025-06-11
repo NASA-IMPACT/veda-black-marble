@@ -40,9 +40,8 @@ blackmarble = ["data/*.npy", "data/WRS2_descending_0/*"]
 [dependency-groups]
 dev = [
   "scalene>=1.5.51",
-  "pytest",
-  "ruff",
-  "mypy",
+  "pre-commit>=4.2.0",
+  "pytest>=8.3.5",
 ]
 
 [tool.pytest.ini_options]

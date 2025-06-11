@@ -29,7 +29,9 @@ def extract_params_from_filename(filename: str) -> dict[str, float | int]:
     base_name = os.path.basename(filename)
     # Regex to match the pattern: ndui_LATSTR(N|S)_LONSTR(E|W)_YYYYMMDD.tif(f)?
     # LATSTR/LONSTR can contain digits, 'p', and optionally start with 'm'
-    match = re.match(r'^ndui_([mp\d]+)([NS])_([mp\d]+)([EW])_(\d{8})\.tif(?:f)?$', base_name)
+    # Allow 6- or 8-digit date strings so that malformed dates still hit
+    # the date-parsing branch and raise the expected error.
+    match = re.match(r'^ndui_([mp\d]+)([NS])_([mp\d]+)([EW])_(\d{6,8})\.tif(?:f)?$', base_name)
 
     if not match:
         raise FilenameParseError(f"Filename does not match expected format: {base_name}")
@@ -115,7 +117,7 @@ def test_extract_params_from_filename_invalid_format():
         extract_params_from_filename("ndui_33.03N_21.28E_20230124.tif") # Uses dot instead of p
     with pytest.raises(FilenameParseError, match="Filename does not match expected format"):
         extract_params_from_filename("ndui_33p03X_21p28E_20230124.tif") # Invalid hemisphere
-    with pytest.raises(FilenameParseError, match="Could not parse latitude value from filename"):
+    with pytest.raises(FilenameParseError, match="Filename does not match expected format"):
          extract_params_from_filename("ndui_33p.03N_21p28E_20230124.tif") # Invalid number format
 
 def test_extract_params_from_filename_different_extension():

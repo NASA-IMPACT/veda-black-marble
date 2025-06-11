@@ -69,7 +69,8 @@ def test_get_utm_zone_poles():
     lat_north = 83.9 # Close to North Pole limit (84N)
     lon = 0.0
     _, _, zone_num_n, zone_letter_n = coords.get_utm_zone(lat_north, lon)
-    assert zone_letter_n == 'Z' # Special polar zone handling might occur
+    # The utm library uses letters C–X; 72°–84° N is letter 'X'.
+    assert zone_letter_n == 'X'
 
     lat_south = -79.9 # Close to South Pole limit (80S)
     _, _, zone_num_s, zone_letter_s = coords.get_utm_zone(lat_south, lon)
