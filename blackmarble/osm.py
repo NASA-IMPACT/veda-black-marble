@@ -11,7 +11,7 @@ import fiona
 import osmnx as ox
 import shapely.geometry
 import shutil # Import shutil for directory removal
-from typing import List, Dict, Any, Union  # Add typing imports
+from typing import Any, Union  # Add typing imports
 
 class OSMUtil:
     """Rasterize OpenStreetMap roads into a uint8 mask."""
@@ -26,7 +26,7 @@ class OSMUtil:
             height: int = src.height
             width: int = src.width
             transform: rasterio.Affine = src.transform
-            profile: Dict[str, Any] = src.profile.copy()
+            profile: dict[str, Any] = src.profile.copy()
         temp_dir = os.path.join(output_dir, 'temp')
         os.makedirs(temp_dir, exist_ok=True)
         shapefile_dir = os.path.join(temp_dir, 'roads_osm_flat')
@@ -39,10 +39,10 @@ class OSMUtil:
             else:
                 ox.save_graph_shapefile(G, filepath=shapefile_dir)
                 shp: str = os.path.join(shapefile_dir, 'edges.shp')
-                road_shapes: List[Dict[str, Any]] = []
+                road_shapes: list[dict[str, Any]] = []
                 with fiona.open(shp) as feats:
                     for feat in feats:
-                        geom: Dict[str, Any] = feat['geometry']
+                        geom: dict[str, Any] = feat['geometry']
                         poly: shapely.geometry.Polygon = shapely.geometry.shape(geom).buffer(path_thickness)
                         road_shapes.append(shapely.geometry.mapping(poly))
                 mask: np.ndarray = rasterio.features.rasterize(
@@ -74,12 +74,12 @@ class OSMUtil:
             height: int = src.height
             width: int = src.width
             transform: rasterio.Affine = src.transform
-            profile: Dict[str, Any] = src.profile.copy()
+            profile: dict[str, Any] = src.profile.copy()
         temp_dir = os.path.join(output_dir, 'temp')
         os.makedirs(temp_dir, exist_ok=True)
         shapefile_dir = os.path.join(temp_dir, 'roads_osm_typed')
         base: np.ndarray = np.zeros((height, width), dtype=np.uint8)
-        filters: List[str] = [
+        filters: list[str] = [
             '["highway"~"primary_link|primary|secondary|secondary_link|tertiary|tertiary_link"]',
             '["highway"~"motorway|motorway_link"]',
             '["highway"~"residential"]',
@@ -99,10 +99,10 @@ class OSMUtil:
                     shutil.rmtree(shapefile_dir)
                 ox.save_graph_shapefile(G, filepath=shapefile_dir)
                 shp: str = os.path.join(shapefile_dir, 'edges.shp')
-                shapes: List[Dict[str, Any]] = []
+                shapes: list[dict[str, Any]] = []
                 with fiona.open(shp) as feats:
                     for feat in feats:
-                        geom: Dict[str, Any] = feat['geometry']
+                        geom: dict[str, Any] = feat['geometry']
                         poly: shapely.geometry.Polygon = shapely.geometry.shape(geom).buffer(path_thickness)
                         shapes.append(shapely.geometry.mapping(poly))
                 mask: np.ndarray = rasterio.features.rasterize(

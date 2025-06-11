@@ -12,7 +12,7 @@ import numpy as np
 import boto3
 from importlib.resources import files
 from datetime import datetime
-from typing import List, Dict, Tuple, Optional, Any, Union
+from typing import Optional, Any, Union
 from boto3.session import Session
 from mypy_boto3_s3.client import S3Client
 import collections
@@ -34,11 +34,11 @@ aws_secret_key: Optional[str] = os.environ.get('AWS_ACCESS_SECRET')
 
 class LandsatUtil:
     """Perform conversion between lat/lon and WRS-2 + download bands from USGS S3."""
-    dir_cache: collections.OrderedDict[str, List[Dict[str, str]]] = collections.OrderedDict()
+    dir_cache: collections.OrderedDict[str, list[dict[str, str]]] = collections.OrderedDict()
     MAX_CACHE_SIZE = 100
     shapefile: ogr.DataSource
     layer: ogr.Layer
-    polygons: List[Tuple[shapely.geometry.Polygon, int, int]]
+    polygons: list[tuple[shapely.geometry.Polygon, int, int]]
 
     def __init__(self, shapefile: Optional[str] = None) -> None:
         # Use bundled default WRS-2 shapefile if none provided
@@ -55,10 +55,10 @@ class LandsatUtil:
             shape = shapely.wkt.loads(geom.ExportToWkt())
             self.polygons.append((shape, path, row))
 
-    def get_wrs(self, lat: float, lon: float) -> List[Dict[str, int]]:
+    def get_wrs(self, lat: float, lon: float) -> list[dict[str, int]]:
         """Return list of {'path', 'row'} for given lat/lon."""
         pt = shapely.geometry.Point(lon, lat)
-        res: List[Dict[str, int]] = []
+        res: list[dict[str, int]] = []
         for poly, path, row in self.polygons:
             if pt.within(poly):
                 res.append({'path': path, 'row': row})
@@ -70,7 +70,7 @@ class LandsatUtil:
         da: str = str(day).zfill(2)
         prefix: str = f'collection02/level-2/standard/oli-tirs/{yr}/{path}/{row}/'
         if prefix in self.dir_cache:
-            directories: List[Dict[str, str]] = self.dir_cache[prefix]
+            directories: list[dict[str, str]] = self.dir_cache[prefix]
         else:
             session = boto3.Session()
             s3: S3Client = session.client('s3')
@@ -85,7 +85,7 @@ class LandsatUtil:
         target: datetime = datetime.strptime(yr + mo + da, '%Y%m%d')
         selected: Optional[str] = None
         for entry in directories:
-            dr: List[str] = entry['Prefix'].split('/')[-2].split('_')[3:5]
+            dr: list[str] = entry['Prefix'].split('/')[-2].split('_')[3:5]
             start: datetime = datetime.strptime(dr[0], '%Y%m%d')
             end: datetime = datetime.strptime(dr[1], '%Y%m%d')
             if start <= target <= end:
@@ -123,17 +123,17 @@ class LandsatUtil:
 def download_tiles_for_band(band: Union[int, str], year: int, month: int, day: int,
                             lat1: float, lon1: float, lat2: float, lon2: float,
                             temp_dir: str, # Add temp_dir argument
-                            ignore_missing: bool = False) -> Tuple[List[str], List[str], List[str], List[str]]:
+                            ignore_missing: bool = False) -> tuple[list[str], list[str], list[str], list[str]]:
     """Download source, QA_PIXEL, QA_RADSAT, QA_AEROSOL for all overlapping tiles."""
     landsat = LandsatUtil()
-    wrs1: Dict[str, int] = landsat.get_wrs(lat1, lon1)[0]
-    wrs2: Dict[str, int] = landsat.get_wrs(lat2, lon2)[0]
+    wrs1: dict[str, int] = landsat.get_wrs(lat1, lon1)[0]
+    wrs2: dict[str, int] = landsat.get_wrs(lat2, lon2)[0]
     paths = range(min(wrs1['path'], wrs2['path']), max(wrs1['path'], wrs2['path'])+1)
     rows = range(min(wrs1['row'], wrs2['row']), max(wrs1['row'], wrs2['row'])+1)
-    downloads: List[str] = []
-    pixels: List[str] = []
-    radsat: List[str] = []
-    aerosol: List[str] = []
+    downloads: list[str] = []
+    pixels: list[str] = []
+    radsat: list[str] = []
+    aerosol: list[str] = []
     for p in paths:
         for r in rows:
             d: Optional[str] = landsat.filter_landsat_data_dir(year, month, day,
@@ -175,9 +175,9 @@ def download_tiles_for_band(band: Union[int, str], year: int, month: int, day: i
 def download_tiles_for_band_with_composites(band: Union[int, str], year: int, month: int, day: int,
                                             lat1: float, lon1: float, lat2: float, lon2: float,
                                             temp_dir: str, # Add temp_dir argument
-                                            composite_history_months: int = 12) -> List[Tuple[List[str], List[str], List[str], List[str]]]:
+                                            composite_history_months: int = 12) -> list[tuple[list[str], list[str], list[str], list[str]]]:
     """Download current and past composites for a band, ignoring missing where needed."""
-    tiles: List[Tuple[List[str], List[str], List[str], List[str]]] = [download_tiles_for_band(band, year, month, day,
+    tiles: list[tuple[list[str], list[str], list[str], list[str]]] = [download_tiles_for_band(band, year, month, day,
                                     lat1, lon1, lat2, lon2, temp_dir)] # Pass temp_dir
     for comp in range(1, composite_history_months+1):
         y: int = year
@@ -187,7 +187,7 @@ def download_tiles_for_band_with_composites(band: Union[int, str], year: int, mo
             m += 12
         try:
             print(f"Downloading composite for {y}-{m}-01...")
-            t: Tuple[List[str], List[str], List[str], List[str]] = download_tiles_for_band(band, y, m, 1,
+            t: tuple[list[str], list[str], list[str], list[str]] = download_tiles_for_band(band, y, m, 1,
                                         lat1, lon1, lat2, lon2, temp_dir, # Pass temp_dir
                                         ignore_missing=True)
             # Only add if data was actually found
@@ -202,14 +202,14 @@ def download_tiles_for_band_with_composites(band: Union[int, str], year: int, mo
 
 def process_band_data(band: Union[int, str], year: int, month: int, day: int,
                       lat1: float, lon1: float, lat2: float, lon2: float,
-                      output_prefix: str, temp_dir: str) -> Tuple[List[str], List[str], List[str], List[str]]: # Add temp_dir
+                      output_prefix: str, temp_dir: str) -> tuple[list[str], list[str], list[str], list[str]]: # Add temp_dir
     """Download, warp, and merge source + QA into multi-scene TIFFs."""
-    composites: List[Tuple[List[str], List[str], List[str], List[str]]] = download_tiles_for_band_with_composites(
+    composites: list[tuple[list[str], list[str], list[str], list[str]]] = download_tiles_for_band_with_composites(
         band, year, month, day, lat1, lon1, lat2, lon2, temp_dir) # Pass temp_dir
-    outputs: List[str] = []
-    pixel_tifs: List[str] = []
-    radsat_tifs: List[str] = []
-    aerosol_tifs: List[str] = []
+    outputs: list[str] = []
+    pixel_tifs: list[str] = []
+    radsat_tifs: list[str] = []
+    aerosol_tifs: list[str] = []
     for idx, (srcs, pxs, rxs, axs) in enumerate(composites):
         # Skip processing if no source files were found for this composite period
         if not srcs:

@@ -9,9 +9,9 @@ Raster I/O utilities:
 # Imports
 from osgeo import gdal
 import numpy as np
-from typing import Tuple, Union
+from typing import Union
 
-def get_geo(filepath: str, band: int) -> Tuple[np.ndarray, Tuple[float, ...], str]:
+def get_geo(filepath: str, band: int) -> tuple[np.ndarray, tuple[float, ...], str]:
     """
     Reads a specific band from a raster file and returns its data along with georeferencing information.
 
@@ -40,7 +40,7 @@ def get_geo(filepath: str, band: int) -> Tuple[np.ndarray, Tuple[float, ...], st
     ds = None
     return array, geotransform, projection
 
-def save_image(array: np.ndarray, geotransform: Tuple[float, ...], projection: str, gdal_type: int, out_path: str) -> None:
+def save_image(array: np.ndarray, geotransform: tuple[float, ...], projection: str, gdal_type: int, out_path: str) -> None:
     """
     Saves a NumPy array as a single-band GeoTIFF file.
 
@@ -67,7 +67,7 @@ def save_image(array: np.ndarray, geotransform: Tuple[float, ...], projection: s
     band.WriteArray(array, 0, 0)
     dst = None
 
-def save_geotiff_rgb(out_path: str, r: np.ndarray, g: np.ndarray, b: np.ndarray, projection: str, geotransform: Tuple[float, ...]) -> None:
+def save_geotiff_rgb(out_path: str, r: np.ndarray, g: np.ndarray, b: np.ndarray, projection: str, geotransform: tuple[float, ...]) -> None:
     rows, cols = r.shape
     driver = gdal.GetDriverByName('GTiff')
     dst = driver.Create(out_path, cols, rows, 3, gdal.GDT_Byte)
@@ -81,7 +81,7 @@ def save_geotiff_rgb(out_path: str, r: np.ndarray, g: np.ndarray, b: np.ndarray,
     dst.GetRasterBand(3).WriteArray(b)
     dst = None
 
-def save_geotiff_single(out_path: str, array: np.ndarray, projection: str, geotransform: Tuple[float, ...]) -> None:
+def save_geotiff_single(out_path: str, array: np.ndarray, projection: str, geotransform: tuple[float, ...]) -> None:
     """
     Saves a NumPy array as a single-band unsigned 16-bit integer GeoTIFF file.
 

@@ -9,7 +9,7 @@ import os
 import requests
 import shutil # Add shutil for rmtree
 from datetime import date
-from typing import Tuple # Add typing import
+# no typing import needed
 
 from .io import get_geo, save_image
 
@@ -46,7 +46,7 @@ def convert_VNP46A2_HDF2TIFF(h5_file, output_file):
 class VNP46A2Util:
     """Download and convert VNP46A2 (VIIRS) HDF files."""
 
-    def coordinates_to_tile_id(self, lat, lon) -> Tuple[int, int]: # Add return type hint
+    def coordinates_to_tile_id(self, lat, lon) -> tuple[int, int]:
         """Return (vertical, horizontal) tile indices for lat/lon."""
         # convert to 0–360/0–180 range
         v = int((( -lat + 90.0) / 180.0) * 18)

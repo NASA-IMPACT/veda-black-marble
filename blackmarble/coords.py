@@ -9,15 +9,15 @@ Coordinate & projection helpers:
 import utm
 from pyproj import Proj
 from geopy.distance import geodesic
-from typing import Dict, Any, Tuple
+from typing import Any
 import pyproj
 
-def wkt_to_json(wkt_string: str) -> Dict[str, Any]:
+def wkt_to_json(wkt_string: str) -> dict[str, Any]:
     """Parse a WKT projection string into a JSON dict."""
     proj = Proj(wkt_string)
     return proj.crs.to_json_dict()
 
-def get_utm_zone(latitude: float, longitude: float) -> Tuple[float, float, int, str]:
+def get_utm_zone(latitude: float, longitude: float) -> tuple[float, float, int, str]:
     """Return (easting, northing, zone_number, zone_letter) for given lat/lon."""
     return utm.from_latlon(latitude, longitude)
 
@@ -27,17 +27,17 @@ def calculate_bounding_box_area(min_lon: float, min_lat: float, max_lon: float, 
     area_km2, _ = geodesic.polygon_area_perimeter(polygon)
     return abs(area_km2) / 1e6
 
-def get_test_coord() -> Tuple[float, float, float, float]:
+def get_test_coord() -> tuple[float, float, float, float]:
     """Example bbox (test)."""
     return 33.034682, 21.279194, 32.465949, 22.919832
 
-def get_peurto_coord() -> Tuple[float, float, float, float]:
+def get_peurto_coord() -> tuple[float, float, float, float]:
     """Example Puerto Rico bbox."""
     return 18.518435, -67.244568, 17.918391, -65.788879
 
-def get_fort_myers() -> Tuple[float, float, float, float]:
+def get_fort_myers() -> tuple[float, float, float, float]:
     """Example Fort Myers bbox."""
     return 26.718905, -82.103920, 26.520302, -81.833752
 
-def turkey() -> Tuple[float, float, float, float]:
+def turkey() -> tuple[float, float, float, float]:
     return 38.256313, 35.385847, 42.448697, 36.448697
