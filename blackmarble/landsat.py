@@ -28,10 +28,6 @@ ogr.UseExceptions()
 import shapely.wkt
 import shapely.geometry
 
-# Read AWS credentials from environment
-aws_access_key: str | None = os.environ.get('AWS_ACCESS_KEY')
-aws_secret_key: str | None = os.environ.get('AWS_ACCESS_SECRET')
-
 class LandsatUtil:
     """Perform conversion between lat/lon and WRS-2 + download bands from USGS S3."""
     dir_cache: collections.OrderedDict[str, list[dict[str, str]]] = collections.OrderedDict()
@@ -106,14 +102,9 @@ class LandsatUtil:
         else:
             key = f"{directory}{scene}_SR_B{band}.TIF"
         # Use provided AWS keys or default credential chain
-        session: Session
-        if aws_access_key and aws_secret_key:
-            session = boto3.Session(
-                aws_access_key_id=aws_access_key,
-                aws_secret_access_key=aws_secret_key
-            )
-        else:
-            session = boto3.Session()
+        # Rely on boto3's default credential resolution (env vars, shared
+        # credentials file, IAM roles, etc.)
+        session: Session = boto3.Session()
         s3: S3Client = session.client('s3')
         # Ensure the directory for the output file exists
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
