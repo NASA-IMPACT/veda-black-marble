@@ -1,13 +1,12 @@
 import os
 import re
 import pytest
-from typing import Dict, Union
 
 class FilenameParseError(ValueError):
     """Custom exception for filename parsing errors."""
     pass
 
-def extract_params_from_filename(filename: str) -> Dict[str, Union[float, int]]:
+def extract_params_from_filename(filename: str) -> dict[str, float | int]:
     """
     Extracts bounding box coordinates and date from a Black Marble output filename.
 
@@ -20,7 +19,7 @@ def extract_params_from_filename(filename: str) -> Dict[str, Union[float, int]]:
         filename (str): The Black Marble output filename.
 
     Returns:
-        Dict[str, Union[float, int]]: A dictionary containing 'lat1', 'lon1',
+        dict[str, float | int]: A dictionary containing 'lat1', 'lon1',
                                       'year', 'month', 'day'. Note: The filename
                                       only encodes the *start* coordinates (lat1, lon1).
 
