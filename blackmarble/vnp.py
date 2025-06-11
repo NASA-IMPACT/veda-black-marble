@@ -87,7 +87,7 @@ class VNP46A2Util:
             session.headers.update({'Authorization': f'Bearer {earthdata_token}'})
         else:
             raise RuntimeError(
-                'Earthdata token not found. Set EARTH_DATA_TOKEN environment variable.'
+                'Earthdata token not found. Set EARTHDATA_TOKEN environment variable.'
             )
 
         print(f"Downloading VNP46A2 HDF5 to {target_filepath}...")

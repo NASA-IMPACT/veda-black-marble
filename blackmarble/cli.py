@@ -16,8 +16,8 @@ def run(
     day: int = typer.Option(..., "--day", help="Target day for data."),
     earthdata_token: str | None = typer.Option(
         None, "--earthdata-token", "-t",
-        help="NASA Earthdata login token. If not provided, reads from EARTH_DATA_TOKEN environment variable.",
-        envvar="EARTH_DATA_TOKEN" # Automatically read from env var if not provided
+        help="NASA Earthdata login token. If not provided, reads from EARTHDATA_TOKEN environment variable.",
+        envvar="EARTHDATA_TOKEN"  # Automatically read from env var if not provided
     ),
     output_dir: str = typer.Option(
         "outputs", "--output-dir", "-o",
@@ -38,7 +38,7 @@ def run(
     from blackmarble.pipeline import run_pipeline
 
     if not earthdata_token:
-        typer.echo("Error: Earthdata token is required. Provide via --earthdata-token or EARTH_DATA_TOKEN environment variable.", err=True)
+        typer.echo("Error: Earthdata token is required. Provide via --earthdata-token or EARTHDATA_TOKEN environment variable.", err=True)
         raise typer.Exit(code=1)
 
     typer.echo(f"Starting Black Marble pipeline for bounding box:")
