@@ -6,10 +6,12 @@ Raster I/O utilities:
   - save_geotiff_rgb: 3-band RGB GeoTIFF writer
   - scale_image: clamp & scale array to uint8
 """
+
 # Imports
 from osgeo import gdal
 import numpy as np
 from typing import Union
+
 
 def get_geo(filepath: str, band: int) -> tuple[np.ndarray, tuple[float, ...], str]:
     """
@@ -30,7 +32,7 @@ def get_geo(filepath: str, band: int) -> tuple[np.ndarray, tuple[float, ...], st
     """
     ds = gdal.Open(filepath, gdal.GA_ReadOnly)
     if ds is None:
-         raise RuntimeError(f"Could not open raster file: {filepath}")
+        raise RuntimeError(f"Could not open raster file: {filepath}")
     cols = ds.RasterXSize
     rows = ds.RasterYSize
     array = ds.GetRasterBand(band).ReadAsArray(0, 0, cols, rows)
@@ -40,7 +42,14 @@ def get_geo(filepath: str, band: int) -> tuple[np.ndarray, tuple[float, ...], st
     ds = None
     return array, geotransform, projection
 
-def save_image(array: np.ndarray, geotransform: tuple[float, ...], projection: str, gdal_type: int, out_path: str) -> None:
+
+def save_image(
+    array: np.ndarray,
+    geotransform: tuple[float, ...],
+    projection: str,
+    gdal_type: int,
+    out_path: str,
+) -> None:
     """
     Saves a NumPy array as a single-band GeoTIFF file.
 
@@ -54,7 +63,7 @@ def save_image(array: np.ndarray, geotransform: tuple[float, ...], projection: s
     Raises:
         RuntimeError: If the GDAL 'GTiff' driver is not found.
     """
-    driver = gdal.GetDriverByName('GTiff')
+    driver = gdal.GetDriverByName("GTiff")
     if driver is None:
         raise RuntimeError("GDAL driver 'GTiff' not found")
     rows, cols = array.shape
@@ -67,9 +76,17 @@ def save_image(array: np.ndarray, geotransform: tuple[float, ...], projection: s
     band.WriteArray(array, 0, 0)
     dst = None
 
-def save_geotiff_rgb(out_path: str, r: np.ndarray, g: np.ndarray, b: np.ndarray, projection: str, geotransform: tuple[float, ...]) -> None:
+
+def save_geotiff_rgb(
+    out_path: str,
+    r: np.ndarray,
+    g: np.ndarray,
+    b: np.ndarray,
+    projection: str,
+    geotransform: tuple[float, ...],
+) -> None:
     rows, cols = r.shape
-    driver = gdal.GetDriverByName('GTiff')
+    driver = gdal.GetDriverByName("GTiff")
     dst = driver.Create(out_path, cols, rows, 3, gdal.GDT_Byte)
     dst.SetProjection(projection)
     dst.SetGeoTransform(geotransform)
@@ -81,7 +98,10 @@ def save_geotiff_rgb(out_path: str, r: np.ndarray, g: np.ndarray, b: np.ndarray,
     dst.GetRasterBand(3).WriteArray(b)
     dst = None
 
-def save_geotiff_single(out_path: str, array: np.ndarray, projection: str, geotransform: tuple[float, ...]) -> None:
+
+def save_geotiff_single(
+    out_path: str, array: np.ndarray, projection: str, geotransform: tuple[float, ...]
+) -> None:
     """
     Saves a NumPy array as a single-band GeoTIFF file.
 
@@ -95,10 +115,10 @@ def save_geotiff_single(out_path: str, array: np.ndarray, projection: str, geotr
         RuntimeError: If the GDAL 'GTiff' driver is not found.
     """
     rows, cols = array.shape
-    driver = gdal.GetDriverByName('GTiff')
+    driver = gdal.GetDriverByName("GTiff")
     if driver is None:
         raise RuntimeError("GDAL driver 'GTiff' not found")
-    
+
     # Determine data type based on array dtype
     if array.dtype == np.float32 or array.dtype == np.float64:
         gdal_dtype = gdal.GDT_Float32
@@ -110,7 +130,7 @@ def save_geotiff_single(out_path: str, array: np.ndarray, projection: str, geotr
         gdal_dtype = gdal.GDT_UInt16
         nodata_value = 0
         array_copy = array
-    
+
     dst = driver.Create(out_path, cols, rows, 1, gdal_dtype)
     dst.SetProjection(projection)
     dst.SetGeoTransform(geotransform)
@@ -119,7 +139,10 @@ def save_geotiff_single(out_path: str, array: np.ndarray, projection: str, geotr
     band.WriteArray(array_copy)
     dst = None
 
-def scale_image(input_array: np.ndarray, min_value: Union[int, float], max_value: Union[int, float]) -> np.ndarray:
+
+def scale_image(
+    input_array: np.ndarray, min_value: Union[int, float], max_value: Union[int, float]
+) -> np.ndarray:
     """
     Clamps the values of a NumPy array to a specified range [min_value, max_value]
     and then linearly scales the result to an unsigned 8-bit integer range [0, 255].
@@ -141,7 +164,7 @@ def scale_image(input_array: np.ndarray, min_value: Union[int, float], max_value
     arr_max = arr.max()
     if arr_max == arr_min:
         # Return an array of zeros or a constant value, depending on desired behavior
-        return np.zeros_like(arr, dtype='uint8')
+        return np.zeros_like(arr, dtype="uint8")
 
-    scaled = ((arr - arr_min) * (255.0 / (arr_max - arr_min))).astype('uint8')
+    scaled = ((arr - arr_min) * (255.0 / (arr_max - arr_min))).astype("uint8")
     return scaled
