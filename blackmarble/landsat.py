@@ -117,8 +117,20 @@ def download_tiles_for_band(band: Union[int, str], year: int, month: int, day: i
                             ignore_missing: bool = False) -> tuple[list[str], list[str], list[str], list[str]]:
     """Download source, QA_PIXEL, QA_RADSAT, QA_AEROSOL for all overlapping tiles."""
     landsat = LandsatUtil()
-    wrs1: dict[str, int] = landsat.get_wrs(lat1, lon1)[0]
-    wrs2: dict[str, int] = landsat.get_wrs(lat2, lon2)[0]
+    
+    # Get WRS path/row with validation
+    wrs1_results = landsat.get_wrs(lat1, lon1)
+    wrs2_results = landsat.get_wrs(lat2, lon2)
+    
+    if not wrs1_results:
+        raise RuntimeError(f"No WRS path/row found for coordinates: ({lat1}, {lon1}). "
+                          "This location may be over water or outside Landsat coverage.")
+    if not wrs2_results:
+        raise RuntimeError(f"No WRS path/row found for coordinates: ({lat2}, {lon2}). "
+                          "This location may be over water or outside Landsat coverage.")
+    
+    wrs1: dict[str, int] = wrs1_results[0]
+    wrs2: dict[str, int] = wrs2_results[0]
     paths = range(min(wrs1['path'], wrs2['path']), max(wrs1['path'], wrs2['path'])+1)
     rows = range(min(wrs1['row'], wrs2['row']), max(wrs1['row'], wrs2['row'])+1)
     downloads: list[str] = []

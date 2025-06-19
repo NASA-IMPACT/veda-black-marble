@@ -52,6 +52,37 @@ class VNP46A2Util:
         v = int((( -lat + 90.0) / 180.0) * 18)
         h = int((( lon + 180.0) / 360.0) * 36)
         return v, h
+    
+    def get_tiles_for_bbox(self, lat1: float, lon1: float, lat2: float, lon2: float) -> list[tuple[int, int]]:
+        """Return all (vertical, horizontal) tile pairs that intersect the bounding box.
+        
+        Args:
+            lat1, lon1: First corner coordinates
+            lat2, lon2: Second corner coordinates
+            
+        Returns:
+            List of (vertical, horizontal) tile index tuples
+        """
+        # Get min/max bounds
+        min_lat = min(lat1, lat2)
+        max_lat = max(lat1, lat2)
+        min_lon = min(lon1, lon2)
+        max_lon = max(lon1, lon2)
+        
+        # Get tile indices for all corners
+        # Each tile covers 10 degrees, so we need all tiles that intersect
+        v1, h1 = self.coordinates_to_tile_id(max_lat, min_lon)  # NW corner
+        v2, h2 = self.coordinates_to_tile_id(min_lat, max_lon)  # SE corner
+        
+        # Generate all tiles in the rectangular region
+        tiles = []
+        for v in range(min(v1, v2), max(v1, v2) + 1):
+            for h in range(min(h1, h2), max(h1, h2) + 1):
+                # Handle wraparound for horizontal tiles (0-35)
+                h_wrapped = h % 36
+                tiles.append((v, h_wrapped))
+        
+        return tiles
 
     def download_h5(self, earthdata_token: str, year: int, month: int, day: int,
                     vertical: int, horizontal: int, target_filepath: str) -> None:

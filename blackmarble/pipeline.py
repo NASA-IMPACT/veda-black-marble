@@ -88,10 +88,16 @@ def run_pipeline(
     os.makedirs(final_dir, exist_ok=True)
 
     # Compute UTM coords
-    e1: float; n1: float; _: int; __: str
-    e1, n1, _, _ = get_utm_zone(lat1, lon1)
-    e2: float; n2: float
-    e2, n2, _, _ = get_utm_zone(lat2, lon2)
+    e1: float; n1: float; zone1: int; letter1: str
+    e1, n1, zone1, letter1 = get_utm_zone(lat1, lon1)
+    e2: float; n2: float; zone2: int; letter2: str
+    e2, n2, zone2, letter2 = get_utm_zone(lat2, lon2)
+    
+    # Warn if bounding box spans UTM zones
+    if zone1 != zone2 or letter1 != letter2:
+        print(f"Warning: Bounding box spans UTM zones ({zone1}{letter1} to {zone2}{letter2})")
+        print("This may cause projection issues at zone boundaries.")
+        # Continue processing - the current implementation can handle this, but results may be less accurate
 
     # 1) Landsat bands
     print("Downloading and processing Landsat bands...")
@@ -193,20 +199,59 @@ def run_pipeline(
     # 6) Download & subset Nightlights (VIIRS)
     print("Downloading nightlights (VIIRS)...")
     vnp = VNP46A2Util()
-    vert: int; horz: int
-    vert, horz = vnp.coordinates_to_tile_id(lat1, lon1)
-    download_file: str = os.path.join(temp_dir, 'VNP46A2.h5')
-    vnp.download_h5(earthdata_token, year, month, day, vert, horz, target_filepath=download_file)
     
-    # Extract all three layers from VNP46A2
-    ntl_temp_tif = os.path.join(temp_dir, 'ntl_raw.tif')
-    vnp.convert_hdf_to_tiff(download_file, ntl_temp_tif, layer=0)  # DNB_At_Sensor_Radiance_500m
+    # Get all tiles that intersect the bounding box
+    tiles = vnp.get_tiles_for_bbox(lat1, lon1, lat2, lon2)
+    print(f"Found {len(tiles)} VIIRS tiles to download: {tiles}")
     
-    lunar_temp_tif = os.path.join(temp_dir, 'lunar_irradiance.tif')
-    vnp.convert_hdf_to_tiff(download_file, lunar_temp_tif, layer=1)  # Lunar_Irradiance
+    # Download and process each tile
+    ntl_tiles: List[str] = []
+    lunar_tiles: List[str] = []
+    quality_tiles: List[str] = []
     
-    quality_temp_tif = os.path.join(temp_dir, 'mandatory_quality_flag.tif')
-    vnp.convert_hdf_to_tiff(download_file, quality_temp_tif, layer=3)  # Mandatory_Quality_Flag
+    for i, (vert, horz) in enumerate(tiles):
+        print(f"Processing VIIRS tile {i+1}/{len(tiles)}: h{horz:02d}v{vert:02d}")
+        download_file: str = os.path.join(temp_dir, f'VNP46A2_h{horz:02d}v{vert:02d}.h5')
+        
+        try:
+            vnp.download_h5(earthdata_token, year, month, day, vert, horz, target_filepath=download_file)
+            
+            # Extract all three layers from VNP46A2
+            ntl_tile = os.path.join(temp_dir, f'ntl_raw_h{horz:02d}v{vert:02d}.tif')
+            vnp.convert_hdf_to_tiff(download_file, ntl_tile, layer=0)  # DNB_At_Sensor_Radiance_500m
+            ntl_tiles.append(ntl_tile)
+            
+            lunar_tile = os.path.join(temp_dir, f'lunar_irradiance_h{horz:02d}v{vert:02d}.tif')
+            vnp.convert_hdf_to_tiff(download_file, lunar_tile, layer=1)  # Lunar_Irradiance
+            lunar_tiles.append(lunar_tile)
+            
+            quality_tile = os.path.join(temp_dir, f'mandatory_quality_flag_h{horz:02d}v{vert:02d}.tif')
+            vnp.convert_hdf_to_tiff(download_file, quality_tile, layer=3)  # Mandatory_Quality_Flag
+            quality_tiles.append(quality_tile)
+            
+        except RuntimeError as e:
+            print(f"Warning: Failed to download tile h{horz:02d}v{vert:02d}: {e}")
+            # Continue with other tiles
+    
+    if not ntl_tiles:
+        raise RuntimeError("No VIIRS tiles could be downloaded for the specified area and date")
+    
+    # Mosaic tiles if multiple, or use single tile
+    if len(ntl_tiles) > 1:
+        print("Mosaicing VIIRS tiles...")
+        ntl_temp_tif = os.path.join(temp_dir, 'ntl_raw_mosaic.tif')
+        gdal.Warp(ntl_temp_tif, ntl_tiles, format="GTiff", resampleAlg='bilinear')
+        
+        lunar_temp_tif = os.path.join(temp_dir, 'lunar_irradiance_mosaic.tif')
+        gdal.Warp(lunar_temp_tif, lunar_tiles, format="GTiff", resampleAlg='bilinear')
+        
+        quality_temp_tif = os.path.join(temp_dir, 'mandatory_quality_flag_mosaic.tif')
+        gdal.Warp(quality_temp_tif, quality_tiles, format="GTiff", resampleAlg='nearest')  # Use nearest for quality flags
+    else:
+        # Single tile, use directly
+        ntl_temp_tif = ntl_tiles[0]
+        lunar_temp_tif = lunar_tiles[0]
+        quality_temp_tif = quality_tiles[0]
     
     # subset to area + scale
     minX: float; maxX: float
@@ -380,12 +425,15 @@ def main() -> None:
     final_bucket: Optional[str] = os.environ.get('UPLOAD_BUCKET')
     final_key: Optional[str] = os.environ.get('UPLOAD_FILE')
 
-    # AWS web identity (optional) - Handled implicitly by boto3 if configured
-    # if 'AWS_WEB_IDENTITY_TOKEN_FILE' in os.environ and 'AWS_WEB_IDENTITY_TOKEN' in os.environ:
-    #     token_file: str = os.environ['AWS_WEB_IDENTITY_TOKEN_FILE']
-    #     token: str = os.environ['AWS_WEB_IDENTITY_TOKEN']
-    #     with open(token_file, 'w+') as f:
-    #         f.write(token)
+    # AWS web identity (optional) - Write token to file if both env vars are set
+    # This supports AWS IAM roles for service accounts (IRSA) in Kubernetes environments
+    if 'AWS_WEB_IDENTITY_TOKEN_FILE' in os.environ and 'AWS_WEB_IDENTITY_TOKEN' in os.environ:
+        token_file: str = os.environ['AWS_WEB_IDENTITY_TOKEN_FILE']
+        token: str = os.environ['AWS_WEB_IDENTITY_TOKEN']
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(token_file), exist_ok=True)
+        with open(token_file, 'w+') as f:
+            f.write(token)
 
     # Read required parameters from environment
     try:
