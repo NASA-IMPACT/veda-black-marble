@@ -197,16 +197,33 @@ def run_pipeline(
     vert, horz = vnp.coordinates_to_tile_id(lat1, lon1)
     download_file: str = os.path.join(temp_dir, 'VNP46A2.h5')
     vnp.download_h5(earthdata_token, year, month, day, vert, horz, target_filepath=download_file)
+    
+    # Extract all three layers from VNP46A2
     ntl_temp_tif = os.path.join(temp_dir, 'ntl_raw.tif')
-    vnp.convert_hdf_to_tiff(download_file, ntl_temp_tif, layer=0)
+    vnp.convert_hdf_to_tiff(download_file, ntl_temp_tif, layer=0)  # DNB_At_Sensor_Radiance_500m
+    
+    lunar_temp_tif = os.path.join(temp_dir, 'lunar_irradiance.tif')
+    vnp.convert_hdf_to_tiff(download_file, lunar_temp_tif, layer=1)  # Lunar_Irradiance
+    
+    quality_temp_tif = os.path.join(temp_dir, 'mandatory_quality_flag.tif')
+    vnp.convert_hdf_to_tiff(download_file, quality_temp_tif, layer=3)  # Mandatory_Quality_Flag
+    
     # subset to area + scale
     minX: float; maxX: float
     minX, maxX = sorted([lon1, lon2])
     minY: float; maxY: float
     minY, maxY = sorted([lat1, lat2])
     scale: float = 0.00011111111
+    
+    # Subset all three layers
     ntl_subset_path = os.path.join(output_dir, 'ntl.tif')
     subset_raster_normal(ntl_temp_tif, ntl_subset_path, minX, maxY, maxX, minY, scale, temp_dir)
+    
+    lunar_subset_path = os.path.join(output_dir, 'lunar_irradiance.tif')
+    subset_raster_normal(lunar_temp_tif, lunar_subset_path, minX, maxY, maxX, minY, scale, temp_dir)
+    
+    quality_subset_path = os.path.join(output_dir, 'mandatory_quality_flag.tif')
+    subset_raster_normal(quality_temp_tif, quality_subset_path, minX, maxY, maxX, minY, scale, temp_dir)
 
     # 7) Rasterize OSM roads
     print("Rasterizing OpenStreetMap roads...")
@@ -222,11 +239,12 @@ def run_pipeline(
     desired_res: Tuple[float, float] = (0.0001, -0.0001)
     inputs: List[str] = [
         b3_wgs84_path, b4_wgs84_path, b5_wgs84_path,
-        ntl_subset_path, osm_path
+        ntl_subset_path, lunar_subset_path, quality_subset_path, osm_path
     ]
     outputs_final: List[str] = [
         os.path.join(final_dir, 'B3.TIFF'), os.path.join(final_dir, 'B4.TIFF'),
         os.path.join(final_dir, 'B5.TIFF'), os.path.join(final_dir, 'ntl.tif'),
+        os.path.join(final_dir, 'lunar_irradiance.tif'), os.path.join(final_dir, 'mandatory_quality_flag.tif'),
         os.path.join(final_dir, 'osm.tif')
     ]
     for inp, outp in zip(inputs, outputs_final):
@@ -247,16 +265,24 @@ def run_pipeline(
     b4_px, _, _ = get_geo(outputs_final[1], 1)
     b5_px: np.ndarray
     b5_px, _, _ = get_geo(outputs_final[2], 1)
-    osm_px: np.ndarray
-    osm_px, _, _ = get_geo(outputs_final[4], 1)
     ntl_px: np.ndarray
     ntl_px, _, _ = get_geo(outputs_final[3], 1)
-    stack: np.ndarray = fill_gaps([b3_px, b4_px, b5_px, osm_px, ntl_px])
+    lunar_px: np.ndarray
+    lunar_px, _, _ = get_geo(outputs_final[4], 1)
+    quality_px: np.ndarray
+    quality_px, _, _ = get_geo(outputs_final[5], 1)
+    osm_px: np.ndarray
+    osm_px, _, _ = get_geo(outputs_final[6], 1)
+    
+    # Apply fill_gaps to ensure all arrays have same shape
+    stack: np.ndarray = fill_gaps([b3_px, b4_px, b5_px, ntl_px, lunar_px, quality_px, osm_px])
     b3_px = rescale_bands(stack[0])
     b4_px = rescale_bands(stack[1])
     b5_px = rescale_bands(stack[2])
-    osm_px = stack[3]
-    ntl_px = stack[4]
+    ntl_px = stack[3]
+    lunar_px = stack[4]
+    quality_px = stack[5]
+    osm_px = stack[6]
 
     # 10) Compute indices
     print("Computing NDVI, NDWI, NDUI...")
@@ -265,10 +291,26 @@ def run_pipeline(
     ndwi: np.ndarray = (b3_px - b5_px) / (b3_px + b5_px + 1e-6)
     ndwi = np.clip(ndwi, -1.0, 1.0)
 
-    # NTL scaling
-    img_ntl: np.ndarray = np.where(ntl_px > 65530, 0.0, ntl_px).astype(float) / 10.0
-    img_ntl = np.where(img_ntl > NTL_CEILING, NTL_CEILING, img_ntl)
-    img_ntl = np.where(img_ntl < NTL_FLOOR, 0.0, img_ntl)
+    # NTL processing with lunar irradiance correction and quality filtering
+    # Handle fill values (>65530 becomes 0)
+    img_ntl: np.ndarray = np.where(ntl_px > 65530, 0.0, ntl_px).astype(float)
+    img_lunar: np.ndarray = np.where(lunar_px > 65530, 0.0, lunar_px).astype(float)
+    
+    # Apply quality mask (keep pixels with flag == 0 (high quality) or flag == 2 (twilight))
+    # Fix the original boolean logic error
+    quality_mask: np.ndarray = ((quality_px == 0) | (quality_px == 2)).astype(float)
+    
+    # Apply lunar irradiance correction properly to avoid false negatives
+    # Subtract lunar irradiance first, then apply quality mask
+    adjusted_ntl: np.ndarray = (img_ntl - img_lunar) * quality_mask
+    
+    # Convert units (nW/cm²/sr) and apply scaling
+    adjusted_ntl = adjusted_ntl / 10.0
+    adjusted_ntl = np.where(adjusted_ntl > NTL_CEILING, NTL_CEILING, adjusted_ntl)
+    adjusted_ntl = np.where(adjusted_ntl < NTL_FLOOR, 0.0, adjusted_ntl)
+    
+    # Use adjusted NTL for NDUI calculation
+    img_ntl = adjusted_ntl / NTL_CEILING  # Normalize to 0-1
     img_ndvi: np.ndarray = ndvi
     img_ndwi: np.ndarray = ndwi
     img_road: np.ndarray = osm_px
@@ -276,13 +318,20 @@ def run_pipeline(
     # NDUI
     ndui: np.ndarray = (img_ntl - img_ndvi) / (img_ntl + img_ndvi + 1e-5)
     ndui = np.clip(ndui, -1.0, 1.0)
-    ndui = np.abs((ndui + 1.0)) / 2.0
+    
+    # Apply water mask (Task 1.3) - set water pixels to -1
+    ndui = np.where(img_ndwi >= 0.0, -1.0, ndui)
+    
+    # Transform to 0-1 range (simplified without unnecessary abs)
+    ndui = (ndui + 1.0) / 2.0
     ndui = np.where(ndui < NDUI_FLOOR, 0.0, ndui)
-    # road enhancement
+    
+    # Road enhancement (fix road value 6 reference)
     ndui = np.where((img_road == 1) | (img_road == 4), ndui * 1.3, ndui)
-    ndui = np.where((img_road == 2) | (img_road == 3) |
-                     (img_road == 5) | (img_road == 6), ndui * 1.1, ndui)
-    ndui = ndui / 1.3
+    ndui = np.where((img_road == 2) | (img_road == 3) | (img_road == 5), ndui * 1.1, ndui)
+    
+    # Task 1.2 Fix: Remove the division by 1.3 that affects all pixels
+    # ndui = ndui / 1.3  # REMOVED - This was the normalization bug
 
     # 11) Colorize & create COG
     print("Colorizing and creating cloud-optimized GeoTIFF...")
