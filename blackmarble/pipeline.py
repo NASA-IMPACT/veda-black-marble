@@ -55,7 +55,14 @@ def run_pipeline(
     earthdata_token: str,
     output_dir: str = "outputs",
     upload_bucket: Optional[str] = None,
-    upload_key: Optional[str] = None
+    upload_key: Optional[str] = None,
+    # New optional configuration parameters
+    composite_months: int = 12,
+    ntl_resolution: float = 0.00011111111,
+    final_resolution: float = 0.0001,
+    osm_buffer: float = 0.00005,
+    display_min: float = 0.3,
+    display_max: float = 0.8
 ) -> str:
     """
     Runs the Black Marble processing pipeline for a given area and date.
@@ -72,6 +79,12 @@ def run_pipeline(
         output_dir (str): Base directory for all outputs and temporary files. Defaults to "outputs".
         upload_bucket (Optional[str]): S3 bucket name for final upload. Defaults to None.
         upload_key (Optional[str]): S3 key (path/filename) for final upload. Defaults to None.
+        composite_months (int): Number of months to look back for composite imagery. Defaults to 12.
+        ntl_resolution (float): Resolution for VIIRS nighttime lights resampling in degrees. Defaults to 0.00011111111.
+        final_resolution (float): Final output resolution in degrees. Defaults to 0.0001.
+        osm_buffer (float): Buffer distance for OSM road rasterization in degrees. Defaults to 0.00005.
+        display_min (float): Minimum value for display scaling (0-1). Defaults to 0.3.
+        display_max (float): Maximum value for display scaling (0-1). Defaults to 0.8.
 
     Returns:
         str: The path to the final generated Cloud-Optimized GeoTIFF.
@@ -102,11 +115,11 @@ def run_pipeline(
     # 1) Landsat bands
     print("Downloading and processing Landsat bands...")
     b3_out: List[str]; b3_p: List[str]; b3_r: List[str]; b3_a: List[str]
-    b3_out, b3_p, b3_r, b3_a = process_band_data(3, year, month, day, lat1, lon1, lat2, lon2, os.path.join(output_dir, 'B3_Merged_'), temp_dir)
+    b3_out, b3_p, b3_r, b3_a = process_band_data(3, year, month, day, lat1, lon1, lat2, lon2, os.path.join(output_dir, 'B3_Merged_'), temp_dir, composite_months)
     b4_out: List[str]; b4_p: List[str]; b4_r: List[str]; b4_a: List[str]
-    b4_out, b4_p, b4_r, b4_a = process_band_data(4, year, month, day, lat1, lon1, lat2, lon2, os.path.join(output_dir, 'B4_Merged_'), temp_dir)
+    b4_out, b4_p, b4_r, b4_a = process_band_data(4, year, month, day, lat1, lon1, lat2, lon2, os.path.join(output_dir, 'B4_Merged_'), temp_dir, composite_months)
     b5_out: List[str]; b5_p: List[str]; b5_r: List[str]; b5_a: List[str]
-    b5_out, b5_p, b5_r, b5_a = process_band_data(5, year, month, day, lat1, lon1, lat2, lon2, os.path.join(output_dir, 'B5_Merged_'), temp_dir)
+    b5_out, b5_p, b5_r, b5_a = process_band_data(5, year, month, day, lat1, lon1, lat2, lon2, os.path.join(output_dir, 'B5_Merged_'), temp_dir, composite_months)
 
     # 2) Crop to UTM bbox
     print("Cropping Landsat bands to UTM bounding box...")
@@ -264,7 +277,7 @@ def run_pipeline(
     minX, maxX = sorted([lon1, lon2])
     minY: float; maxY: float
     minY, maxY = sorted([lat1, lat2])
-    scale: float = 0.00011111111
+    scale: float = ntl_resolution
     
     # Subset all three layers
     ntl_subset_path = os.path.join(output_dir, 'ntl.tif')
@@ -283,11 +296,12 @@ def run_pipeline(
     osm.create_road_raster(lat1, lon1, lat2, lon2,
                            reference_raster=ntl_subset_path,
                            output_path=osm_path,
-                           output_dir=output_dir)
+                           output_dir=output_dir,
+                           path_thickness=osm_buffer)
 
     # 8) Resample all to final resolution
     print("Resampling to final resolution...")
-    desired_res: Tuple[float, float] = (0.0001, -0.0001)
+    desired_res: Tuple[float, float] = (final_resolution, -final_resolution)
     inputs: List[str] = [
         b3_wgs84_path, b4_wgs84_path, b5_wgs84_path,
         ntl_subset_path, lunar_subset_path, quality_subset_path, osm_path
@@ -393,7 +407,7 @@ def run_pipeline(
     b: np.ndarray = np.load(os.path.join(data_dir, 'inferno_b.npy'))
     r[0] = 0; g[0] = 0; b[0] = 0
     # scale
-    img_scaled: np.ndarray = scale_image(ndui, 0.3, 0.8)
+    img_scaled: np.ndarray = scale_image(ndui, display_min, display_max)
     rr: np.ndarray = r[img_scaled]; gg: np.ndarray = g[img_scaled]; bb: np.ndarray = b[img_scaled]
 
     # build 3-band array

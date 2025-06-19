@@ -205,10 +205,11 @@ def download_tiles_for_band_with_composites(band: Union[int, str], year: int, mo
 
 def process_band_data(band: Union[int, str], year: int, month: int, day: int,
                       lat1: float, lon1: float, lat2: float, lon2: float,
-                      output_prefix: str, temp_dir: str) -> tuple[list[str], list[str], list[str], list[str]]: # Add temp_dir
+                      output_prefix: str, temp_dir: str,
+                      composite_months: int = 12) -> tuple[list[str], list[str], list[str], list[str]]:
     """Download, warp, and merge source + QA into multi-scene TIFFs."""
     composites: list[tuple[list[str], list[str], list[str], list[str]]] = download_tiles_for_band_with_composites(
-        band, year, month, day, lat1, lon1, lat2, lon2, temp_dir) # Pass temp_dir
+        band, year, month, day, lat1, lon1, lat2, lon2, temp_dir, composite_months)
     outputs: list[str] = []
     pixel_tifs: list[str] = []
     radsat_tifs: list[str] = []
