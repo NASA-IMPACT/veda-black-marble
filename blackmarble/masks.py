@@ -9,7 +9,15 @@ Quality‐masking utilities:
 import numpy as np
 
 def check_values(values_to_check, array):
-    """Return mask (float) of pixels not matching any of values_to_check."""
+    """Return mask (float) where 1.0 = pixel should be kept, 0.0 = pixel should be masked.
+    
+    Args:
+        values_to_check: Values that should be MASKED OUT (return 0.0)
+        array: The array to check
+    
+    Returns:
+        Mask where pixels NOT in values_to_check get 1.0 (keep), pixels IN values_to_check get 0.0 (mask)
+    """
     return (~np.isin(array, values_to_check)).astype(float)
 
 def mark_cloud2(p_px):
@@ -18,10 +26,14 @@ def mark_cloud2(p_px):
     return check_values(cloud_px_values, p_px)
 
 def mark_cloud(p_px):
-    """Mask cloud pixels (keep only clear land/water codes)."""
-    # TODO: Make values configurable?
-    valid_values = list(range(1, 21823)) + list(range(21825, 21951)) + list(range(21953, 65535))  # Example; consider moving to config
-    return check_values(valid_values, p_px)
+    """Mask cloud pixels (keep only clear land/water codes).
+    
+    Keeps pixels with values 21824 (clear land) and 21952 (clear water).
+    All other values are masked out (clouds, shadows, etc.).
+    """
+    # Values to mask out (everything except 21824 and 21952)
+    cloud_values = list(range(1, 21824)) + list(range(21825, 21952)) + list(range(21953, 65535))
+    return check_values(cloud_values, p_px)
 
 def mark_aerosol2(a_px):
     """Mask aerosol pixels using extended QA set."""

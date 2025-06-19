@@ -39,7 +39,25 @@ def fill_gaps(pxs: list[np.ndarray]) -> np.ndarray:
     return stacked
 
 def rescale_bands(band_data: np.ndarray) -> np.ndarray:
-    """Threshold and scale band data to reflectance range."""
-    arr: np.ndarray = np.where(band_data < 7273, 0, band_data)
-    arr = np.where(arr > 43636, 0, arr)
-    return arr * 0.0000275 - 0.2
+    """Threshold and scale band data to reflectance range.
+    
+    Applies Landsat Collection 2 Level-2 scaling to convert from
+    scaled DN values to surface reflectance.
+    
+    Args:
+        band_data: Raw band data from Landsat
+        
+    Returns:
+        Surface reflectance values (0 for invalid pixels)
+    """
+    # Apply scaling formula first to get reflectance values
+    scaled = band_data * 0.0000275 - 0.2
+    
+    # Mark out-of-range pixels as invalid (0)
+    # Valid range for scaled DN is 7273-43636, which corresponds to 0-1 reflectance
+    scaled = np.where((band_data < 7273) | (band_data > 43636), 0, scaled)
+    
+    # Ensure no negative reflectance values
+    scaled = np.where(scaled < 0, 0, scaled)
+    
+    return scaled

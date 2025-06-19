@@ -161,10 +161,10 @@ def run_pipeline(
         b4_pxs.append(b4_px * c_mask * a_mask * b4_r_px)
         b5_pxs.append(b5_px * c_mask * a_mask * b5_r_px)
 
-    # Median composite
-    stack3: np.ndarray = np.stack(b3_pxs)
-    stack4: np.ndarray = np.stack(b4_pxs)
-    stack5: np.ndarray = np.stack(b5_pxs)
+    # Median composite - use fill_gaps to handle different array shapes
+    stack3: np.ndarray = fill_gaps(b3_pxs)
+    stack4: np.ndarray = fill_gaps(b4_pxs)
+    stack5: np.ndarray = fill_gaps(b5_pxs)
     b3_med: np.ndarray = np.nanmedian(np.where(stack3 == 0, np.nan, stack3), axis=0)
     b4_med: np.ndarray = np.nanmedian(np.where(stack4 == 0, np.nan, stack4), axis=0)
     b5_med: np.ndarray = np.nanmedian(np.where(stack5 == 0, np.nan, stack5), axis=0)
@@ -316,7 +316,7 @@ def run_pipeline(
     img_road: np.ndarray = osm_px
 
     # NDUI
-    ndui: np.ndarray = (img_ntl - img_ndvi) / (img_ntl + img_ndvi + 1e-5)
+    ndui: np.ndarray = (img_ntl - img_ndvi) / (img_ntl + img_ndvi + 1e-6)
     ndui = np.clip(ndui, -1.0, 1.0)
     
     # Apply water mask (Task 1.3) - set water pixels to -1
@@ -326,7 +326,7 @@ def run_pipeline(
     ndui = (ndui + 1.0) / 2.0
     ndui = np.where(ndui < NDUI_FLOOR, 0.0, ndui)
     
-    # Road enhancement (fix road value 6 reference)
+    # Road enhancement (OSM produces values 1-5 only)
     ndui = np.where((img_road == 1) | (img_road == 4), ndui * 1.3, ndui)
     ndui = np.where((img_road == 2) | (img_road == 3) | (img_road == 5), ndui * 1.1, ndui)
     
