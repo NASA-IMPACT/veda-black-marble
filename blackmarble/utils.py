@@ -30,12 +30,16 @@ def removeFiles(folder: str) -> None:
             print(f"Error removing file {f}: {e}")
 
 def fill_gaps(pxs: list[np.ndarray]) -> np.ndarray:
-    """Stack arrays of differing shapes by zero-padding to the max shape."""
+    """Stack arrays of differing shapes by padding with NaN to the max shape.
+    
+    This preserves the distinction between valid zeros and missing data.
+    """
     max_shape = np.max([m.shape for m in pxs], axis=0)
-    stacked: np.ndarray = np.zeros((len(pxs), *max_shape), dtype=np.float64)
+    # Initialize with NaN instead of zeros
+    stacked: np.ndarray = np.full((len(pxs), *max_shape), np.nan, dtype=np.float32)
     for idx, m in enumerate(pxs):
         h, w = m.shape
-        stacked[idx, :h, :w] = m
+        stacked[idx, :h, :w] = m.astype(np.float32)
     return stacked
 
 def rescale_bands(band_data: np.ndarray) -> np.ndarray:
@@ -48,16 +52,16 @@ def rescale_bands(band_data: np.ndarray) -> np.ndarray:
         band_data: Raw band data from Landsat
         
     Returns:
-        Surface reflectance values (0 for invalid pixels)
+        Surface reflectance values (NaN for invalid pixels)
     """
     # Apply scaling formula first to get reflectance values
     scaled = band_data * 0.0000275 - 0.2
     
-    # Mark out-of-range pixels as invalid (0)
+    # Mark out-of-range pixels as invalid (NaN)
     # Valid range for scaled DN is 7273-43636, which corresponds to 0-1 reflectance
-    scaled = np.where((band_data < 7273) | (band_data > 43636), 0, scaled)
+    scaled = np.where((band_data < 7273) | (band_data > 43636), np.nan, scaled)
     
     # Ensure no negative reflectance values
-    scaled = np.where(scaled < 0, 0, scaled)
+    scaled = np.where(scaled < 0, np.nan, scaled)
     
     return scaled

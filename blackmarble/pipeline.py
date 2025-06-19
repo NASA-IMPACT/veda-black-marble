@@ -163,17 +163,23 @@ def run_pipeline(
         b4_px, _, _ = get_geo(b4_final[i], 1)
         b5_px: np.ndarray
         b5_px, _, _ = get_geo(b5_final[i], 1)
-        b3_pxs.append(b3_px * c_mask * a_mask * b3_r_px)
-        b4_pxs.append(b4_px * c_mask * a_mask * b4_r_px)
-        b5_pxs.append(b5_px * c_mask * a_mask * b5_r_px)
+        # Use NaN for masked pixels instead of 0 to distinguish from valid zeros
+        combined_mask = c_mask * a_mask
+        b3_masked = np.where(combined_mask * b3_r_px == 0, np.nan, b3_px)
+        b4_masked = np.where(combined_mask * b4_r_px == 0, np.nan, b4_px)
+        b5_masked = np.where(combined_mask * b5_r_px == 0, np.nan, b5_px)
+        b3_pxs.append(b3_masked)
+        b4_pxs.append(b4_masked)
+        b5_pxs.append(b5_masked)
 
     # Median composite - use fill_gaps to handle different array shapes
     stack3: np.ndarray = fill_gaps(b3_pxs)
     stack4: np.ndarray = fill_gaps(b4_pxs)
     stack5: np.ndarray = fill_gaps(b5_pxs)
-    b3_med: np.ndarray = np.nanmedian(np.where(stack3 == 0, np.nan, stack3), axis=0)
-    b4_med: np.ndarray = np.nanmedian(np.where(stack4 == 0, np.nan, stack4), axis=0)
-    b5_med: np.ndarray = np.nanmedian(np.where(stack5 == 0, np.nan, stack5), axis=0)
+    # Already using NaN for invalid pixels, so just use nanmedian directly
+    b3_med: np.ndarray = np.nanmedian(stack3, axis=0)
+    b4_med: np.ndarray = np.nanmedian(stack4, axis=0)
+    b5_med: np.ndarray = np.nanmedian(stack5, axis=0)
 
     # 4) Save merged bands
     print("Saving merged Landsat bands...")
@@ -338,12 +344,12 @@ def run_pipeline(
 
     # NTL processing with lunar irradiance correction and quality filtering
     # Handle fill values (>65530 becomes 0)
-    img_ntl: np.ndarray = np.where(ntl_px > 65530, 0.0, ntl_px).astype(float)
-    img_lunar: np.ndarray = np.where(lunar_px > 65530, 0.0, lunar_px).astype(float)
+    img_ntl: np.ndarray = np.where(ntl_px > 65530, 0.0, ntl_px).astype(np.float32)
+    img_lunar: np.ndarray = np.where(lunar_px > 65530, 0.0, lunar_px).astype(np.float32)
     
     # Apply quality mask (keep pixels with flag == 0 (high quality) or flag == 2 (twilight))
     # Fix the original boolean logic error
-    quality_mask: np.ndarray = ((quality_px == 0) | (quality_px == 2)).astype(float)
+    quality_mask: np.ndarray = ((quality_px == 0) | (quality_px == 2)).astype(np.float32)
     
     # Apply lunar irradiance correction properly to avoid false negatives
     # Subtract lunar irradiance first, then apply quality mask

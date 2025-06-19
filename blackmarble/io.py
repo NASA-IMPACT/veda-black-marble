@@ -83,11 +83,11 @@ def save_geotiff_rgb(out_path: str, r: np.ndarray, g: np.ndarray, b: np.ndarray,
 
 def save_geotiff_single(out_path: str, array: np.ndarray, projection: str, geotransform: tuple[float, ...]) -> None:
     """
-    Saves a NumPy array as a single-band unsigned 16-bit integer GeoTIFF file.
+    Saves a NumPy array as a single-band GeoTIFF file.
 
     Args:
         out_path (str): The file path where the GeoTIFF will be saved.
-        array (numpy.ndarray): The 2D NumPy array containing the image data (should be suitable for uint16).
+        array (numpy.ndarray): The 2D NumPy array containing the image data.
         projection (str): The projection information in WKT format.
         geotransform (tuple): The GDAL GeoTransform tuple (6 elements).
 
@@ -98,10 +98,25 @@ def save_geotiff_single(out_path: str, array: np.ndarray, projection: str, geotr
     driver = gdal.GetDriverByName('GTiff')
     if driver is None:
         raise RuntimeError("GDAL driver 'GTiff' not found")
-    dst = driver.Create(out_path, cols, rows, 1, gdal.GDT_UInt16)
+    
+    # Determine data type based on array dtype
+    if array.dtype == np.float32 or array.dtype == np.float64:
+        gdal_dtype = gdal.GDT_Float32
+        # Convert NaN to a specific NoData value for better compatibility
+        nodata_value = -9999.0
+        array_copy = array.copy()
+        array_copy[np.isnan(array)] = nodata_value
+    else:
+        gdal_dtype = gdal.GDT_UInt16
+        nodata_value = 0
+        array_copy = array
+    
+    dst = driver.Create(out_path, cols, rows, 1, gdal_dtype)
     dst.SetProjection(projection)
     dst.SetGeoTransform(geotransform)
-    dst.GetRasterBand(1).WriteArray(array)
+    band = dst.GetRasterBand(1)
+    band.SetNoDataValue(nodata_value)
+    band.WriteArray(array_copy)
     dst = None
 
 def scale_image(input_array: np.ndarray, min_value: Union[int, float], max_value: Union[int, float]) -> np.ndarray:
