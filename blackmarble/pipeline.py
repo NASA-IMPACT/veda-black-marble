@@ -21,6 +21,8 @@ from rio_cogeo.profiles import cog_profiles
 from rio_cogeo.cogeo import cog_translate
 import os.path
 from typing import List, Tuple, Optional, Dict, Any
+from pathlib import Path
+from datetime import datetime
 
 # Package imports
 from blackmarble.coords import get_utm_zone
@@ -44,6 +46,12 @@ from blackmarble.validation import (
     validate_reflectance_range,
     generate_quality_report
 )
+
+# Phase 2 adapter and data source imports
+from blackmarble.adapters.s3 import S3Adapter
+from blackmarble.adapters.raster_io import GDALRasterAdapter
+from blackmarble.data_sources.landsat import LandsatDataSource
+from blackmarble.data_sources.viirs import VIIRSDataSource
 
 # If run as script, ensure project root is on PYTHONPATH and set package name
 if __name__ == "__main__" and __package__ is None:
@@ -81,6 +89,11 @@ def run_pipeline(
     display_min: float = 0.3,
     display_max: float = 0.8,
     config: Optional[ProcessingConfig] = None,
+    # Optional adapters for dependency injection
+    s3_adapter: Optional[S3Adapter] = None,
+    raster_adapter: Optional[GDALRasterAdapter] = None,
+    landsat_source: Optional[LandsatDataSource] = None,
+    viirs_source: Optional[VIIRSDataSource] = None,
 ) -> str:
     """
     Runs the Black Marble processing pipeline for a given area and date.
@@ -104,6 +117,10 @@ def run_pipeline(
         display_min (float): Minimum value for display scaling (0-1). Defaults to 0.3.
         display_max (float): Maximum value for display scaling (0-1). Defaults to 0.8.
         config (Optional[ProcessingConfig]): Configuration object. If None, uses defaults or environment.
+        s3_adapter (Optional[S3Adapter]): S3 storage adapter for dependency injection.
+        raster_adapter (Optional[GDALRasterAdapter]): Raster I/O adapter for dependency injection.
+        landsat_source (Optional[LandsatDataSource]): Landsat data source for dependency injection.
+        viirs_source (Optional[VIIRSDataSource]): VIIRS data source for dependency injection.
 
     Returns:
         str: The path to the final generated Cloud-Optimized GeoTIFF.
@@ -124,6 +141,12 @@ def run_pipeline(
     
     # Validate configuration
     config.validate()
+    
+    # Initialize adapters if not provided (dependency injection)
+    if s3_adapter is None:
+        s3_adapter = S3Adapter(anonymous=False)
+    if raster_adapter is None:
+        raster_adapter = GDALRasterAdapter()
     # Define output subdirectories
     temp_dir = os.path.join(output_dir, "temp")
     final_dir = os.path.join(output_dir, "final")
@@ -154,57 +177,112 @@ def run_pipeline(
 
     # 1) Landsat bands
     print("Downloading and processing Landsat bands...")
-    b3_out: List[str]
-    b3_p: List[str]
-    b3_r: List[str]
-    b3_a: List[str]
-    b3_out, b3_p, b3_r, b3_a = process_band_data(
-        3,
-        year,
-        month,
-        day,
-        lat1,
-        lon1,
-        lat2,
-        lon2,
-        os.path.join(output_dir, "B3_Merged_"),
-        temp_dir,
-        config.landsat.composite_months,
-    )
-    b4_out: List[str]
-    b4_p: List[str]
-    b4_r: List[str]
-    b4_a: List[str]
-    b4_out, b4_p, b4_r, b4_a = process_band_data(
-        4,
-        year,
-        month,
-        day,
-        lat1,
-        lon1,
-        lat2,
-        lon2,
-        os.path.join(output_dir, "B4_Merged_"),
-        temp_dir,
-        config.landsat.composite_months,
-    )
-    b5_out: List[str]
-    b5_p: List[str]
-    b5_r: List[str]
-    b5_a: List[str]
-    b5_out, b5_p, b5_r, b5_a = process_band_data(
-        5,
-        year,
-        month,
-        day,
-        lat1,
-        lon1,
-        lat2,
-        lon2,
-        os.path.join(output_dir, "B5_Merged_"),
-        temp_dir,
-        config.landsat.composite_months,
-    )
+    
+    # Check if we should use the new data source approach
+    if landsat_source is not None:
+        # Use the new Landsat data source with adapters
+        print("Using LandsatDataSource with adapters...")
+        bbox = (min(lon1, lon2), min(lat1, lat2), max(lon1, lon2), max(lat1, lat2))
+        start_date = datetime(year, month, day)
+        end_date = start_date
+        
+        try:
+            # Fetch Landsat data using the data source
+            landsat_data = landsat_source.fetch(
+                bbox=bbox,
+                start_date=start_date,
+                end_date=end_date,
+                bands=["B3", "B4", "B5", "QA_PIXEL"],
+                composite_months=config.landsat.composite_months
+            )
+            
+            # Save fetched data to temporary files for compatibility
+            b3_out = [os.path.join(output_dir, "B3_Merged_0.TIFF")]
+            b4_out = [os.path.join(output_dir, "B4_Merged_0.TIFF")]
+            b5_out = [os.path.join(output_dir, "B5_Merged_0.TIFF")]
+            qa_out = [os.path.join(output_dir, "QA_PIXEL_0.TIFF")]
+            
+            # Write data using raster adapter
+            for path, data, band_name in [
+                (b3_out[0], landsat_data.get("B3"), "B3"),
+                (b4_out[0], landsat_data.get("B4"), "B4"),
+                (b5_out[0], landsat_data.get("B5"), "B5"),
+                (qa_out[0], landsat_data.get("QA_PIXEL"), "QA_PIXEL")
+            ]:
+                if data is not None:
+                    # Create minimal metadata for writing
+                    metadata = {
+                        "width": data.shape[-1],
+                        "height": data.shape[-2],
+                        "count": 1,
+                        "dtype": data.dtype,
+                        "driver": "GTiff"
+                    }
+                    raster_adapter.write(Path(path), data, metadata)
+            
+            # For compatibility, create empty lists for QA bands (will process QA_PIXEL later)
+            b3_p = b3_r = b3_a = qa_out
+            b4_p = b4_r = b4_a = qa_out
+            b5_p = b5_r = b5_a = qa_out
+            
+        except Exception as e:
+            print(f"LandsatDataSource failed: {e}. Falling back to legacy method...")
+            # Fall back to legacy method
+            landsat_source = None
+    
+    if landsat_source is None:
+        # Use legacy process_band_data function
+        b3_out: List[str]
+        b3_p: List[str]
+        b3_r: List[str]
+        b3_a: List[str]
+        b3_out, b3_p, b3_r, b3_a = process_band_data(
+            3,
+            year,
+            month,
+            day,
+            lat1,
+            lon1,
+            lat2,
+            lon2,
+            os.path.join(output_dir, "B3_Merged_"),
+            temp_dir,
+            config.landsat.composite_months,
+        )
+        b4_out: List[str]
+        b4_p: List[str]
+        b4_r: List[str]
+        b4_a: List[str]
+        b4_out, b4_p, b4_r, b4_a = process_band_data(
+            4,
+            year,
+            month,
+            day,
+            lat1,
+            lon1,
+            lat2,
+            lon2,
+            os.path.join(output_dir, "B4_Merged_"),
+            temp_dir,
+            config.landsat.composite_months,
+        )
+        b5_out: List[str]
+        b5_p: List[str]
+        b5_r: List[str]
+        b5_a: List[str]
+        b5_out, b5_p, b5_r, b5_a = process_band_data(
+            5,
+            year,
+            month,
+            day,
+            lat1,
+            lon1,
+            lat2,
+            lon2,
+            os.path.join(output_dir, "B5_Merged_"),
+            temp_dir,
+            config.landsat.composite_months,
+        )
 
     # 2) Crop to UTM bbox
     print("Cropping Landsat bands to UTM bounding box...")
@@ -250,11 +328,25 @@ def run_pipeline(
         p_px: np.ndarray
         _: Tuple[float, ...] | str
         __: Tuple[float, ...] | str
-        p_px, _, __ = get_geo(p_final[i], 1)
-        a_px: np.ndarray
-        a_px, _, __ = get_geo(a_final[i], 1)
-        r_px: np.ndarray
-        r_px, _, __ = get_geo(r_final[i], 1)
+        
+        # Use raster adapter if available, otherwise fall back to get_geo
+        if raster_adapter is not None:
+            try:
+                p_data, _ = raster_adapter.read(Path(p_final[i]), band=1)
+                p_px = p_data
+                a_data, _ = raster_adapter.read(Path(a_final[i]), band=1)
+                a_px = a_data
+                r_data, _ = raster_adapter.read(Path(r_final[i]), band=1)
+                r_px = r_data
+            except Exception as e:
+                print(f"RasterAdapter failed: {e}. Using get_geo...")
+                p_px, _, __ = get_geo(p_final[i], 1)
+                a_px, _, __ = get_geo(a_final[i], 1)
+                r_px, _, __ = get_geo(r_final[i], 1)
+        else:
+            p_px, _, __ = get_geo(p_final[i], 1)
+            a_px, _, __ = get_geo(a_final[i], 1)
+            r_px, _, __ = get_geo(r_final[i], 1)
         
         # Debug QA values
         print(f"DEBUG: QA_PIXEL unique values: {np.unique(p_px)[:10]}... (showing first 10)")
@@ -284,11 +376,27 @@ def run_pipeline(
         print(f"DEBUG: Radsat B4 keep: {np.sum(b4_r_px > 0)} ({100.0 * np.sum(b4_r_px > 0) / b4_r_px.size:.1f}%)")
         print(f"DEBUG: Radsat B5 keep: {np.sum(b5_r_px > 0)} ({100.0 * np.sum(b5_r_px > 0) / b5_r_px.size:.1f}%)")
         b3_px: np.ndarray
-        b3_px, _, __ = get_geo(b3_final[i], 1)
         b4_px: np.ndarray
-        b4_px, _, __ = get_geo(b4_final[i], 1)
         b5_px: np.ndarray
-        b5_px, _, __ = get_geo(b5_final[i], 1)
+        
+        # Use raster adapter if available, otherwise fall back to get_geo
+        if raster_adapter is not None:
+            try:
+                b3_data, _ = raster_adapter.read(Path(b3_final[i]), band=1)
+                b3_px = b3_data
+                b4_data, _ = raster_adapter.read(Path(b4_final[i]), band=1)
+                b4_px = b4_data
+                b5_data, _ = raster_adapter.read(Path(b5_final[i]), band=1)
+                b5_px = b5_data
+            except Exception as e:
+                print(f"RasterAdapter failed for bands: {e}. Using get_geo...")
+                b3_px, _, __ = get_geo(b3_final[i], 1)
+                b4_px, _, __ = get_geo(b4_final[i], 1)
+                b5_px, _, __ = get_geo(b5_final[i], 1)
+        else:
+            b3_px, _, __ = get_geo(b3_final[i], 1)
+            b4_px, _, __ = get_geo(b4_final[i], 1)
+            b5_px, _, __ = get_geo(b5_final[i], 1)
         
         # Check band data ranges
         print(f"\nDEBUG: Band value ranges:")
@@ -399,6 +507,7 @@ def run_pipeline(
     
     # Apply rescaling to convert DN to reflectance (only if needed)
     # The scale_landsat_to_reflectance function handles the check internally
+    nodata_value = -9999.0  # Define nodata value
     b3_med_scaled = scale_landsat_to_reflectance(b3_med, config.landsat, nodata_value=nodata_value)
     b4_med_scaled = scale_landsat_to_reflectance(b4_med, config.landsat, nodata_value=nodata_value)
     b5_med_scaled = scale_landsat_to_reflectance(b5_med, config.landsat, nodata_value=nodata_value)
@@ -425,14 +534,39 @@ def run_pipeline(
     print(f"DEBUG: B5: {np.sum(~np.isnan(b5_med_scaled))} valid pixels")
     
     # get georef from first band
-    _unused, gt_temp, proj_temp = get_geo(b3_final[0], 1)
-    
-    print(f"DEBUG: Geotransform type: {type(gt_temp)}, value: {gt_temp}")
-    print(f"DEBUG: Projection type: {type(proj_temp)}, length: {len(str(proj_temp)) if proj_temp else 0}")
-    
-    # Direct assignment - get_geo always returns the correct types
-    gt_save: Tuple[float, ...] = gt_temp
-    proj_save: str = proj_temp
+    if raster_adapter is not None:
+        try:
+            _, metadata = raster_adapter.read(Path(b3_final[0]), band=1)
+            # Extract geotransform and projection from metadata
+            if 'gdal_transform' in metadata:
+                gt_save = metadata['gdal_transform']
+            elif 'transform' in metadata:
+                # Convert Affine to GDAL transform tuple
+                t = metadata['transform']
+                gt_save = (t.c, t.a, t.b, t.f, t.d, t.e)
+            else:
+                raise ValueError("No geotransform in metadata")
+            
+            proj_save = metadata.get('crs', '')
+            if not isinstance(proj_save, str):
+                proj_save = str(proj_save)
+            
+            print(f"DEBUG: Using RasterAdapter - Geotransform: {gt_save}")
+            print(f"DEBUG: Using RasterAdapter - Projection: {proj_save[:100]}...")
+        except Exception as e:
+            print(f"RasterAdapter failed for georef: {e}. Using get_geo...")
+            _unused, gt_temp, proj_temp = get_geo(b3_final[0], 1)
+            gt_save = gt_temp
+            proj_save = proj_temp
+    else:
+        _unused, gt_temp, proj_temp = get_geo(b3_final[0], 1)
+        
+        print(f"DEBUG: Geotransform type: {type(gt_temp)}, value: {gt_temp}")
+        print(f"DEBUG: Projection type: {type(proj_temp)}, length: {len(str(proj_temp)) if proj_temp else 0}")
+        
+        # Direct assignment - get_geo always returns the correct types
+        gt_save: Tuple[float, ...] = gt_temp
+        proj_save: str = proj_temp
     b3_merged_path = os.path.join(output_dir, "B3.TIFF")
     b4_merged_path = os.path.join(output_dir, "B4.TIFF")
     b5_merged_path = os.path.join(output_dir, "B5.TIFF")
@@ -440,19 +574,46 @@ def run_pipeline(
     print(f"\nDEBUG: About to save B3 to {b3_merged_path}")
     print(f"DEBUG: save_geotiff_single params - shape: {b3_med_scaled.shape}, proj type: {type(proj_save)}, gt type: {type(gt_save)}")
     
-    try:
-        save_geotiff_single(b3_merged_path, b3_med_scaled, proj_save, gt_save)
-        print("DEBUG: B3 saved successfully")
-    except Exception as e:
-        print(f"ERROR: Failed to save B3: {type(e).__name__}: {e}")
-        print(f"DEBUG: proj_save = {repr(proj_save)}")
-        print(f"DEBUG: gt_save = {repr(gt_save)}")
-        import traceback
-        traceback.print_exc()
-        raise
-        
-    save_geotiff_single(b4_merged_path, b4_med_scaled, proj_save, gt_save)
-    save_geotiff_single(b5_merged_path, b5_med_scaled, proj_save, gt_save)
+    # Save using raster adapter if available
+    if raster_adapter is not None:
+        try:
+            # Prepare metadata for saving
+            save_metadata = {
+                'crs': proj_save,
+                'gdal_transform': gt_save,
+                'width': b3_med_scaled.shape[1],
+                'height': b3_med_scaled.shape[0],
+                'count': 1,
+                'dtype': b3_med_scaled.dtype,
+                'driver': 'GTiff',
+                'nodata': np.nan
+            }
+            
+            raster_adapter.write(Path(b3_merged_path), b3_med_scaled, save_metadata)
+            print("DEBUG: B3 saved successfully using RasterAdapter")
+            
+            raster_adapter.write(Path(b4_merged_path), b4_med_scaled, save_metadata)
+            raster_adapter.write(Path(b5_merged_path), b5_med_scaled, save_metadata)
+            
+        except Exception as e:
+            print(f"RasterAdapter write failed: {e}. Using save_geotiff_single...")
+            save_geotiff_single(b3_merged_path, b3_med_scaled, proj_save, gt_save)
+            save_geotiff_single(b4_merged_path, b4_med_scaled, proj_save, gt_save)
+            save_geotiff_single(b5_merged_path, b5_med_scaled, proj_save, gt_save)
+    else:
+        try:
+            save_geotiff_single(b3_merged_path, b3_med_scaled, proj_save, gt_save)
+            print("DEBUG: B3 saved successfully")
+        except Exception as e:
+            print(f"ERROR: Failed to save B3: {type(e).__name__}: {e}")
+            print(f"DEBUG: proj_save = {repr(proj_save)}")
+            print(f"DEBUG: gt_save = {repr(gt_save)}")
+            import traceback
+            traceback.print_exc()
+            raise
+            
+        save_geotiff_single(b4_merged_path, b4_med_scaled, proj_save, gt_save)
+        save_geotiff_single(b5_merged_path, b5_med_scaled, proj_save, gt_save)
 
     # 5) Reproject to WGS84
     print("Reprojecting to WGS84...")
@@ -465,84 +626,131 @@ def run_pipeline(
 
     # 6) Download & subset Nightlights (VIIRS)
     print("\nDEBUG: Downloading nightlights (VIIRS)...")
-    vnp = VNP46A2Util()
-
-    # Get all tiles that intersect the bounding box
-    tiles = vnp.get_tiles_for_bbox(lat1, lon1, lat2, lon2)
-    print(f"Found {len(tiles)} VIIRS tiles to download: {tiles}")
-
-    # Download and process each tile
-    ntl_tiles: List[str] = []
-    lunar_tiles: List[str] = []
-    quality_tiles: List[str] = []
-
-    for i, (vert, horz) in enumerate(tiles):
-        print(f"Processing VIIRS tile {i + 1}/{len(tiles)}: h{horz:02d}v{vert:02d}")
-        download_file: str = os.path.join(
-            temp_dir, f"VNP46A2_h{horz:02d}v{vert:02d}.h5"
-        )
-
+    
+    # Check if we should use the new data source approach
+    if viirs_source is not None:
+        # Use the new VIIRS data source with adapters
+        print("Using VIIRSDataSource with adapters...")
+        bbox = (min(lon1, lon2), min(lat1, lat2), max(lon1, lon2), max(lat1, lat2))
+        start_date = datetime(year, month, day)
+        end_date = start_date
+        
         try:
-            vnp.download_h5(
-                earthdata_token,
-                year,
-                month,
-                day,
-                vert,
-                horz,
-                target_filepath=download_file,
+            # Fetch VIIRS data using the data source
+            viirs_data = viirs_source.fetch(
+                bbox=bbox,
+                start_date=start_date,
+                end_date=end_date,
+                layers=["NTL", "LUNAR", "QF"]
+            )
+            
+            # Save fetched data to temporary files for compatibility
+            ntl_temp_tif = os.path.join(temp_dir, "ntl_raw_mosaic.tif")
+            lunar_temp_tif = os.path.join(temp_dir, "lunar_irradiance_mosaic.tif")
+            quality_temp_tif = os.path.join(temp_dir, "mandatory_quality_flag_mosaic.tif")
+            
+            # Write data using raster adapter
+            for path, data, layer_name in [
+                (ntl_temp_tif, viirs_data.get("NTL"), "NTL"),
+                (lunar_temp_tif, viirs_data.get("LUNAR"), "LUNAR"),
+                (quality_temp_tif, viirs_data.get("QF"), "QF")
+            ]:
+                if data is not None:
+                    # Create minimal metadata for writing
+                    metadata = {
+                        "width": data.shape[-1],
+                        "height": data.shape[-2],
+                        "count": 1,
+                        "dtype": data.dtype,
+                        "driver": "GTiff"
+                    }
+                    raster_adapter.write(Path(path), data, metadata)
+                    
+        except Exception as e:
+            print(f"VIIRSDataSource failed: {e}. Falling back to legacy method...")
+            # Fall back to legacy method
+            viirs_source = None
+    
+    if viirs_source is None:
+        # Use legacy VNP46A2Util
+        vnp = VNP46A2Util()
+
+        # Get all tiles that intersect the bounding box
+        tiles = vnp.get_tiles_for_bbox(lat1, lon1, lat2, lon2)
+        print(f"Found {len(tiles)} VIIRS tiles to download: {tiles}")
+
+        # Download and process each tile
+        ntl_tiles: List[str] = []
+        lunar_tiles: List[str] = []
+        quality_tiles: List[str] = []
+
+        for i, (vert, horz) in enumerate(tiles):
+            print(f"Processing VIIRS tile {i + 1}/{len(tiles)}: h{horz:02d}v{vert:02d}")
+            download_file: str = os.path.join(
+                temp_dir, f"VNP46A2_h{horz:02d}v{vert:02d}.h5"
             )
 
-            # Extract all three layers from VNP46A2
-            ntl_tile = os.path.join(temp_dir, f"ntl_raw_h{horz:02d}v{vert:02d}.tif")
-            vnp.convert_hdf_to_tiff(
-                download_file, ntl_tile, layer=0
-            )  # DNB_At_Sensor_Radiance_500m
-            ntl_tiles.append(ntl_tile)
+            try:
+                vnp.download_h5(
+                    earthdata_token,
+                    year,
+                    month,
+                    day,
+                    vert,
+                    horz,
+                    target_filepath=download_file,
+                )
 
-            lunar_tile = os.path.join(
-                temp_dir, f"lunar_irradiance_h{horz:02d}v{vert:02d}.tif"
+                # Extract all three layers from VNP46A2
+                ntl_tile = os.path.join(temp_dir, f"ntl_raw_h{horz:02d}v{vert:02d}.tif")
+                vnp.convert_hdf_to_tiff(
+                    download_file, ntl_tile, layer=0
+                )  # DNB_At_Sensor_Radiance_500m
+                ntl_tiles.append(ntl_tile)
+
+                lunar_tile = os.path.join(
+                    temp_dir, f"lunar_irradiance_h{horz:02d}v{vert:02d}.tif"
+                )
+                vnp.convert_hdf_to_tiff(
+                    download_file, lunar_tile, layer=1
+                )  # Lunar_Irradiance
+                lunar_tiles.append(lunar_tile)
+
+                quality_tile = os.path.join(
+                    temp_dir, f"mandatory_quality_flag_h{horz:02d}v{vert:02d}.tif"
+                )
+                vnp.convert_hdf_to_tiff(
+                    download_file, quality_tile, layer=3
+                )  # Mandatory_Quality_Flag
+                quality_tiles.append(quality_tile)
+
+            except RuntimeError as e:
+                print(f"Warning: Failed to download tile h{horz:02d}v{vert:02d}: {e}")
+                # Continue with other tiles
+
+        if not ntl_tiles:
+            raise RuntimeError(
+                "No VIIRS tiles could be downloaded for the specified area and date"
             )
-            vnp.convert_hdf_to_tiff(
-                download_file, lunar_tile, layer=1
-            )  # Lunar_Irradiance
-            lunar_tiles.append(lunar_tile)
 
-            quality_tile = os.path.join(
-                temp_dir, f"mandatory_quality_flag_h{horz:02d}v{vert:02d}.tif"
-            )
-            vnp.convert_hdf_to_tiff(
-                download_file, quality_tile, layer=3
-            )  # Mandatory_Quality_Flag
-            quality_tiles.append(quality_tile)
+        # Mosaic tiles if multiple, or use single tile
+        if len(ntl_tiles) > 1:
+            print("Mosaicing VIIRS tiles...")
+            ntl_temp_tif = os.path.join(temp_dir, "ntl_raw_mosaic.tif")
+            gdal.Warp(ntl_temp_tif, ntl_tiles, format="GTiff", resampleAlg="bilinear")
 
-        except RuntimeError as e:
-            print(f"Warning: Failed to download tile h{horz:02d}v{vert:02d}: {e}")
-            # Continue with other tiles
+            lunar_temp_tif = os.path.join(temp_dir, "lunar_irradiance_mosaic.tif")
+            gdal.Warp(lunar_temp_tif, lunar_tiles, format="GTiff", resampleAlg="bilinear")
 
-    if not ntl_tiles:
-        raise RuntimeError(
-            "No VIIRS tiles could be downloaded for the specified area and date"
-        )
-
-    # Mosaic tiles if multiple, or use single tile
-    if len(ntl_tiles) > 1:
-        print("Mosaicing VIIRS tiles...")
-        ntl_temp_tif = os.path.join(temp_dir, "ntl_raw_mosaic.tif")
-        gdal.Warp(ntl_temp_tif, ntl_tiles, format="GTiff", resampleAlg="bilinear")
-
-        lunar_temp_tif = os.path.join(temp_dir, "lunar_irradiance_mosaic.tif")
-        gdal.Warp(lunar_temp_tif, lunar_tiles, format="GTiff", resampleAlg="bilinear")
-
-        quality_temp_tif = os.path.join(temp_dir, "mandatory_quality_flag_mosaic.tif")
-        gdal.Warp(
-            quality_temp_tif, quality_tiles, format="GTiff", resampleAlg="nearest"
-        )  # Use nearest for quality flags
-    else:
-        # Single tile, use directly
-        ntl_temp_tif = ntl_tiles[0]
-        lunar_temp_tif = lunar_tiles[0]
-        quality_temp_tif = quality_tiles[0]
+            quality_temp_tif = os.path.join(temp_dir, "mandatory_quality_flag_mosaic.tif")
+            gdal.Warp(
+                quality_temp_tif, quality_tiles, format="GTiff", resampleAlg="nearest"
+            )  # Use nearest for quality flags
+        else:
+            # Single tile, use directly
+            ntl_temp_tif = ntl_tiles[0]
+            lunar_temp_tif = lunar_tiles[0]
+            quality_temp_tif = quality_tiles[0]
 
     # subset to area + scale
     minX: float
@@ -647,7 +855,28 @@ def run_pipeline(
     b3_px_final: np.ndarray
     gt_temp3: Any
     proj_temp3: Any
-    b3_px_final, gt_temp3, proj_temp3 = get_geo(outputs_final[0], 1)
+    
+    # Use raster adapter if available
+    if raster_adapter is not None:
+        try:
+            b3_px_final, metadata = raster_adapter.read(Path(outputs_final[0]), band=1)
+            # Extract geotransform and projection
+            if 'gdal_transform' in metadata:
+                gt_temp3 = metadata['gdal_transform']
+            elif 'transform' in metadata:
+                t = metadata['transform']
+                gt_temp3 = (t.c, t.a, t.b, t.f, t.d, t.e)
+            else:
+                raise ValueError("No geotransform in metadata")
+            
+            proj_temp3 = metadata.get('crs', '')
+            if not isinstance(proj_temp3, str):
+                proj_temp3 = str(proj_temp3)
+        except Exception as e:
+            print(f"RasterAdapter failed for final read: {e}. Using get_geo...")
+            b3_px_final, gt_temp3, proj_temp3 = get_geo(outputs_final[0], 1)
+    else:
+        b3_px_final, gt_temp3, proj_temp3 = get_geo(outputs_final[0], 1)
     
     print(f"DEBUG: Final georef - geotransform type: {type(gt_temp3)}, value: {gt_temp3}")
     print(f"DEBUG: Final georef - projection type: {type(proj_temp3)}")
@@ -660,30 +889,62 @@ def run_pipeline(
     
     gt: Tuple[float, ...] = gt_temp3
     proj: str = proj_temp3
+    # Read remaining bands
     b4_px_final: np.ndarray
-    _gt4: Tuple[float, ...] | str
-    _proj4: Tuple[float, ...] | str
-    b4_px_final, _gt4, _proj4 = get_geo(outputs_final[1], 1)
     b5_px_final: np.ndarray
-    _gt5: Tuple[float, ...] | str
-    _proj5: Tuple[float, ...] | str
-    b5_px_final, _gt5, _proj5 = get_geo(outputs_final[2], 1)
     ntl_px: np.ndarray
-    _gt_ntl: Tuple[float, ...] | str
-    _proj_ntl: Tuple[float, ...] | str
-    ntl_px, _gt_ntl, _proj_ntl = get_geo(outputs_final[3], 1)
     lunar_px: np.ndarray
-    _gt_lunar: Tuple[float, ...] | str
-    _proj_lunar: Tuple[float, ...] | str
-    lunar_px, _gt_lunar, _proj_lunar = get_geo(outputs_final[4], 1)
     quality_px: np.ndarray
-    _gt_quality: Tuple[float, ...] | str
-    _proj_quality: Tuple[float, ...] | str
-    quality_px, _gt_quality, _proj_quality = get_geo(outputs_final[5], 1)
     osm_px: np.ndarray
-    _gt_osm: Tuple[float, ...] | str
-    _proj_osm: Tuple[float, ...] | str
-    osm_px, _gt_osm, _proj_osm = get_geo(outputs_final[6], 1)
+    
+    if raster_adapter is not None:
+        try:
+            b4_px_final, _ = raster_adapter.read(Path(outputs_final[1]), band=1)
+            b5_px_final, _ = raster_adapter.read(Path(outputs_final[2]), band=1)
+            ntl_px, _ = raster_adapter.read(Path(outputs_final[3]), band=1)
+            lunar_px, _ = raster_adapter.read(Path(outputs_final[4]), band=1)
+            quality_px, _ = raster_adapter.read(Path(outputs_final[5]), band=1)
+            osm_px, _ = raster_adapter.read(Path(outputs_final[6]), band=1)
+        except Exception as e:
+            print(f"RasterAdapter failed for other bands: {e}. Using get_geo...")
+            # Fall back to get_geo
+            _gt4: Tuple[float, ...] | str
+            _proj4: Tuple[float, ...] | str
+            b4_px_final, _gt4, _proj4 = get_geo(outputs_final[1], 1)
+            _gt5: Tuple[float, ...] | str
+            _proj5: Tuple[float, ...] | str
+            b5_px_final, _gt5, _proj5 = get_geo(outputs_final[2], 1)
+            _gt_ntl: Tuple[float, ...] | str
+            _proj_ntl: Tuple[float, ...] | str
+            ntl_px, _gt_ntl, _proj_ntl = get_geo(outputs_final[3], 1)
+            _gt_lunar: Tuple[float, ...] | str
+            _proj_lunar: Tuple[float, ...] | str
+            lunar_px, _gt_lunar, _proj_lunar = get_geo(outputs_final[4], 1)
+            _gt_quality: Tuple[float, ...] | str
+            _proj_quality: Tuple[float, ...] | str
+            quality_px, _gt_quality, _proj_quality = get_geo(outputs_final[5], 1)
+            _gt_osm: Tuple[float, ...] | str
+            _proj_osm: Tuple[float, ...] | str
+            osm_px, _gt_osm, _proj_osm = get_geo(outputs_final[6], 1)
+    else:
+        _gt4: Tuple[float, ...] | str
+        _proj4: Tuple[float, ...] | str
+        b4_px_final, _gt4, _proj4 = get_geo(outputs_final[1], 1)
+        _gt5: Tuple[float, ...] | str
+        _proj5: Tuple[float, ...] | str
+        b5_px_final, _gt5, _proj5 = get_geo(outputs_final[2], 1)
+        _gt_ntl: Tuple[float, ...] | str
+        _proj_ntl: Tuple[float, ...] | str
+        ntl_px, _gt_ntl, _proj_ntl = get_geo(outputs_final[3], 1)
+        _gt_lunar: Tuple[float, ...] | str
+        _proj_lunar: Tuple[float, ...] | str
+        lunar_px, _gt_lunar, _proj_lunar = get_geo(outputs_final[4], 1)
+        _gt_quality: Tuple[float, ...] | str
+        _proj_quality: Tuple[float, ...] | str
+        quality_px, _gt_quality, _proj_quality = get_geo(outputs_final[5], 1)
+        _gt_osm: Tuple[float, ...] | str
+        _proj_osm: Tuple[float, ...] | str
+        osm_px, _gt_osm, _proj_osm = get_geo(outputs_final[6], 1)
 
     # Apply fill_gaps to ensure all arrays have same shape
     stack: np.ndarray = fill_gaps(
@@ -849,10 +1110,26 @@ def run_pipeline(
     # 12) Upload (skip if no bucket/key provided)
     if upload_bucket and upload_key:
         print(f"Uploading {out_cog} to s3://{upload_bucket}/{upload_key}...")
-        s3 = boto3.client("s3")
-        with open(out_cog, "rb") as f:
-            s3.upload_fileobj(f, upload_bucket, upload_key)
-        print("Upload complete.")
+        
+        # Use S3 adapter if available, otherwise fall back to boto3
+        if s3_adapter is not None:
+            try:
+                # Use the adapter's upload_file method
+                s3_adapter.upload_file(Path(out_cog), upload_bucket, upload_key)
+                print("Upload complete using S3Adapter.")
+            except Exception as e:
+                print(f"S3Adapter upload failed: {e}. Falling back to boto3...")
+                # Fall back to direct boto3
+                s3 = boto3.client("s3")
+                with open(out_cog, "rb") as f:
+                    s3.upload_fileobj(f, upload_bucket, upload_key)
+                print("Upload complete using boto3.")
+        else:
+            # Use direct boto3
+            s3 = boto3.client("s3")
+            with open(out_cog, "rb") as f:
+                s3.upload_fileobj(f, upload_bucket, upload_key)
+            print("Upload complete.")
     else:
         print("UPLOAD_BUCKET/UPLOAD_FILE not set; skipping S3 upload.")
 
