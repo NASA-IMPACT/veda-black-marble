@@ -62,18 +62,23 @@ class TestNDVIBehavior:
 
         ndvi = calculate_ndvi(red, nir)
 
-        # Manual calculations (with epsilon):
-        # (0.6-0.2)/(0.6+0.2+eps) ≈ 0.4/0.8 ≈ 0.5
-        assert pytest.approx(ndvi[0, 0], abs=1e-5) == 0.5
+        # Manual calculations with epsilon=1e-6:
+        eps = 1e-6
+        # (0.6-0.2)/(0.6+0.2+1e-6) = 0.4/0.800001
+        expected_0 = (0.6 - 0.2) / (0.6 + 0.2 + eps)
+        assert pytest.approx(ndvi[0, 0], abs=1e-7) == expected_0
 
-        # (0.9-0.1)/(0.9+0.1+eps) ≈ 0.8/1.0 ≈ 0.8
-        assert pytest.approx(ndvi[0, 1], abs=1e-5) == 0.8
+        # (0.9-0.1)/(0.9+0.1+1e-6) = 0.8/1.000001
+        expected_1 = (0.9 - 0.1) / (0.9 + 0.1 + eps)
+        assert pytest.approx(ndvi[0, 1], abs=1e-7) == expected_1
 
-        # (0.7-0.3)/(0.7+0.3+eps) ≈ 0.4/1.0 ≈ 0.4
-        assert pytest.approx(ndvi[0, 2], abs=1e-5) == 0.4
+        # (0.7-0.3)/(0.7+0.3+1e-6) = 0.4/1.000001
+        expected_2 = (0.7 - 0.3) / (0.7 + 0.3 + eps)
+        assert pytest.approx(ndvi[0, 2], abs=1e-7) == expected_2
 
-        # (0.75-0.25)/(0.75+0.25+eps) ≈ 0.5/1.0 ≈ 0.5
-        assert pytest.approx(ndvi[0, 3], abs=1e-5) == 0.5
+        # (0.75-0.25)/(0.75+0.25+1e-6) = 0.5/1.000001
+        expected_3 = (0.75 - 0.25) / (0.75 + 0.25 + eps)
+        assert pytest.approx(ndvi[0, 3], abs=1e-7) == expected_3
 
     def test_zero_handling(self):
         """Test NDVI behavior with zero values."""
@@ -170,12 +175,27 @@ class TestNDUIBehavior:
 
         ndui = calculate_ndui(ntl, ndvi, ndwi, roads, config)
 
-        # First: (1-0)/(1+0+eps) ≈ 1, transformed: (1+1)/2 = 1
-        assert pytest.approx(ndui[0, 0], abs=1e-5) == 1.0
+        # Calculate expected value step by step:
+        # 1. Basic NDUI: (1.0 - 0.0) / (1.0 + 0.0 + 1e-6) = 1.0 / 1.000001 ≈ 0.999999
+        # 2. Clipped to [-1, 1]: still 0.999999
+        # 3. Water mask: ndwi=-0.5 < 0.3, so no water mask applied
+        # 4. Transform to [0,1]: (0.999999 + 1) / 2 ≈ 0.9999995
+        # 5. Floor threshold: 0.9999995 > 0.0, so no floor applied
+        # 6. Road enhancement: roads=0, so no enhancement
+        eps = 1e-6
+        basic_ndui = (1.0 - 0.0) / (1.0 + 0.0 + eps)
+        transformed = (basic_ndui + 1.0) / 2.0
+        assert pytest.approx(ndui[0, 0], abs=1e-6) == transformed
 
-        # Second: (1-(-0.5))/(1+(-0.5)+eps) ≈ 3 → clipped to 1
-        # Transformed: (1+1)/2 = 1
-        assert pytest.approx(ndui[0, 1], abs=1e-5) == 1.0
+        # Second calculation:
+        # 1. Basic NDUI: (1.0 - (-0.5)) / (1.0 + (-0.5) + eps) = 1.5 / 0.500001 ≈ 2.999994
+        # 2. Clipped to [-1, 1]: becomes 1.0
+        # 3. Water mask: ndwi=-0.8 < 0.3, so no water mask
+        # 4. Transform: (1.0 + 1) / 2 = 1.0
+        basic_ndui_2 = (1.0 - (-0.5)) / (1.0 + (-0.5) + eps)
+        clipped_2 = np.clip(basic_ndui_2, -1.0, 1.0)
+        transformed_2 = (clipped_2 + 1.0) / 2.0
+        assert pytest.approx(ndui[0, 1], abs=1e-6) == transformed_2
 
     def test_pure_vegetation(self):
         """Test NDUI for pure vegetation area."""

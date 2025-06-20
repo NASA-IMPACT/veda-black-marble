@@ -20,7 +20,25 @@ from blackmarble.config import LandsatConfig, VIIRSConfig
 
 
 class TestCloudMasker:
-    """Test CloudMasker component."""
+    """Test CloudMasker component.
+    
+    Landsat Collection 2 QA_PIXEL bit definitions:
+    - Bits 0-1: Fill (0=no, 1=yes)
+    - Bit 2: Clear (0=no, 1=yes)  
+    - Bit 3: Water (0=no, 1=yes)
+    - Bits 4-5: Cloud shadow confidence (0=none, 1=low, 2=medium, 3=high)
+    - Bits 6-7: Snow/ice confidence
+    - Bits 8-9: Cloud confidence (0=none, 1=low, 2=medium, 3=high)
+    - Bits 10-11: Cirrus confidence
+    
+    Common QA values used in tests:
+    - 21824 (0101010101000000): Clear land (clear=1, water=0, no clouds/shadows)
+    - 21952 (0101010111000000): Clear water (clear=1, water=1, no clouds/shadows)
+    - 22280 (0101011100001000): Low confidence cloud
+    - 54596 (1101010101000100): Medium confidence cloud  
+    - 54852 (1101011001000100): High confidence cloud
+    - 55052 (1101011110001100): High confidence cloud + shadow
+    """
 
     def test_conservative_strategy(self):
         """Test conservative cloud masking strategy."""
@@ -146,15 +164,20 @@ class TestRadianceSaturationMasker:
 
     def test_single_band_masking(self):
         """Test masking for a single band."""
-        # QA_RADSAT with bit flags
+        # QA_RADSAT bit definitions for Landsat 8-9:
+        # Bit 0 (value 1) = Band 1 saturated
+        # Bit 1 (value 2) = Band 2 saturated  
         # Bit 2 (value 4) = Band 3 saturated
         # Bit 3 (value 8) = Band 4 saturated
         # Bit 4 (value 16) = Band 5 saturated
+        # Bit 5 (value 32) = Band 6 saturated
+        # Bit 6 (value 64) = Band 7 saturated
+        # Multiple bits can be set (values add)
         qa_radsat = np.array(
             [
-                [0, 4, 8],  # none, B3 sat, B4 sat
-                [12, 16, 20],  # B3+B4 sat, B5 sat, B3+B5 sat
-                [28, 0, 4],  # B3+B4+B5 sat, none, B3 sat
+                [0, 4, 8],      # none, B3 saturated, B4 saturated
+                [12, 16, 20],   # B3+B4 (4+8), B5 saturated, B3+B5 (4+16)
+                [28, 0, 4],     # B3+B4+B5 (4+8+16), none, B3 saturated
             ]
         )
 
