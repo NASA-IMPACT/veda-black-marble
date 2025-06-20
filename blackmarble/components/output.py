@@ -96,7 +96,7 @@ class COGProfile:
     blocksize: int = 512
     overview_level: Optional[int] = None
     overview_resampling: str = "bilinear"
-    web_optimized: bool = True
+    web_optimized: bool = True  # Always true for COGs
     in_memory: bool = True
 
 
