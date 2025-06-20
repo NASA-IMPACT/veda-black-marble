@@ -8,27 +8,24 @@ Landsat data download & processing:
 
 # Landsat data download & processing
 import os
-import glob
-import numpy as np
 import boto3
 from importlib.resources import files
 from datetime import datetime
 from typing import Any, Union
 from boto3.session import Session
-from mypy_boto3_s3.client import S3Client
 import collections
+from osgeo import gdal
+from osgeo import ogr
+import shapely.wkt
+import shapely.geometry
+
+# Enable GDAL/OGR exceptions (avoids FutureWarning and uses Python exceptions)
+ogr.UseExceptions()
 
 # Default path to WRS2 descending shapefile bundled with this package
 DEFAULT_WRS_SHAPEFILE: str = str(
     files("blackmarble").joinpath("data", "WRS2_descending_0", "WRS2_descending.shp")
 )
-from osgeo import gdal
-from osgeo import ogr
-
-# Enable GDAL/OGR exceptions (avoids FutureWarning and uses Python exceptions)
-ogr.UseExceptions()
-import shapely.wkt
-import shapely.geometry
 
 
 class LandsatUtil:
@@ -38,8 +35,8 @@ class LandsatUtil:
         collections.OrderedDict()
     )
     MAX_CACHE_SIZE = 100
-    shapefile: ogr.DataSource
-    layer: ogr.Layer
+    shapefile: Any  # ogr.DataSource is not properly typed
+    layer: Any  # ogr.Layer is not properly typed
     polygons: list[tuple[shapely.geometry.Polygon, int, int]]
 
     def __init__(self, shapefile: str | None = None) -> None:
@@ -55,7 +52,8 @@ class LandsatUtil:
             row = feat["ROW"]
             geom = feat.GetGeometryRef()
             shape = shapely.wkt.loads(geom.ExportToWkt())
-            self.polygons.append((shape, path, row))
+            if isinstance(shape, shapely.geometry.Polygon):
+                self.polygons.append((shape, path, row))
 
     def get_wrs(self, lat: float, lon: float) -> list[dict[str, int]]:
         """Return list of {'path', 'row'} for given lat/lon."""
@@ -73,18 +71,23 @@ class LandsatUtil:
         mo: str = str(month).zfill(2)
         da: str = str(day).zfill(2)
         prefix: str = f"collection02/level-2/standard/oli-tirs/{yr}/{path}/{row}/"
+        directories: list[dict[str, str]]
         if prefix in self.dir_cache:
-            directories: list[dict[str, str]] = self.dir_cache[prefix]
+            directories = self.dir_cache[prefix]
         else:
             session = boto3.Session()
-            s3: S3Client = session.client("s3")
+            s3 = session.client("s3")
             resp = s3.list_objects_v2(
                 Bucket="usgs-landsat",
                 Prefix=prefix,
                 RequestPayer="requester",
                 Delimiter="/",
             )
-            directories = resp.get("CommonPrefixes", [])
+            directories = []
+            common_prefixes = resp.get("CommonPrefixes", [])
+            for prefix_entry in common_prefixes:
+                if isinstance(prefix_entry, dict) and "Prefix" in prefix_entry:
+                    directories.append({"Prefix": prefix_entry["Prefix"]})
             if len(self.dir_cache) >= self.MAX_CACHE_SIZE:
                 self.dir_cache.popitem(last=False)
             self.dir_cache[prefix] = directories
@@ -107,11 +110,12 @@ class LandsatUtil:
         key: str
         if band in ("QA_PIXEL", "QA_RADSAT", "QA_AEROSOL"):
             # Adjust suffix for QA_AEROSOL if needed based on actual filenames
-            suffix: str = {
+            suffix_map: dict[str, str] = {
                 "QA_PIXEL": "_QA_PIXEL.TIF",
                 "QA_RADSAT": "_QA_RADSAT.TIF",
                 "QA_AEROSOL": "_SR_QA_AEROSOL.TIF",
-            }[band]  # Assuming SR_QA_AEROSOL
+            }
+            suffix = suffix_map[str(band)]  # Convert to str for type safety
             key = directory + scene + suffix
         else:
             key = f"{directory}{scene}_SR_B{band}.TIF"
@@ -119,7 +123,7 @@ class LandsatUtil:
         # Rely on boto3's default credential resolution (env vars, shared
         # credentials file, IAM roles, etc.)
         session: Session = boto3.Session()
-        s3: S3Client = session.client("s3")
+        s3 = session.client("s3")
         # Ensure the directory for the output file exists
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         s3.download_file(

@@ -19,7 +19,9 @@ def wkt_to_json(wkt_string: str) -> dict[str, Any]:
     return proj.crs.to_json_dict()
 
 
-def get_utm_zone(latitude: float, longitude: float) -> tuple[float, float, int, str]:
+def get_utm_zone(
+    latitude: float, longitude: float
+) -> tuple[float, float, int, str | None]:
     """Return (easting, northing, zone_number, zone_letter) for given lat/lon."""
     return utm.from_latlon(latitude, longitude)
 

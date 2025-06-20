@@ -1,6 +1,36 @@
 #!/usr/bin/env python3
+"""
+Pipeline orchestration for Black Marble processing.
+Imports modules in this package to perform the full workflow:
+  1. Download & merge Landsat bands + QA
+  2. Download VIIRS nightlights + convert to TIFF
+  3. Rasterize OSM roads
+  4. Mask clouds, aerosol, radsat
+  5. Stack, compute NDVI/NDWI/NDUI, colorize
+  6. Export cloud-optimized GeoTIFF & upload
+"""
 # Allow direct execution: ensure project root is on PYTHONPATH
-import os, sys
+import os
+import sys
+import numpy as np
+import boto3
+from osgeo import gdal
+import rasterio
+from rasterio.io import MemoryFile
+from rio_cogeo.profiles import cog_profiles
+from rio_cogeo.cogeo import cog_translate
+import os.path
+from typing import List, Tuple, Optional, Dict, Any
+
+# Package imports
+from blackmarble.coords import get_utm_zone
+from blackmarble.landsat import process_band_data
+from blackmarble.reproj import crop_to_bb_utm, convert_to_wgs84, subset_raster_normal
+from blackmarble.io import get_geo, save_geotiff_single, scale_image
+from blackmarble.masks import mark_cloud, mark_aerosol, mark_radsat
+from blackmarble.utils import fill_gaps, rescale_bands
+from blackmarble.vnp import VNP46A2Util
+from blackmarble.osm import OSMUtil
 
 # If run as script, ensure project root is on PYTHONPATH and set package name
 if __name__ == "__main__" and __package__ is None:
@@ -14,38 +44,6 @@ if __name__ == "__main__" and __package__ is None:
         ogr.UseExceptions()
     except ImportError:
         pass
-"""
-Pipeline orchestration for Black Marble processing.
-Imports modules in this package to perform the full workflow:
-  1. Download & merge Landsat bands + QA
-  2. Download VIIRS nightlights + convert to TIFF
-  3. Rasterize OSM roads
-  4. Mask clouds, aerosol, radsat
-  5. Stack, compute NDVI/NDWI/NDUI, colorize
-  6. Export cloud-optimized GeoTIFF & upload
-"""
-import argparse
-import importlib
-import numpy as np
-import boto3
-from osgeo import gdal
-import rasterio
-from rasterio.io import MemoryFile
-from rio_cogeo.profiles import cog_profiles
-from rio_cogeo.cogeo import cog_translate
-import os.path
-from typing import List, Tuple, Optional, Dict, Any
-from mypy_boto3_s3.client import S3Client
-
-# Package imports
-from blackmarble.coords import get_utm_zone
-from blackmarble.landsat import process_band_data
-from blackmarble.reproj import crop_to_bb_utm, convert_to_wgs84, subset_raster_normal
-from blackmarble.io import get_geo, save_geotiff_single, scale_image
-from blackmarble.masks import mark_cloud, mark_aerosol, mark_radsat
-from blackmarble.utils import fill_gaps, rescale_bands
-from blackmarble.vnp import VNP46A2Util
-from blackmarble.osm import OSMUtil
 
 NTL_FLOOR = 0.1
 NTL_CEILING = 10
@@ -112,12 +110,12 @@ def run_pipeline(
     e1: float
     n1: float
     zone1: int
-    letter1: str
+    letter1: str | None
     e1, n1, zone1, letter1 = get_utm_zone(lat1, lon1)
     e2: float
     n2: float
     zone2: int
-    letter2: str
+    letter2: str | None
     e2, n2, zone2, letter2 = get_utm_zone(lat2, lon2)
 
     # Warn if bounding box spans UTM zones
@@ -217,61 +215,137 @@ def run_pipeline(
 
     # 3) Mask & Stack
     print("Masking and stacking bands...")
+    print(f"DEBUG: Processing {len(b3_final)} scenes")
     b3_pxs: List[np.ndarray] = []
     b4_pxs: List[np.ndarray] = []
     b5_pxs: List[np.ndarray] = []
     for i in range(len(b3_final)):
+        print(f"\nDEBUG: Processing scene {i+1}/{len(b3_final)}")
         p_px: np.ndarray
-        _: Tuple[float, ...]
-        __: str
-        p_px, _, _ = get_geo(p_final[i], 1)
+        _: Tuple[float, ...] | str
+        __: Tuple[float, ...] | str
+        p_px, _, __ = get_geo(p_final[i], 1)
         a_px: np.ndarray
-        a_px, _, _ = get_geo(a_final[i], 1)
+        a_px, _, __ = get_geo(a_final[i], 1)
         r_px: np.ndarray
-        r_px, _, _ = get_geo(r_final[i], 1)
+        r_px, _, __ = get_geo(r_final[i], 1)
+        
+        # Debug QA values
+        print(f"DEBUG: QA_PIXEL unique values: {np.unique(p_px)[:10]}... (showing first 10)")
+        print(f"DEBUG: QA_AEROSOL unique values: {np.unique(a_px)[:10]}... (showing first 10)")
+        print(f"DEBUG: QA_RADSAT unique values: {np.unique(r_px)[:10]}... (showing first 10)")
+        
         c_mask: np.ndarray = mark_cloud(p_px)
         a_mask: np.ndarray = mark_aerosol(a_px)
         b3_r_px: np.ndarray
         b4_r_px: np.ndarray
         b5_r_px: np.ndarray
         b3_r_px, b4_r_px, b5_r_px = mark_radsat(r_px)
+        
+        # Debug radsat masks
+        print(f"DEBUG: Radsat B3 keep: {np.sum(b3_r_px > 0)} ({100.0 * np.sum(b3_r_px > 0) / b3_r_px.size:.1f}%)")
+        print(f"DEBUG: Radsat B4 keep: {np.sum(b4_r_px > 0)} ({100.0 * np.sum(b4_r_px > 0) / b4_r_px.size:.1f}%)")
+        print(f"DEBUG: Radsat B5 keep: {np.sum(b5_r_px > 0)} ({100.0 * np.sum(b5_r_px > 0) / b5_r_px.size:.1f}%)")
         b3_px: np.ndarray
-        b3_px, _, _ = get_geo(b3_final[i], 1)
+        b3_px, _, __ = get_geo(b3_final[i], 1)
         b4_px: np.ndarray
-        b4_px, _, _ = get_geo(b4_final[i], 1)
+        b4_px, _, __ = get_geo(b4_final[i], 1)
         b5_px: np.ndarray
-        b5_px, _, _ = get_geo(b5_final[i], 1)
+        b5_px, _, __ = get_geo(b5_final[i], 1)
+        
+        # Check band data ranges
+        print(f"\nDEBUG: Band value ranges:")
+        print(f"DEBUG: B3 range: {np.min(b3_px)} - {np.max(b3_px)}")
+        print(f"DEBUG: B4 range: {np.min(b4_px)} - {np.max(b4_px)}")
+        print(f"DEBUG: B5 range: {np.min(b5_px)} - {np.max(b5_px)}")
+        # Debug masking statistics
+        total_pixels = p_px.size
+        cloud_keep = np.sum(c_mask > 0)
+        aerosol_keep = np.sum(a_mask > 0)
+        b3_radsat_keep = np.sum(b3_r_px > 0)
+        
+        print(f"DEBUG: Total pixels in scene: {total_pixels}")
+        print(f"DEBUG: Pixels kept after cloud mask: {cloud_keep} ({100.0 * cloud_keep / total_pixels:.1f}%)")
+        print(f"DEBUG: Pixels kept after aerosol mask: {aerosol_keep} ({100.0 * aerosol_keep / total_pixels:.1f}%)")
+        print(f"DEBUG: B3 pixels kept after radsat mask: {b3_radsat_keep} ({100.0 * b3_radsat_keep / total_pixels:.1f}%)")
+        
         # Use NaN for masked pixels instead of 0 to distinguish from valid zeros
         combined_mask = c_mask * a_mask
+        combined_keep = np.sum(combined_mask > 0)
+        print(f"DEBUG: Pixels kept after combined cloud+aerosol mask: {combined_keep} ({100.0 * combined_keep / total_pixels:.1f}%)")
+        
         b3_masked = np.where(combined_mask * b3_r_px == 0, np.nan, b3_px)
         b4_masked = np.where(combined_mask * b4_r_px == 0, np.nan, b4_px)
         b5_masked = np.where(combined_mask * b5_r_px == 0, np.nan, b5_px)
+        
+        # Check valid pixels after all masking
+        b3_valid = np.sum(~np.isnan(b3_masked))
+        b4_valid = np.sum(~np.isnan(b4_masked))
+        b5_valid = np.sum(~np.isnan(b5_masked))
+        print(f"DEBUG: Valid pixels after all masks - B3: {b3_valid} ({100.0 * b3_valid / total_pixels:.1f}%), "
+              f"B4: {b4_valid} ({100.0 * b4_valid / total_pixels:.1f}%), "
+              f"B5: {b5_valid} ({100.0 * b5_valid / total_pixels:.1f}%)")
+        
+        # Check if band values are in expected range
+        b3_range = (np.nanmin(b3_px), np.nanmax(b3_px))
+        print(f"DEBUG: B3 value range: {b3_range}")
+        
         b3_pxs.append(b3_masked)
         b4_pxs.append(b4_masked)
         b5_pxs.append(b5_masked)
 
     # Median composite - use fill_gaps to handle different array shapes
+    print("\nDEBUG: Creating median composite...")
     stack3: np.ndarray = fill_gaps(b3_pxs)
     stack4: np.ndarray = fill_gaps(b4_pxs)
     stack5: np.ndarray = fill_gaps(b5_pxs)
+    
+    print(f"DEBUG: Stack shapes - B3: {stack3.shape}, B4: {stack4.shape}, B5: {stack5.shape}")
+    print(f"DEBUG: Valid pixels in stacks - B3: {np.sum(~np.isnan(stack3))}, "
+          f"B4: {np.sum(~np.isnan(stack4))}, B5: {np.sum(~np.isnan(stack5))}")
+    
     # Already using NaN for invalid pixels, so just use nanmedian directly
-    b3_med: np.ndarray = np.nanmedian(stack3, axis=0)
-    b4_med: np.ndarray = np.nanmedian(stack4, axis=0)
-    b5_med: np.ndarray = np.nanmedian(stack5, axis=0)
+    with np.errstate(all='ignore'):  # Suppress warnings temporarily
+        b3_med: np.ndarray = np.nanmedian(stack3, axis=0)
+        b4_med: np.ndarray = np.nanmedian(stack4, axis=0)
+        b5_med: np.ndarray = np.nanmedian(stack5, axis=0)
+    
+    # Check results
+    b3_all_nan = np.all(np.isnan(b3_med))
+    b4_all_nan = np.all(np.isnan(b4_med))
+    b5_all_nan = np.all(np.isnan(b5_med))
+    
+    print(f"\nDEBUG: Median composite results:")
+    print(f"DEBUG: B3 all NaN: {b3_all_nan}, valid pixels: {np.sum(~np.isnan(b3_med))}")
+    print(f"DEBUG: B4 all NaN: {b4_all_nan}, valid pixels: {np.sum(~np.isnan(b4_med))}")
+    print(f"DEBUG: B5 all NaN: {b5_all_nan}, valid pixels: {np.sum(~np.isnan(b5_med))}")
+    
+    if b3_all_nan or b4_all_nan or b5_all_nan:
+        print("\nERROR: One or more bands have NO valid pixels after masking!")
+        print("This typically means:")
+        print("  1. The QA masks are too aggressive (marking all pixels as bad)")
+        print("  2. The input data is corrupted or missing")
+        print("  3. The mask logic might be inverted")
+        # Don't raise error yet, let's see what happens
 
     # 4) Save merged bands
     print("Saving merged Landsat bands...")
     # get georef from first band
-    _: np.ndarray
-    gt: Tuple[float, ...]
-    proj: str
-    _, gt, proj = get_geo(b3_final[0], 1)
+    _unused: np.ndarray
+    gt_merge: Tuple[float, ...] | str
+    proj_merge: Tuple[float, ...] | str
+    _unused, gt_merge, proj_merge = get_geo(b3_final[0], 1)
+    # Type narrow gt_merge and proj_merge
+    if isinstance(gt_merge, str) or isinstance(proj_merge, str):
+        raise RuntimeError("Unexpected string type in georeferencing data")
+    gt_save: Tuple[float, ...] = gt_merge  # type: ignore
+    proj_save: str = proj_merge  # type: ignore
     b3_merged_path = os.path.join(output_dir, "B3.TIFF")
     b4_merged_path = os.path.join(output_dir, "B4.TIFF")
     b5_merged_path = os.path.join(output_dir, "B5.TIFF")
-    save_geotiff_single(b3_merged_path, b3_med, proj, gt)
-    save_geotiff_single(b4_merged_path, b4_med, proj, gt)
-    save_geotiff_single(b5_merged_path, b5_med, proj, gt)
+    save_geotiff_single(b3_merged_path, b3_med, proj_save, gt_save)
+    save_geotiff_single(b4_merged_path, b4_med, proj_save, gt_save)
+    save_geotiff_single(b5_merged_path, b5_med, proj_save, gt_save)
 
     # 5) Reproject to WGS84
     print("Reprojecting to WGS84...")
@@ -283,7 +357,7 @@ def run_pipeline(
     convert_to_wgs84(b5_merged_path, b5_wgs84_path, lon1, lat1, lon2, lat2, output_dir)
 
     # 6) Download & subset Nightlights (VIIRS)
-    print("Downloading nightlights (VIIRS)...")
+    print("\nDEBUG: Downloading nightlights (VIIRS)...")
     vnp = VNP46A2Util()
 
     # Get all tiles that intersect the bounding box
@@ -433,27 +507,51 @@ def run_pipeline(
         gdal.Warp(outp, inp, options=warp_opts)
 
     # 9) Load final rasters and stack
-    print("Loading final rasters and stacking...")
-    b3_px: np.ndarray
-    gt: Tuple[float, ...]
-    proj: str
-    b3_px, gt, proj = get_geo(outputs_final[0], 1)
-    b4_px: np.ndarray
-    b4_px, _, _ = get_geo(outputs_final[1], 1)
-    b5_px: np.ndarray
-    b5_px, _, _ = get_geo(outputs_final[2], 1)
+    print("\nDEBUG: Loading final rasters and stacking...")
+    b3_px_final: np.ndarray
+    gt_temp3: Any
+    proj_temp3: Any
+    b3_px_final, gt_temp3, proj_temp3 = get_geo(outputs_final[0], 1)
+    
+    print(f"DEBUG: Final georef - geotransform type: {type(gt_temp3)}, value: {gt_temp3}")
+    print(f"DEBUG: Final georef - projection type: {type(proj_temp3)}")
+    
+    # Ensure correct types
+    if not isinstance(gt_temp3, tuple):
+        raise RuntimeError(f"Expected tuple for final geotransform, got {type(gt_temp3)}: {gt_temp3}")
+    if not isinstance(proj_temp3, str):
+        raise RuntimeError(f"Expected string for final projection, got {type(proj_temp3)}: {proj_temp3}")
+    
+    gt: Tuple[float, ...] = gt_temp3
+    proj: str = proj_temp3
+    b4_px_final: np.ndarray
+    _gt4: Tuple[float, ...] | str
+    _proj4: Tuple[float, ...] | str
+    b4_px_final, _gt4, _proj4 = get_geo(outputs_final[1], 1)
+    b5_px_final: np.ndarray
+    _gt5: Tuple[float, ...] | str
+    _proj5: Tuple[float, ...] | str
+    b5_px_final, _gt5, _proj5 = get_geo(outputs_final[2], 1)
     ntl_px: np.ndarray
-    ntl_px, _, _ = get_geo(outputs_final[3], 1)
+    _gt_ntl: Tuple[float, ...] | str
+    _proj_ntl: Tuple[float, ...] | str
+    ntl_px, _gt_ntl, _proj_ntl = get_geo(outputs_final[3], 1)
     lunar_px: np.ndarray
-    lunar_px, _, _ = get_geo(outputs_final[4], 1)
+    _gt_lunar: Tuple[float, ...] | str
+    _proj_lunar: Tuple[float, ...] | str
+    lunar_px, _gt_lunar, _proj_lunar = get_geo(outputs_final[4], 1)
     quality_px: np.ndarray
-    quality_px, _, _ = get_geo(outputs_final[5], 1)
+    _gt_quality: Tuple[float, ...] | str
+    _proj_quality: Tuple[float, ...] | str
+    quality_px, _gt_quality, _proj_quality = get_geo(outputs_final[5], 1)
     osm_px: np.ndarray
-    osm_px, _, _ = get_geo(outputs_final[6], 1)
+    _gt_osm: Tuple[float, ...] | str
+    _proj_osm: Tuple[float, ...] | str
+    osm_px, _gt_osm, _proj_osm = get_geo(outputs_final[6], 1)
 
     # Apply fill_gaps to ensure all arrays have same shape
     stack: np.ndarray = fill_gaps(
-        [b3_px, b4_px, b5_px, ntl_px, lunar_px, quality_px, osm_px]
+        [b3_px_final, b4_px_final, b5_px_final, ntl_px, lunar_px, quality_px, osm_px]
     )
     b3_px = rescale_bands(stack[0])
     b4_px = rescale_bands(stack[1])
@@ -477,13 +575,19 @@ def run_pipeline(
 
     # Apply quality mask (keep pixels with flag == 0 (high quality) or flag == 2 (twilight))
     # Fix the original boolean logic error
+    print(f"\nDEBUG: VIIRS quality flag unique values: {np.unique(quality_px)}")
     quality_mask: np.ndarray = ((quality_px == 0) | (quality_px == 2)).astype(
         np.float32
     )
+    quality_keep = np.sum(quality_mask > 0)
+    print(f"DEBUG: VIIRS pixels kept after quality mask: {quality_keep} ({100.0 * quality_keep / quality_px.size:.1f}%)")
 
     # Apply lunar irradiance correction properly to avoid false negatives
     # Subtract lunar irradiance first, then apply quality mask
+    print(f"\nDEBUG: NTL value range before correction: {np.min(img_ntl)} - {np.max(img_ntl)}")
+    print(f"DEBUG: Lunar irradiance range: {np.min(img_lunar)} - {np.max(img_lunar)}")
     adjusted_ntl: np.ndarray = (img_ntl - img_lunar) * quality_mask
+    print(f"DEBUG: NTL value range after lunar correction: {np.min(adjusted_ntl)} - {np.max(adjusted_ntl)}")
 
     # Convert units (nW/cm²/sr) and apply scaling
     adjusted_ntl = adjusted_ntl / 10.0
@@ -497,10 +601,16 @@ def run_pipeline(
     img_road: np.ndarray = osm_px
 
     # NDUI
+    print(f"\nDEBUG: Computing NDUI...")
+    print(f"DEBUG: NTL normalized range: {np.nanmin(img_ntl)} - {np.nanmax(img_ntl)}")
+    print(f"DEBUG: NDVI range: {np.nanmin(img_ndvi)} - {np.nanmax(img_ndvi)}")
     ndui: np.ndarray = (img_ntl - img_ndvi) / (img_ntl + img_ndvi + 1e-6)
     ndui = np.clip(ndui, -1.0, 1.0)
+    print(f"DEBUG: NDUI range after calculation: {np.nanmin(ndui)} - {np.nanmax(ndui)}")
 
     # Apply water mask (Task 1.3) - set water pixels to -1
+    water_pixels = np.sum(img_ndwi >= 0.0)
+    print(f"\nDEBUG: Water pixels detected (NDWI >= 0): {water_pixels} ({100.0 * water_pixels / img_ndwi.size:.1f}%)")
     ndui = np.where(img_ndwi >= 0.0, -1.0, ndui)
 
     # Transform to 0-1 range (simplified without unnecessary abs)
@@ -517,9 +627,14 @@ def run_pipeline(
     # ndui = ndui / 1.3  # REMOVED - This was the normalization bug
 
     # 11) Colorize & create COG
-    print("Colorizing and creating cloud-optimized GeoTIFF...")
+    print("\nDEBUG: Colorizing and creating cloud-optimized GeoTIFF...")
+    print(f"DEBUG: Final NDUI range: {np.nanmin(ndui)} - {np.nanmax(ndui)}")
+    print(f"DEBUG: Non-zero NDUI pixels: {np.sum(ndui > 0)} ({100.0 * np.sum(ndui > 0) / ndui.size:.1f}%)")
     # load bundled colormap arrays
-    data_dir: str = str(importlib.resources.files("blackmarble").joinpath("data"))
+    # Use importlib.resources for Python 3.9+ compatibility
+    import importlib.resources as resources
+
+    data_dir: str = str(resources.files("blackmarble").joinpath("data"))
     r: np.ndarray = np.load(os.path.join(data_dir, "inferno_r.npy"))
     g: np.ndarray = np.load(os.path.join(data_dir, "inferno_g.npy"))
     b: np.ndarray = np.load(os.path.join(data_dir, "inferno_b.npy"))
@@ -549,7 +664,7 @@ def run_pipeline(
     # 12) Upload (skip if no bucket/key provided)
     if upload_bucket and upload_key:
         print(f"Uploading {out_cog} to s3://{upload_bucket}/{upload_key}...")
-        s3: S3Client = boto3.client("s3")
+        s3 = boto3.client("s3")
         with open(out_cog, "rb") as f:
             s3.upload_fileobj(f, upload_bucket, upload_key)
         print("Upload complete.")

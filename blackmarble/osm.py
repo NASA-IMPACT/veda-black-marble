@@ -12,7 +12,7 @@ import fiona
 import osmnx as ox
 import shapely.geometry
 import shutil  # Import shutil for directory removal
-from typing import Any, Union  # Add typing imports
+from typing import Any
 
 
 class OSMUtil:
@@ -40,17 +40,22 @@ class OSMUtil:
         shapefile_dir = os.path.join(temp_dir, "roads_osm_flat")
         try:
             G = ox.graph_from_bbox(
-                max(lat1, lat2),
-                min(lat1, lat2),
-                max(lon1, lon2),
-                min(lon1, lon2),
+                bbox=(
+                    min(lon1, lon2),
+                    min(lat1, lat2),
+                    max(lon1, lon2),
+                    max(lat1, lat2),
+                ),
                 retain_all=True,
                 network_type="all",
             )
             if G.number_of_edges() == 0:
-                mask = np.zeros((height, width), dtype=np.uint8)
+                mask: np.ndarray = np.zeros((height, width), dtype=np.uint8)
             else:
-                ox.save_graph_shapefile(G, filepath=shapefile_dir)
+                # Convert graph to GeoDataFrames and save as shapefiles
+                nodes_gdf, edges_gdf = ox.graph_to_gdfs(G)
+                os.makedirs(shapefile_dir, exist_ok=True)
+                edges_gdf.to_file(os.path.join(shapefile_dir, "edges.shp"))
                 shp: str = os.path.join(shapefile_dir, "edges.shp")
                 road_shapes: list[dict[str, Any]] = []
                 with fiona.open(shp) as feats:
@@ -60,7 +65,7 @@ class OSMUtil:
                             geom
                         ).buffer(path_thickness)
                         road_shapes.append(shapely.geometry.mapping(poly))
-                mask: np.ndarray = rasterio.features.rasterize(
+                mask = rasterio.features.rasterize(
                     road_shapes,
                     out_shape=(height, width),
                     transform=transform,
@@ -110,10 +115,12 @@ class OSMUtil:
         for idx, custom_filter in enumerate(filters, start=1):
             try:
                 G = ox.graph_from_bbox(
-                    max(lat1, lat2),
-                    min(lat1, lat2),
-                    max(lon1, lon2),
-                    min(lon1, lon2),
+                    bbox=(
+                        min(lon1, lon2),
+                        min(lat1, lat2),
+                        max(lon1, lon2),
+                        max(lat1, lat2),
+                    ),
                     retain_all=True,
                     network_type="all",
                     custom_filter=custom_filter,
@@ -122,7 +129,10 @@ class OSMUtil:
                     continue
                 if os.path.exists(shapefile_dir):
                     shutil.rmtree(shapefile_dir)
-                ox.save_graph_shapefile(G, filepath=shapefile_dir)
+                # Convert graph to GeoDataFrames and save as shapefiles
+                nodes_gdf, edges_gdf = ox.graph_to_gdfs(G)
+                os.makedirs(shapefile_dir, exist_ok=True)
+                edges_gdf.to_file(os.path.join(shapefile_dir, "edges.shp"))
                 shp: str = os.path.join(shapefile_dir, "edges.shp")
                 shapes: list[dict[str, Any]] = []
                 with fiona.open(shp) as feats:
