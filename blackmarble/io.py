@@ -8,6 +8,7 @@ Raster I/O utilities:
 """
 
 # Imports
+import os
 from osgeo import gdal
 import numpy as np
 from typing import Union
