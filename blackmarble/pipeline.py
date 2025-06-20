@@ -240,7 +240,18 @@ def run_pipeline(
         b3_r_px: np.ndarray
         b4_r_px: np.ndarray
         b5_r_px: np.ndarray
-        b3_r_px, b4_r_px, b5_r_px = mark_radsat(r_px)
+        # Check if r_px has valid data before calling mark_radsat
+        r_valid = np.sum(~np.isnan(r_px))
+        print(f"DEBUG: QA_RADSAT has {r_valid} valid pixels ({100.0 * r_valid / r_px.size:.1f}%)")
+        
+        if r_valid == 0:
+            print("WARNING: QA_RADSAT has no valid data - assuming no saturation")
+            # If no radsat data, assume no saturation (all pixels good)
+            b3_r_px = np.ones_like(r_px)
+            b4_r_px = np.ones_like(r_px)
+            b5_r_px = np.ones_like(r_px)
+        else:
+            b3_r_px, b4_r_px, b5_r_px = mark_radsat(r_px)
         
         # Debug radsat masks
         print(f"DEBUG: Radsat B3 keep: {np.sum(b3_r_px > 0)} ({100.0 * np.sum(b3_r_px > 0) / b3_r_px.size:.1f}%)")

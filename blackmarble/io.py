@@ -42,11 +42,33 @@ def get_geo(filepath: str, band: int) -> tuple[np.ndarray, tuple[float, ...], st
     nodata = band_obj.GetNoDataValue()
     
     # Convert NoData to NaN for consistent handling
+    # BUT: Be careful with QA bands - they might use 0 as a valid value!
     if nodata is not None:
         print(f"DEBUG get_geo: File {filepath} has NoData value: {nodata}")
-        array = array.astype(np.float32)  # Ensure float type for NaN
-        array = np.where(array == nodata, np.nan, array)
-        print(f"DEBUG get_geo: Replaced {np.sum(np.isnan(array))} NoData pixels with NaN")
+        
+        # Check if this is likely a QA band (contains QA, PIXEL, RADSAT, or AEROSOL in filename)
+        is_qa_band = any(qa in os.path.basename(filepath).upper() for qa in ['QA', 'PIXEL', 'RADSAT', 'AEROSOL'])
+        
+        if is_qa_band and nodata == 0:
+            print(f"DEBUG get_geo: This appears to be a QA band with NoData=0. Checking if 0 is actually used...")
+            zero_count = np.sum(array == 0)
+            unique_vals = np.unique(array)
+            print(f"DEBUG get_geo: Found {zero_count} zeros out of {array.size} pixels")
+            print(f"DEBUG get_geo: Unique values: {unique_vals[:10]}... (first 10)")
+            
+            # If all or most pixels are 0, it's likely NoData
+            if zero_count == array.size or zero_count > 0.9 * array.size:
+                print(f"DEBUG get_geo: {100.0 * zero_count / array.size:.1f}% pixels are 0 - treating as NoData")
+                array = array.astype(np.float32)
+                array = np.where(array == nodata, np.nan, array)
+                print(f"DEBUG get_geo: Replaced {np.sum(np.isnan(array))} NoData pixels with NaN")
+            else:
+                print(f"DEBUG get_geo: Only {100.0 * zero_count / array.size:.1f}% pixels are 0 - keeping as valid QA values")
+        else:
+            # For non-QA bands or non-zero NoData, proceed as normal
+            array = array.astype(np.float32)  # Ensure float type for NaN
+            array = np.where(array == nodata, np.nan, array)
+            print(f"DEBUG get_geo: Replaced {np.sum(np.isnan(array))} NoData pixels with NaN")
 
     geotransform = ds.GetGeoTransform()
     projection = ds.GetProjectionRef()

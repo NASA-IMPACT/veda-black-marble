@@ -55,8 +55,26 @@ def mark_aerosol(a_px):
 
 
 def mark_radsat(r_px):
-    """Mask radiance saturation for bands 3, 4, 5 from QA flags."""
-    b3 = check_values([4], r_px & 4)
-    b4 = check_values([8], r_px & 8)
-    b5 = check_values([16], r_px & 16)
+    """Mask radiance saturation for bands 3, 4, 5 from QA flags.
+    
+    Returns masks where 1.0 = pixel is good (not saturated), 0.0 = pixel is saturated.
+    If input contains NaN (from NoData), those pixels are marked as 0.0 (masked).
+    """
+    # Handle NaN values - convert to a value that won't match any bit flags
+    # This ensures NaN pixels are masked out (return 0.0)
+    r_px_safe = np.where(np.isnan(r_px), -1, r_px).astype(np.int32)
+    
+    # Check bit flags for saturation
+    # Bit 2 (value 4) = Band 3 saturated
+    # Bit 3 (value 8) = Band 4 saturated  
+    # Bit 4 (value 16) = Band 5 saturated
+    b3 = check_values([4], r_px_safe & 4)
+    b4 = check_values([8], r_px_safe & 8)
+    b5 = check_values([16], r_px_safe & 16)
+    
+    # Also mask out original NaN pixels
+    b3 = np.where(np.isnan(r_px), 0.0, b3)
+    b4 = np.where(np.isnan(r_px), 0.0, b4)
+    b5 = np.where(np.isnan(r_px), 0.0, b5)
+    
     return b3, b4, b5
