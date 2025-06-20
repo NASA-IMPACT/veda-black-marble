@@ -290,6 +290,11 @@ def run_pipeline(
         b3_range = (np.nanmin(b3_px), np.nanmax(b3_px))
         print(f"DEBUG: B3 value range: {b3_range}")
         
+        # IMPORTANT: Check if values need rescaling (Landsat Collection 2 DN values)
+        if np.nanmax(b3_px) > 1.5:  # If max > 1.5, it's likely DN values not reflectance
+            print(f"WARNING: Band values appear to be DN values (max={np.nanmax(b3_px)}), not reflectance!")
+            print("         These should be scaled with rescale_bands() before use.")
+        
         b3_pxs.append(b3_masked)
         b4_pxs.append(b4_masked)
         b5_pxs.append(b5_masked)
@@ -305,10 +310,17 @@ def run_pipeline(
           f"B4: {np.sum(~np.isnan(stack4))}, B5: {np.sum(~np.isnan(stack5))}")
     
     # Already using NaN for invalid pixels, so just use nanmedian directly
+    # Note: "All-NaN slice" warnings are expected for pixels with no valid data across all time periods
     with np.errstate(all='ignore'):  # Suppress warnings temporarily
         b3_med: np.ndarray = np.nanmedian(stack3, axis=0)
         b4_med: np.ndarray = np.nanmedian(stack4, axis=0)
         b5_med: np.ndarray = np.nanmedian(stack5, axis=0)
+    
+    # For pixels with no valid data across time, nanmedian returns NaN
+    print(f"\nDEBUG: Pixels with no valid data across time (NaN in median):")
+    print(f"DEBUG: B3: {np.sum(np.isnan(b3_med))} pixels ({100.0 * np.sum(np.isnan(b3_med)) / b3_med.size:.1f}%)")
+    print(f"DEBUG: B4: {np.sum(np.isnan(b4_med))} pixels ({100.0 * np.sum(np.isnan(b4_med)) / b4_med.size:.1f}%)")
+    print(f"DEBUG: B5: {np.sum(np.isnan(b5_med))} pixels ({100.0 * np.sum(np.isnan(b5_med)) / b5_med.size:.1f}%)")
     
     # Check results
     b3_all_nan = np.all(np.isnan(b3_med))
@@ -329,23 +341,54 @@ def run_pipeline(
         # Don't raise error yet, let's see what happens
 
     # 4) Save merged bands
-    print("Saving merged Landsat bands...")
+    print("\nDEBUG: Saving merged Landsat bands...")
+    print(f"DEBUG: Reading georef from {b3_final[0]}")
+    
+    # CRITICAL: The band values are raw DN, not reflectance! Need to scale them first
+    print(f"\nDEBUG: Band value ranges BEFORE rescaling:")
+    print(f"DEBUG: B3 median range: {np.nanmin(b3_med)} - {np.nanmax(b3_med)}")
+    print(f"DEBUG: B4 median range: {np.nanmin(b4_med)} - {np.nanmax(b4_med)}")
+    print(f"DEBUG: B5 median range: {np.nanmin(b5_med)} - {np.nanmax(b5_med)}")
+    
+    # Apply rescaling to convert DN to reflectance
+    b3_med_scaled = rescale_bands(b3_med)
+    b4_med_scaled = rescale_bands(b4_med)
+    b5_med_scaled = rescale_bands(b5_med)
+    
+    print(f"\nDEBUG: Band value ranges AFTER rescaling:")
+    print(f"DEBUG: B3 scaled range: {np.nanmin(b3_med_scaled)} - {np.nanmax(b3_med_scaled)}")
+    print(f"DEBUG: B4 scaled range: {np.nanmin(b4_med_scaled)} - {np.nanmax(b4_med_scaled)}")
+    print(f"DEBUG: B5 scaled range: {np.nanmin(b5_med_scaled)} - {np.nanmax(b5_med_scaled)}")
+    
     # get georef from first band
-    _unused: np.ndarray
-    gt_merge: Tuple[float, ...] | str
-    proj_merge: Tuple[float, ...] | str
-    _unused, gt_merge, proj_merge = get_geo(b3_final[0], 1)
-    # Type narrow gt_merge and proj_merge
-    if isinstance(gt_merge, str) or isinstance(proj_merge, str):
-        raise RuntimeError("Unexpected string type in georeferencing data")
-    gt_save: Tuple[float, ...] = gt_merge  # type: ignore
-    proj_save: str = proj_merge  # type: ignore
+    _unused, gt_temp, proj_temp = get_geo(b3_final[0], 1)
+    
+    print(f"DEBUG: Geotransform type: {type(gt_temp)}, value: {gt_temp}")
+    print(f"DEBUG: Projection type: {type(proj_temp)}, length: {len(str(proj_temp)) if proj_temp else 0}")
+    
+    # Direct assignment - get_geo always returns the correct types
+    gt_save: Tuple[float, ...] = gt_temp
+    proj_save: str = proj_temp
     b3_merged_path = os.path.join(output_dir, "B3.TIFF")
     b4_merged_path = os.path.join(output_dir, "B4.TIFF")
     b5_merged_path = os.path.join(output_dir, "B5.TIFF")
-    save_geotiff_single(b3_merged_path, b3_med, proj_save, gt_save)
-    save_geotiff_single(b4_merged_path, b4_med, proj_save, gt_save)
-    save_geotiff_single(b5_merged_path, b5_med, proj_save, gt_save)
+    
+    print(f"\nDEBUG: About to save B3 to {b3_merged_path}")
+    print(f"DEBUG: save_geotiff_single params - shape: {b3_med_scaled.shape}, proj type: {type(proj_save)}, gt type: {type(gt_save)}")
+    
+    try:
+        save_geotiff_single(b3_merged_path, b3_med_scaled, proj_save, gt_save)
+        print("DEBUG: B3 saved successfully")
+    except Exception as e:
+        print(f"ERROR: Failed to save B3: {type(e).__name__}: {e}")
+        print(f"DEBUG: proj_save = {repr(proj_save)}")
+        print(f"DEBUG: gt_save = {repr(gt_save)}")
+        import traceback
+        traceback.print_exc()
+        raise
+        
+    save_geotiff_single(b4_merged_path, b4_med_scaled, proj_save, gt_save)
+    save_geotiff_single(b5_merged_path, b5_med_scaled, proj_save, gt_save)
 
     # 5) Reproject to WGS84
     print("Reprojecting to WGS84...")
@@ -553,6 +596,12 @@ def run_pipeline(
     stack: np.ndarray = fill_gaps(
         [b3_px_final, b4_px_final, b5_px_final, ntl_px, lunar_px, quality_px, osm_px]
     )
+    
+    print(f"\nDEBUG: Final raster value ranges BEFORE rescaling:")
+    print(f"DEBUG: B3: {np.nanmin(stack[0])} - {np.nanmax(stack[0])}")
+    print(f"DEBUG: B4: {np.nanmin(stack[1])} - {np.nanmax(stack[1])}")
+    print(f"DEBUG: B5: {np.nanmin(stack[2])} - {np.nanmax(stack[2])}")
+    
     b3_px = rescale_bands(stack[0])
     b4_px = rescale_bands(stack[1])
     b5_px = rescale_bands(stack[2])
@@ -560,9 +609,24 @@ def run_pipeline(
     lunar_px = stack[4]
     quality_px = stack[5]
     osm_px = stack[6]
+    
+    print(f"\nDEBUG: Final raster value ranges AFTER rescaling:")
+    print(f"DEBUG: B3: {np.nanmin(b3_px)} - {np.nanmax(b3_px)}")
+    print(f"DEBUG: B4: {np.nanmin(b4_px)} - {np.nanmax(b4_px)}")
+    print(f"DEBUG: B5: {np.nanmin(b5_px)} - {np.nanmax(b5_px)}")
 
     # 10) Compute indices
-    print("Computing NDVI, NDWI, NDUI...")
+    print("\nDEBUG: Computing NDVI, NDWI, NDUI...")
+    
+    # Check for valid data before computing indices
+    b3_valid = np.sum(~np.isnan(b3_px))
+    b4_valid = np.sum(~np.isnan(b4_px))
+    b5_valid = np.sum(~np.isnan(b5_px))
+    print(f"DEBUG: Valid pixels - B3: {b3_valid}, B4: {b4_valid}, B5: {b5_valid}")
+    
+    if b3_valid == 0 or b4_valid == 0 or b5_valid == 0:
+        raise RuntimeError("No valid pixels in one or more bands after rescaling!")
+    
     ndvi: np.ndarray = (b5_px - b4_px) / (b5_px + b4_px + 1e-6)
     ndvi = np.clip(ndvi, -1.0, 1.0)
     ndwi: np.ndarray = (b3_px - b5_px) / (b3_px + b5_px + 1e-6)
