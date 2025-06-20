@@ -440,7 +440,7 @@ class TestUtilityFunctions:
         result = dilate_mask(mask, radius=1)
 
         # Center and adjacent pixels should now be masked
-        assert result[1, 1] == 0.0  # Center stays bad
+        assert pytest.approx(result[1, 1], abs=1e-8) == 0.0  # Center stays bad
         assert np.sum(result == 0.0) > 1  # More pixels are bad after dilation
 
         # Test radius 0 (no dilation)

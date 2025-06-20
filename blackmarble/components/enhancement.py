@@ -147,8 +147,9 @@ class RoadEnhancer(ComposableComponent):
         if roads is None:
             raise ValueError("Roads data must be provided in kwargs")
 
-        # Perform enhancement
-        result = self.enhance(data, roads, **kwargs)
+        # Perform enhancement (remove roads from kwargs to avoid duplicate)
+        enhancement_kwargs = {k: v for k, v in kwargs.items() if k != "roads"}
+        result = self.enhance(data, roads, **enhancement_kwargs)
 
         # Create a mask indicating enhanced pixels
         mask = (roads > 0).astype(float)

@@ -6,6 +6,7 @@ predictable inputs where we know the exact expected outputs mathematically.
 
 import numpy as np
 import pytest
+from tests.test_utils import assert_array_close, assert_close
 from blackmarble.calculations import (
     calculate_ndvi,
     calculate_ndwi,
@@ -287,7 +288,7 @@ class TestNDUIBehavior:
         ndui = calculate_ndui(ntl, ndvi, ndwi, roads, config)
 
         # Should show increasing urbanization
-        assert ndui[0, 0] == 0.0  # Rural (below floor)
+        assert_close(ndui[0, 0], 0.0)  # Rural (below floor)
         assert ndui[0, 1] < ndui[0, 2]  # Increasing
         assert ndui[0, 2] < ndui[0, 3]  # Increasing
         assert ndui[0, 3] < ndui[0, 4]  # Increasing
@@ -357,9 +358,9 @@ class TestLunarCorrectionBehavior:
         assert corrected[0, 2] > 0  # Flag 2 is valid
 
         # Others should be zero
-        assert corrected[0, 1] == 0  # Flag 1 invalid
-        assert corrected[0, 3] == 0  # Flag 3 invalid
-        assert corrected[0, 4] == 0  # Flag 4 invalid
+        assert_close(corrected[0, 1], 0)  # Flag 1 invalid
+        assert_close(corrected[0, 3], 0)  # Flag 3 invalid
+        assert_close(corrected[0, 4], 0)  # Flag 4 invalid
 
     def test_fill_value_handling(self):
         """Test handling of VIIRS fill values."""

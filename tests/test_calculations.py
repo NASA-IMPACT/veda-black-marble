@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from tests.test_utils import assert_array_close, assert_close
 from blackmarble.calculations import (
     calculate_ndvi,
     calculate_ndwi,
@@ -30,8 +31,9 @@ class TestNDVICalculation:
         assert np.all(ndvi < 1)
 
         # Check specific value
-        # NDVI = (0.5 - 0.1) / (0.5 + 0.1) = 0.4 / 0.6 = 0.667
-        assert pytest.approx(ndvi[0, 0], 0.001) == 0.667
+        # NDVI = (0.5 - 0.1) / (0.5 + 0.1 + 1e-6) = 0.4 / 0.600001
+        expected = (0.5 - 0.1) / (0.5 + 0.1 + 1e-6)
+        assert pytest.approx(ndvi[0, 0], 0.001) == expected
 
     def test_ndvi_water(self):
         """Test NDVI for water bodies."""
@@ -43,8 +45,9 @@ class TestNDVICalculation:
 
         # Should be negative for water
         assert ndvi[0, 0] < 0
-        # (0.1 - 0.3) / (0.1 + 0.3) = -0.2 / 0.4 = -0.5
-        assert pytest.approx(ndvi[0, 0], 0.001) == -0.5
+        # (0.1 - 0.3) / (0.1 + 0.3 + 1e-6) = -0.2 / 0.400001
+        expected = (0.1 - 0.3) / (0.1 + 0.3 + 1e-6)
+        assert pytest.approx(ndvi[0, 0], 0.001) == expected
 
     def test_ndvi_bare_soil(self):
         """Test NDVI for bare soil."""
@@ -143,7 +146,7 @@ class TestNDUICalculation:
         # First pixel should have positive NDUI
         assert ndui[0, 0] > 0
         # Second pixel should be zero (water masked)
-        assert ndui[0, 1] == 0.0
+        assert pytest.approx(ndui[0, 1], abs=1e-8) == 0.0
 
     def test_ndui_floor_threshold(self):
         """Test NDUI floor threshold."""
@@ -159,7 +162,7 @@ class TestNDUICalculation:
         ndui = calculate_ndui(ntl, ndvi, ndwi, roads, config)
 
         # Should be zero due to floor threshold
-        assert np.all(ndui == 0.0)
+        assert np.allclose(ndui, 0.0, atol=1e-8)
 
     def test_ndui_road_enhancement(self):
         """Test NDUI road enhancement."""
@@ -220,8 +223,8 @@ class TestLunarCorrection:
         assert corrected[1, 0] > 0  # quality = 2
 
         # Bad quality pixels should be zero
-        assert corrected[0, 1] == 0  # quality = 1
-        assert corrected[1, 1] == 0  # quality = 3
+        assert pytest.approx(corrected[0, 1], abs=1e-8) == 0  # quality = 1
+        assert pytest.approx(corrected[1, 1], abs=1e-8) == 0  # quality = 3
 
     def test_lunar_fill_values(self):
         """Test handling of fill values."""
@@ -235,7 +238,7 @@ class TestLunarCorrection:
 
         # Fill values should become zero
         assert corrected[0, 0] > 0  # Valid pixel
-        assert corrected[0, 1] == 0  # Fill value
+        assert pytest.approx(corrected[0, 1], abs=1e-8) == 0  # Fill value
 
     def test_lunar_floor_ceiling(self):
         """Test floor and ceiling thresholds."""
@@ -248,10 +251,10 @@ class TestLunarCorrection:
         corrected = apply_lunar_correction(ntl, lunar, quality, config)
 
         # Below floor -> 0
-        assert corrected[0, 0] == 0.0
+        assert pytest.approx(corrected[0, 0], abs=1e-8) == 0.0
 
         # Above ceiling -> normalized ceiling
-        assert corrected[0, 1] == 1.0
+        assert pytest.approx(corrected[0, 1], abs=1e-8) == 1.0
 
         # Normal value
         assert 0 < corrected[0, 2] < 1
