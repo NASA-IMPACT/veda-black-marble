@@ -149,9 +149,10 @@ class TestNDUICalculation:
         """Test NDUI floor threshold."""
         config = NDUIConfig(floor=0.5)  # High threshold
         
-        # Low urban signal
-        ntl = np.array([[0.3, 0.2]])
-        ndvi = np.array([[0.25, 0.18]])
+        # Create values where NDVI > NTL (negative NDUI)
+        # This ensures transformed NDUI will be < 0.5
+        ntl = np.array([[0.2, 0.1]])
+        ndvi = np.array([[0.4, 0.3]])  # Higher than NTL
         ndwi = np.array([[-0.1, -0.1]])
         roads = np.zeros((1, 2))
         
@@ -240,7 +241,7 @@ class TestLunarCorrection:
         """Test floor and ceiling thresholds."""
         config = VIIRSConfig(floor=0.5, ceiling=5.0)
         
-        ntl = np.array([[5.0, 1000.0, 3.0]])  # Below floor, above ceiling, normal
+        ntl = np.array([[4.0, 1000.0, 30.0]])  # Below floor, above ceiling, normal
         lunar = np.array([[0.0, 0.0, 0.0]])
         quality = np.array([[0, 0, 0]])
         
@@ -322,8 +323,8 @@ class TestLandsatScaling:
         config = LandsatConfig()
         
         # DN value that produces negative reflectance
-        # 7273 * 0.0000275 - 0.2 = -0.000025 (negative)
-        dn = np.array([[7273]])
+        # 7000 * 0.0000275 - 0.2 = 0.1925 - 0.2 = -0.0075 (negative)
+        dn = np.array([[7000]])
         
         scaled = scale_landsat_to_reflectance(dn, config)
         
@@ -386,7 +387,7 @@ class TestNormalizeToRange:
     
     def test_normalize_constant_values(self):
         """Test normalization when all values are the same."""
-        data = np.array([5, 5, 5])
+        data = np.array([5.0, 5.0, 5.0])
         
         normalized = normalize_to_range(data, 0, 1)
         

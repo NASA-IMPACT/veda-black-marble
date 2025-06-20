@@ -31,6 +31,19 @@ from blackmarble.masks import mark_cloud, mark_aerosol, mark_radsat
 from blackmarble.utils import fill_gaps, rescale_bands
 from blackmarble.vnp import VNP46A2Util
 from blackmarble.osm import OSMUtil
+from blackmarble.config import ProcessingConfig
+from blackmarble.calculations import (
+    calculate_ndvi,
+    calculate_ndwi, 
+    calculate_ndui,
+    apply_lunar_correction,
+    scale_landsat_to_reflectance
+)
+from blackmarble.validation import (
+    check_data_coverage,
+    validate_reflectance_range,
+    generate_quality_report
+)
 
 # If run as script, ensure project root is on PYTHONPATH and set package name
 if __name__ == "__main__" and __package__ is None:
@@ -45,9 +58,7 @@ if __name__ == "__main__" and __package__ is None:
     except ImportError:
         pass
 
-NTL_FLOOR = 0.1
-NTL_CEILING = 10
-NDUI_FLOOR = 0.02
+# Constants are now in ProcessingConfig
 
 
 def run_pipeline(
@@ -69,6 +80,7 @@ def run_pipeline(
     osm_buffer: float = 0.00005,
     display_min: float = 0.3,
     display_max: float = 0.8,
+    config: Optional[ProcessingConfig] = None,
 ) -> str:
     """
     Runs the Black Marble processing pipeline for a given area and date.
@@ -91,6 +103,7 @@ def run_pipeline(
         osm_buffer (float): Buffer distance for OSM road rasterization in degrees. Defaults to 0.00005.
         display_min (float): Minimum value for display scaling (0-1). Defaults to 0.3.
         display_max (float): Maximum value for display scaling (0-1). Defaults to 0.8.
+        config (Optional[ProcessingConfig]): Configuration object. If None, uses defaults or environment.
 
     Returns:
         str: The path to the final generated Cloud-Optimized GeoTIFF.
@@ -98,6 +111,19 @@ def run_pipeline(
     Raises:
         RuntimeError: If critical steps like data download or processing fail.
     """
+    # Initialize configuration
+    if config is None:
+        config = ProcessingConfig.from_env()
+        # Override with any explicitly passed parameters
+        config.landsat.composite_months = composite_months
+        config.viirs.resolution = ntl_resolution
+        config.final_resolution = final_resolution
+        config.osm_buffer = osm_buffer
+        config.display_min = display_min
+        config.display_max = display_max
+    
+    # Validate configuration
+    config.validate()
     # Define output subdirectories
     temp_dir = os.path.join(output_dir, "temp")
     final_dir = os.path.join(output_dir, "final")
@@ -143,7 +169,7 @@ def run_pipeline(
         lon2,
         os.path.join(output_dir, "B3_Merged_"),
         temp_dir,
-        composite_months,
+        config.landsat.composite_months,
     )
     b4_out: List[str]
     b4_p: List[str]
@@ -160,7 +186,7 @@ def run_pipeline(
         lon2,
         os.path.join(output_dir, "B4_Merged_"),
         temp_dir,
-        composite_months,
+        config.landsat.composite_months,
     )
     b5_out: List[str]
     b5_p: List[str]
@@ -177,7 +203,7 @@ def run_pipeline(
         lon2,
         os.path.join(output_dir, "B5_Merged_"),
         temp_dir,
-        composite_months,
+        config.landsat.composite_months,
     )
 
     # 2) Crop to UTM bbox
@@ -372,28 +398,25 @@ def run_pipeline(
     print(f"DEBUG: B5 needs scaling: {b5_needs_scaling} (max value: {np.nanmax(b5_med)})")
     
     # Apply rescaling to convert DN to reflectance (only if needed)
-    if b3_needs_scaling:
-        b3_med_scaled = rescale_bands(b3_med)
-    else:
-        print("DEBUG: B3 appears to already be reflectance, skipping rescale")
-        b3_med_scaled = b3_med
-        
-    if b4_needs_scaling:
-        b4_med_scaled = rescale_bands(b4_med)
-    else:
-        print("DEBUG: B4 appears to already be reflectance, skipping rescale")
-        b4_med_scaled = b4_med
-        
-    if b5_needs_scaling:
-        b5_med_scaled = rescale_bands(b5_med)
-    else:
-        print("DEBUG: B5 appears to already be reflectance, skipping rescale")
-        b5_med_scaled = b5_med
+    # The scale_landsat_to_reflectance function handles the check internally
+    b3_med_scaled = scale_landsat_to_reflectance(b3_med, config.landsat, nodata_value=nodata_value)
+    b4_med_scaled = scale_landsat_to_reflectance(b4_med, config.landsat, nodata_value=nodata_value)
+    b5_med_scaled = scale_landsat_to_reflectance(b5_med, config.landsat, nodata_value=nodata_value)
     
     print(f"\nDEBUG: Band value ranges AFTER rescaling:")
     print(f"DEBUG: B3 scaled range: {np.nanmin(b3_med_scaled)} - {np.nanmax(b3_med_scaled)}")
     print(f"DEBUG: B4 scaled range: {np.nanmin(b4_med_scaled)} - {np.nanmax(b4_med_scaled)}")
     print(f"DEBUG: B5 scaled range: {np.nanmin(b5_med_scaled)} - {np.nanmax(b5_med_scaled)}")
+    
+    # Validate reflectance ranges
+    b3_validation = validate_reflectance_range(b3_med_scaled, "B3")
+    b4_validation = validate_reflectance_range(b4_med_scaled, "B4")
+    b5_validation = validate_reflectance_range(b5_med_scaled, "B5")
+    
+    print(f"\nDEBUG: Reflectance validation:")
+    print(f"DEBUG: B3: {b3_validation['valid_percentage']:.1f}% valid, {b3_validation['out_of_range']} out of range")
+    print(f"DEBUG: B4: {b4_validation['valid_percentage']:.1f}% valid, {b4_validation['out_of_range']} out of range")
+    print(f"DEBUG: B5: {b5_validation['valid_percentage']:.1f}% valid, {b5_validation['out_of_range']} out of range")
     
     # Check valid pixel counts
     print(f"\nDEBUG: Valid pixel counts after processing:")
@@ -528,7 +551,7 @@ def run_pipeline(
     minY: float
     maxY: float
     minY, maxY = sorted([lat1, lat2])
-    scale: float = ntl_resolution
+    scale: float = config.viirs.resolution
 
     # Subset all three layers
     ntl_subset_path = os.path.join(output_dir, "ntl.tif")
@@ -558,12 +581,12 @@ def run_pipeline(
         reference_raster=ntl_subset_path,
         output_path=osm_path,
         output_dir=output_dir,
-        path_thickness=osm_buffer,
+        path_thickness=config.osm_buffer,
     )
 
     # 8) Resample all to final resolution
     print("\nDEBUG: Resampling to final resolution...")
-    desired_res: Tuple[float, float] = (final_resolution, -final_resolution)
+    desired_res: Tuple[float, float] = (config.final_resolution, -config.final_resolution)
     inputs: List[str] = [
         b3_wgs84_path,
         b4_wgs84_path,
@@ -691,9 +714,10 @@ def run_pipeline(
         print(f"DEBUG: B4: {np.min(b4_valid):.4f} to {np.max(b4_valid):.4f} ({len(b4_valid)} valid pixels)")
         print(f"DEBUG: B5: {np.min(b5_valid):.4f} to {np.max(b5_valid):.4f} ({len(b5_valid)} valid pixels)")
     
-    b3_px = rescale_bands(stack[0])
-    b4_px = rescale_bands(stack[1])
-    b5_px = rescale_bands(stack[2])
+    # Scale bands to reflectance if needed
+    b3_px = scale_landsat_to_reflectance(stack[0], config.landsat, nodata_value=-9999.0)
+    b4_px = scale_landsat_to_reflectance(stack[1], config.landsat, nodata_value=-9999.0)
+    b5_px = scale_landsat_to_reflectance(stack[2], config.landsat, nodata_value=-9999.0)
     ntl_px = stack[3]
     lunar_px = stack[4]
     quality_px = stack[5]
@@ -716,39 +740,23 @@ def run_pipeline(
     if b3_valid == 0 or b4_valid == 0 or b5_valid == 0:
         raise RuntimeError("No valid pixels in one or more bands after rescaling!")
     
-    ndvi: np.ndarray = (b5_px - b4_px) / (b5_px + b4_px + 1e-6)
-    ndvi = np.clip(ndvi, -1.0, 1.0)
-    ndwi: np.ndarray = (b3_px - b5_px) / (b3_px + b5_px + 1e-6)
-    ndwi = np.clip(ndwi, -1.0, 1.0)
+    # Calculate spectral indices using refactored functions
+    ndvi = calculate_ndvi(b4_px, b5_px)
+    ndwi = calculate_ndwi(b3_px, b5_px)
 
-    # NTL processing with lunar irradiance correction and quality filtering
-    # Handle fill values (>65530 becomes 0)
-    img_ntl: np.ndarray = np.where(ntl_px > 65530, 0.0, ntl_px).astype(np.float32)
-    img_lunar: np.ndarray = np.where(lunar_px > 65530, 0.0, lunar_px).astype(np.float32)
-
-    # Apply quality mask (keep pixels with flag == 0 (high quality) or flag == 2 (twilight))
-    # Fix the original boolean logic error
+    # Apply lunar correction using refactored function
     print(f"\nDEBUG: VIIRS quality flag unique values: {np.unique(quality_px)}")
-    quality_mask: np.ndarray = ((quality_px == 0) | (quality_px == 2)).astype(
-        np.float32
-    )
-    quality_keep = np.sum(quality_mask > 0)
+    print(f"\nDEBUG: NTL value range before correction: {np.min(ntl_px[ntl_px <= 65530])} - {np.max(ntl_px[ntl_px <= 65530])}")
+    print(f"DEBUG: Lunar irradiance range: {np.min(lunar_px[lunar_px <= 65530])} - {np.max(lunar_px[lunar_px <= 65530])}")
+    
+    # Apply lunar correction and normalization
+    img_ntl = apply_lunar_correction(ntl_px, lunar_px, quality_px, config.viirs)
+    
+    # Debug output
+    quality_mask = ((quality_px == 0) | (quality_px == 2))
+    quality_keep = np.sum(quality_mask)
     print(f"DEBUG: VIIRS pixels kept after quality mask: {quality_keep} ({100.0 * quality_keep / quality_px.size:.1f}%)")
-
-    # Apply lunar irradiance correction properly to avoid false negatives
-    # Subtract lunar irradiance first, then apply quality mask
-    print(f"\nDEBUG: NTL value range before correction: {np.min(img_ntl)} - {np.max(img_ntl)}")
-    print(f"DEBUG: Lunar irradiance range: {np.min(img_lunar)} - {np.max(img_lunar)}")
-    adjusted_ntl: np.ndarray = (img_ntl - img_lunar) * quality_mask
-    print(f"DEBUG: NTL value range after lunar correction: {np.min(adjusted_ntl)} - {np.max(adjusted_ntl)}")
-
-    # Convert units (nW/cm²/sr) and apply scaling
-    adjusted_ntl = adjusted_ntl / 10.0
-    adjusted_ntl = np.where(adjusted_ntl > NTL_CEILING, NTL_CEILING, adjusted_ntl)
-    adjusted_ntl = np.where(adjusted_ntl < NTL_FLOOR, 0.0, adjusted_ntl)
-
-    # Use adjusted NTL for NDUI calculation
-    img_ntl = adjusted_ntl / NTL_CEILING  # Normalize to 0-1
+    print(f"DEBUG: NTL normalized range after correction: {np.min(img_ntl)} - {np.max(img_ntl)}")
     img_ndvi: np.ndarray = ndvi
     img_ndwi: np.ndarray = ndwi
     img_road: np.ndarray = osm_px
@@ -759,37 +767,38 @@ def run_pipeline(
     print(f"DEBUG: NDVI pixels > 0: {np.sum(img_ndvi > 0)} ({100.0 * np.sum(img_ndvi > 0) / img_ndvi.size:.1f}%)")
     print(f"DEBUG: OSM road pixels > 0: {np.sum(img_road > 0)} ({100.0 * np.sum(img_road > 0) / img_road.size:.1f}%)")
 
-    # NDUI
+    # Calculate NDUI using refactored function
     print(f"\nDEBUG: Computing NDUI...")
     print(f"DEBUG: NTL normalized range: {np.nanmin(img_ntl)} - {np.nanmax(img_ntl)}")
     print(f"DEBUG: NDVI range: {np.nanmin(img_ndvi)} - {np.nanmax(img_ndvi)}")
-    ndui: np.ndarray = (img_ntl - img_ndvi) / (img_ntl + img_ndvi + 1e-6)
-    ndui = np.clip(ndui, -1.0, 1.0)
-    print(f"DEBUG: NDUI range after calculation: {np.nanmin(ndui)} - {np.nanmax(ndui)}")
-
-    # Apply water mask (Task 1.3) - set water pixels to -1
+    
+    ndui = calculate_ndui(img_ntl, img_ndvi, img_ndwi, img_road, config.ndui)
+    
+    # Debug output
     water_pixels = np.sum(img_ndwi >= 0.0)
     print(f"\nDEBUG: Water pixels detected (NDWI >= 0): {water_pixels} ({100.0 * water_pixels / img_ndwi.size:.1f}%)")
-    ndui = np.where(img_ndwi >= 0.0, -1.0, ndui)
+    print(f"DEBUG: Final NDUI range: {np.nanmin(ndui)} - {np.nanmax(ndui)}")
+    print(f"DEBUG: Pixels > NDUI_FLOOR ({config.ndui.floor}): {np.sum(ndui > config.ndui.floor)} ({100.0 * np.sum(ndui > config.ndui.floor) / ndui.size:.1f}%)")
 
-    # Transform to 0-1 range (simplified without unnecessary abs)
-    ndui = (ndui + 1.0) / 2.0
-    ndui = np.where(ndui < NDUI_FLOOR, 0.0, ndui)
+    # Generate quality report for debugging
+    quality_data = {
+        "B3": b3_px,
+        "B4": b4_px,
+        "B5": b5_px,
+        "NDVI": ndvi,
+        "NDWI": ndwi,
+        "NTL": img_ntl,
+        "NDUI": ndui,
+        "Roads": img_road
+    }
+    quality_report = generate_quality_report(quality_data)
     
-    # Debug NDUI computation
-    print(f"\nDEBUG: NDUI after transformation to 0-1:")
-    print(f"DEBUG: NDUI range: {np.nanmin(ndui)} - {np.nanmax(ndui)}")
-    print(f"DEBUG: Pixels > NDUI_FLOOR ({NDUI_FLOOR}): {np.sum(ndui > NDUI_FLOOR)} ({100.0 * np.sum(ndui > NDUI_FLOOR) / ndui.size:.1f}%)")
-
-    # Road enhancement (OSM produces values 1-5 only)
-    ndui = np.where((img_road == 1) | (img_road == 4), ndui * 1.3, ndui)
-    ndui = np.where(
-        (img_road == 2) | (img_road == 3) | (img_road == 5), ndui * 1.1, ndui
-    )
-
-    # Task 1.2 Fix: Remove the division by 1.3 that affects all pixels
-    # ndui = ndui / 1.3  # REMOVED - This was the normalization bug
-
+    print("\nDEBUG: Quality Report Summary:")
+    for name, stats in quality_report.items():
+        if stats.get("status") != "missing":
+            print(f"  {name}: {stats['valid_percentage']:.1f}% valid, "
+                  f"range [{stats.get('min', 'N/A'):.3f}, {stats.get('max', 'N/A'):.3f}]")
+    
     # 11) Colorize & create COG
     print("\nDEBUG: Colorizing and creating cloud-optimized GeoTIFF...")
     print(f"DEBUG: Final NDUI range: {np.nanmin(ndui)} - {np.nanmax(ndui)}")
@@ -806,7 +815,7 @@ def run_pipeline(
     g[0] = 0
     b[0] = 0
     # scale
-    img_scaled: np.ndarray = scale_image(ndui, display_min, display_max)
+    img_scaled: np.ndarray = scale_image(ndui, config.display_min, config.display_max)
     rr: np.ndarray = r[img_scaled]
     gg: np.ndarray = g[img_scaled]
     bb: np.ndarray = b[img_scaled]

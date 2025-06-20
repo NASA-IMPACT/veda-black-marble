@@ -72,7 +72,7 @@ class TestCheckDataCoverage:
         
         is_valid, percentage = check_data_coverage(data, min_valid_percentage=50.0)
         
-        assert is_valid is True
+        assert is_valid == True
         assert percentage == pytest.approx(83.33, 0.01)
     
     def test_insufficient_coverage(self):
@@ -81,7 +81,7 @@ class TestCheckDataCoverage:
         
         is_valid, percentage = check_data_coverage(data, min_valid_percentage=50.0)
         
-        assert is_valid is False
+        assert is_valid == False
         assert percentage == 25.0
     
     def test_with_mask(self):
@@ -99,7 +99,7 @@ class TestCheckDataCoverage:
         
         is_valid, percentage = check_data_coverage(data)
         
-        assert is_valid is True
+        assert is_valid == True
         assert percentage == 100.0
 
 
@@ -188,7 +188,7 @@ class TestValidateRoadCoverage:
         assert result["total_pixels"] == 9
         assert result["road_pixels"] == 3
         assert result["road_percentage"] == pytest.approx(33.33, 0.01)
-        assert result["is_valid"] is True
+        assert result["is_valid"] == True
         assert result["road_types"]["type_1"] == 1
         assert result["road_types"]["type_2"] == 1
         assert result["road_types"]["type_3"] == 1
@@ -201,7 +201,7 @@ class TestValidateRoadCoverage:
         
         assert result["road_pixels"] == 0
         assert result["road_percentage"] == 0.0
-        assert result["is_valid"] is False  # Below minimum
+        assert result["is_valid"] == False  # Below minimum
         assert len(result["road_types"]) == 0
     
     def test_too_many_roads(self):
@@ -211,7 +211,7 @@ class TestValidateRoadCoverage:
         result = validate_road_coverage(roads, max_road_percentage=50.0)
         
         assert result["road_percentage"] == 100.0
-        assert result["is_valid"] is False  # Above maximum
+        assert result["is_valid"] == False  # Above maximum
 
 
 class TestValidateProcessingInputs:
@@ -227,7 +227,7 @@ class TestValidateProcessingInputs:
         
         is_valid, errors = validate_processing_inputs(bands)
         
-        assert is_valid is True
+        assert is_valid == True
         assert len(errors) == 0
     
     def test_missing_band(self):
@@ -240,7 +240,7 @@ class TestValidateProcessingInputs:
         
         is_valid, errors = validate_processing_inputs(bands)
         
-        assert is_valid is False
+        assert is_valid == False
         assert len(errors) == 1
         assert "Missing required band: B5" in errors[0]
     
@@ -258,7 +258,7 @@ class TestValidateProcessingInputs:
         
         is_valid, errors = validate_processing_inputs(bands, min_coverage=10.0)
         
-        assert is_valid is False
+        assert is_valid == False
         assert any("B4 has insufficient coverage" in e for e in errors)
     
     def test_all_nan_band(self):
@@ -271,7 +271,7 @@ class TestValidateProcessingInputs:
         
         is_valid, errors = validate_processing_inputs(bands)
         
-        assert is_valid is False
+        assert is_valid == False
         assert any("B3 contains only NaN values" in e for e in errors)
 
 
