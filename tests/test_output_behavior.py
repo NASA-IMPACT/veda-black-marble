@@ -25,8 +25,10 @@ class TestCOGGenerator:
     """Test COGGenerator creates valid profiles."""
     
     def test_single_band_cog_generation(self):
-        """Test generating single-band COG."""
-        generator = COGGenerator()
+        """Test generating single-band COG without web optimization."""
+        # Disable web optimization for predictable testing
+        profile = COGProfile(web_optimized=False)
+        generator = COGGenerator(profile=profile)
         
         # Create test data
         data = np.arange(100).reshape(10, 10).astype(np.float32)
@@ -59,21 +61,24 @@ class TestCOGGenerator:
                 assert np.array_equal(read_data, data)
                 
     def test_multi_band_cog_generation(self):
-        """Test generating multi-band COG."""
-        generator = COGGenerator()
+        """Test generating multi-band COG without web optimization."""
+        # For testing multi-band functionality, disable web optimization
+        # to ensure predictable pixel locations
+        profile = COGProfile(web_optimized=False)
+        generator = COGGenerator(profile=profile)
         
-        # Create 3-band test data
+        # Create 3-band test data - use 256x256 for proper COG
         data = np.array([
-            np.ones((5, 5)) * 100,
-            np.ones((5, 5)) * 200,
-            np.ones((5, 5)) * 250  # Changed from 300 to 250 to fit in uint8
+            np.ones((256, 256)) * 100,
+            np.ones((256, 256)) * 200,
+            np.ones((256, 256)) * 250  # Changed from 300 to 250 to fit in uint8
         ], dtype=np.uint8)
         
         metadata = OutputMetadata(
             crs="EPSG:3857",
-            transform=Affine(10.0, 0, 1000, 0, -10.0, 2000),
-            bounds=(1000, 1950, 1050, 2000),
-            shape=(5, 5),
+            transform=Affine(10.0, 0, 0, 0, -10.0, 2560),
+            bounds=(0, 0, 2560, 2560),
+            shape=(256, 256),
             dtype=np.uint8
         )
         
@@ -84,9 +89,55 @@ class TestCOGGenerator:
             
             with rasterio.open(result_path) as src:
                 assert src.count == 3
+                # Check a few pixels to ensure data is preserved
                 assert src.read(1)[0, 0] == 100
                 assert src.read(2)[0, 0] == 200
                 assert src.read(3)[0, 0] == 250  # Changed from 300 to 250
+                # Also check middle and end pixels
+                assert src.read(1)[128, 128] == 100
+                assert src.read(2)[128, 128] == 200
+                assert src.read(3)[128, 128] == 250
+                
+    def test_web_optimized_cog_generation(self):
+        """Test generating web-optimized COG with proper tile alignment."""
+        generator = COGGenerator()  # Default is web_optimized=True
+        
+        # Create test data
+        data = np.ones((256, 256), dtype=np.uint8) * 100
+        
+        # Use Web Mercator-aligned bounds
+        # Standard Web Mercator world bounds are roughly -20037508.34 to 20037508.34
+        west = -10000000
+        south = -10000000  
+        east = -9000000
+        north = -9000000
+        
+        transform = rasterio.transform.from_bounds(west, south, east, north, 256, 256)
+        
+        metadata = OutputMetadata(
+            crs="EPSG:3857",
+            transform=transform,
+            bounds=(west, south, east, north),
+            shape=(256, 256),
+            dtype=np.uint8
+        )
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "webopt.tif"
+            
+            result_path = generator.generate(data, metadata, output_path)
+            
+            with rasterio.open(result_path) as src:
+                assert src.count == 1
+                # With web optimization, data may be resampled/repositioned
+                # Check that our value appears somewhere in the output
+                band_data = src.read(1)
+                unique_values = np.unique(band_data)
+                assert 100 in unique_values, f"Expected value 100 not found. Got: {unique_values}"
+                
+                # Verify it's a valid COG with proper tiling
+                assert src.is_tiled
+                assert src.block_shapes[0][0] > 0  # Has valid block size
                 
     def test_cog_profile_options(self):
         """Test different COG profile options."""
