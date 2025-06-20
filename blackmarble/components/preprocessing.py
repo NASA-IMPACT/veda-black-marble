@@ -231,15 +231,37 @@ class ResolutionResampler(ComposableComponent):
         new_height = int(height * scale_y)
 
         # Use GDAL for resampling
+        nodata = kwargs.get("nodata", np.nan)
+        
+        # First create a mask of valid pixels in the original data
+        if np.isnan(nodata):
+            original_valid_mask = (~np.isnan(data)).astype(float)
+        else:
+            original_valid_mask = (data != nodata).astype(float)
+            
+        # For multi-band data, combine masks
+        if data.ndim > 2:
+            original_valid_mask = np.all(original_valid_mask, axis=0).astype(float)
+        
+        # Resample the data
         if data.ndim == 2:
-            resampled = self._resample_array(data, new_width, new_height)
+            resampled = self._resample_array(data, new_width, new_height, transform, nodata)
         else:
             # Handle multi-band
             resampled = np.empty(
                 (data.shape[0], new_height, new_width), dtype=data.dtype
             )
             for i in range(data.shape[0]):
-                resampled[i] = self._resample_array(data[i], new_width, new_height)
+                resampled[i] = self._resample_array(data[i], new_width, new_height, transform, nodata)
+
+        # Resample the mask using average method to get proportion of valid pixels
+        resampled_mask = self._resample_array(
+            original_valid_mask, new_width, new_height, transform, None, method="average"
+        )
+        # Conservative approach: require ALL source pixels to be valid
+        # Average resampling gives exact proportion of valid pixels
+        # A value of 1.0 means all contributing pixels were valid
+        mask = (resampled_mask >= 0.999).astype(float)
 
         # Update transform
         new_transform = Affine(
@@ -250,16 +272,6 @@ class ResolutionResampler(ComposableComponent):
             self.target_resolution[1] * (1 if transform.e > 0 else -1),
             transform.f,
         )
-
-        # Create mask for valid pixels
-        nodata = kwargs.get("nodata", np.nan)
-        if np.isnan(nodata):
-            mask = (~np.isnan(resampled)).astype(float)
-        else:
-            mask = (resampled != nodata).astype(float)
-
-        if data.ndim > 2:
-            mask = np.all(mask, axis=0).astype(float)
 
         # Store resampled data
         kwargs["resampled_data"] = resampled
@@ -281,16 +293,42 @@ class ResolutionResampler(ComposableComponent):
         return MaskResult(mask=mask, statistics=stats.__dict__, metadata=metadata)
 
     def _resample_array(
-        self, data: np.ndarray, new_width: int, new_height: int
+        self, data: np.ndarray, new_width: int, new_height: int, 
+        transform: Affine = None, nodata: Optional[float] = None,
+        method: Optional[str] = None
     ) -> np.ndarray:
         """Resample a 2D array using GDAL."""
         # Create in-memory dataset
         driver = gdal.GetDriverByName("MEM")
         src_ds = driver.Create("", data.shape[1], data.shape[0], 1, gdal.GDT_Float32)
-        src_ds.GetRasterBand(1).WriteArray(data)
+        
+        # Set geotransform if provided
+        if transform is not None:
+            gt = (transform.c, transform.a, transform.b, 
+                  transform.f, transform.d, transform.e)
+            src_ds.SetGeoTransform(gt)
+            
+        src_band = src_ds.GetRasterBand(1)
+        src_band.WriteArray(data)
+        
+        # Set nodata value if provided
+        if nodata is not None and not np.isnan(nodata):
+            src_band.SetNoDataValue(float(nodata))
 
         # Create output dataset
         dst_ds = driver.Create("", new_width, new_height, 1, gdal.GDT_Float32)
+        
+        # Calculate output geotransform
+        if transform is not None:
+            scale_x = data.shape[1] / new_width
+            scale_y = data.shape[0] / new_height
+            dst_gt = (transform.c, transform.a * scale_x, transform.b,
+                      transform.f, transform.d, transform.e * scale_y)
+            dst_ds.SetGeoTransform(dst_gt)
+            
+        dst_band = dst_ds.GetRasterBand(1)
+        if nodata is not None and not np.isnan(nodata):
+            dst_band.SetNoDataValue(float(nodata))
 
         # Map resampling methods
         resample_map = {
@@ -299,13 +337,15 @@ class ResolutionResampler(ComposableComponent):
             "cubic": gdal.GRA_Cubic,
             "average": gdal.GRA_Average,
         }
-        resample_alg = resample_map.get(self.method, gdal.GRA_Bilinear)
+        # Use provided method or fall back to instance method
+        use_method = method or self.method
+        resample_alg = resample_map.get(use_method, gdal.GRA_Bilinear)
 
         # Perform resampling
         gdal.ReprojectImage(src_ds, dst_ds, None, None, resample_alg)
 
         # Read result
-        result = dst_ds.GetRasterBand(1).ReadAsArray()
+        result = dst_band.ReadAsArray()
 
         # Cleanup
         src_ds = None
@@ -360,6 +400,14 @@ class BoundsCropper(ComposableComponent):
         transform = kwargs.get("transform")
         if not transform:
             raise ValueError("transform required for cropping")
+
+        # Calculate original bounds from transform and data shape
+        height, width = data.shape[-2:]
+        west = transform.c
+        north = transform.f
+        east = west + transform.a * width
+        south = north + transform.e * height
+        original_bounds = (west, south, east, north)
 
         # Apply buffer to bounds
         min_x, min_y, max_x, max_y = self.bounds
@@ -426,7 +474,7 @@ class BoundsCropper(ComposableComponent):
         }
 
         metadata = {
-            "original_bounds": kwargs.get("bounds", "unknown"),
+            "original_bounds": original_bounds,
             "target_bounds": self.bounds,
             "applied_bounds": (min_x, min_y, max_x, max_y),
             "buffer": self.buffer,
@@ -569,6 +617,13 @@ class SpatialAligner(ComposableComponent):
         }
         resample_method = resample_map.get(self.method, Resampling.nearest)
 
+        # Check if we have CRS information
+        if not src_crs and not ref_crs:
+            # No CRS provided - use a dummy CRS for alignment
+            dummy_crs = "EPSG:4326"
+            src_crs = dummy_crs
+            ref_crs = dummy_crs
+            
         # Create output array
         if data.ndim == 2:
             aligned = np.empty(ref_shape, dtype=data.dtype)

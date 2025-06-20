@@ -405,11 +405,13 @@ class ColorMapper(ComposableComponent):
             else:
                 scaled = np.zeros_like(data)
 
-        # Convert to uint8 indices
-        indices = np.clip(scaled, 0, 255).astype(np.uint8)
-
-        # Handle NaN values - set to 0 (black)
-        indices = np.where(np.isnan(data), 0, indices)
+        # Handle NaN values before rounding to avoid warnings
+        valid_mask = ~np.isnan(scaled)
+        
+        # Convert to uint8 indices with proper rounding
+        indices = np.zeros_like(scaled, dtype=np.uint8)
+        if np.any(valid_mask):
+            indices[valid_mask] = np.clip(np.round(scaled[valid_mask]), 0, 255).astype(np.uint8)
 
         # Apply colormap
         r = self.cmap_r[indices]

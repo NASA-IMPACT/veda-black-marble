@@ -183,11 +183,12 @@ class TestResolutionResampler:
         """Test mask generation with nodata values."""
         resampler = ResolutionResampler(target_resolution=(2.0, 2.0))
         
-        # Create data with some nodata
+        # Create data with nodata in specific quadrants
+        # This ensures some quadrants have nodata and some don't
         data = np.array([
             [1, 2, 3, 4],
-            [5, -999, -999, 8],
-            [9, -999, -999, 12],
+            [5, 6, -999, -999],
+            [9, 10, -999, -999],
             [13, 14, 15, 16]
         ], dtype=np.float32)
         transform = Affine(1.0, 0, 0, 0, -1.0, 4)
@@ -196,10 +197,10 @@ class TestResolutionResampler:
         
         # After downsampling, pixels with any nodata should be masked
         assert result.mask.shape == (2, 2)
-        assert result.mask[0, 0] == 1.0  # No nodata in this quadrant
-        assert result.mask[0, 1] == 0.0  # Has nodata
-        assert result.mask[1, 0] == 0.0  # Has nodata
-        assert result.mask[1, 1] == 1.0  # No nodata
+        assert result.mask[0, 0] == 1.0  # No nodata in top-left quadrant
+        assert result.mask[0, 1] == 0.0  # Has nodata in top-right quadrant
+        assert result.mask[1, 0] == 1.0  # No nodata in bottom-left quadrant  
+        assert result.mask[1, 1] == 0.0  # Has nodata in bottom-right quadrant
 
 
 class TestBoundsCropper:

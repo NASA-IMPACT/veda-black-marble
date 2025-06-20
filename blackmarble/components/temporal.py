@@ -173,6 +173,8 @@ class TemporalCompositor(ComposableComponent):
             "mean_observations": float(np.mean(valid_count)),
             "max_observations": int(np.max(valid_count)),
             "coverage": coverage_stats,
+            "composite": composite,
+            "valid_count": valid_count,
         }
 
         return MaskResult(
@@ -265,13 +267,17 @@ class TemporalCompositor(ComposableComponent):
 
             if len(valid_indices[0]) > 0 and len(invalid_indices[0]) > 0:
                 # Use distance transform to find nearest valid pixel
-                _, indices = distance_transform_edt(
+                indices = distance_transform_edt(
                     valid_mask == 0, return_distances=False, return_indices=True
                 )
-                composite[invalid_indices] = composite[
-                    indices[0, invalid_indices[0], invalid_indices[1]],
-                    indices[1, invalid_indices[0], invalid_indices[1]],
-                ]
+                # indices is shape (2, height, width) where indices[d, i, j] 
+                # gives the d-th coordinate of nearest valid pixel to (i, j)
+                # Extract the nearest neighbor coordinates for invalid pixels
+                row_coords = invalid_indices[0]
+                col_coords = invalid_indices[1]
+                nearest_rows = indices[0, row_coords, col_coords]
+                nearest_cols = indices[1, row_coords, col_coords]
+                composite[row_coords, col_coords] = composite[nearest_rows, nearest_cols]
         else:
             # Multi-band case - fill each band separately
             for b in range(composite.shape[0]):
@@ -280,13 +286,14 @@ class TemporalCompositor(ComposableComponent):
                 invalid_indices = np.where(band_mask == 0)
 
                 if len(valid_indices[0]) > 0 and len(invalid_indices[0]) > 0:
-                    _, indices = distance_transform_edt(
+                    indices = distance_transform_edt(
                         band_mask == 0, return_distances=False, return_indices=True
                     )
-                    composite[b][invalid_indices] = composite[b][
-                        indices[0, invalid_indices[0], invalid_indices[1]],
-                        indices[1, invalid_indices[0], invalid_indices[1]],
-                    ]
+                    row_coords = invalid_indices[0]
+                    col_coords = invalid_indices[1]
+                    nearest_rows = indices[0, row_coords, col_coords]
+                    nearest_cols = indices[1, row_coords, col_coords]
+                    composite[b, row_coords, col_coords] = composite[b, nearest_rows, nearest_cols]
 
         return composite
 
@@ -404,13 +411,20 @@ class SceneMerger(ComposableComponent):
 
         merged_transform = from_bounds(min_x, min_y, max_x, max_y, width, height)
 
-        # Initialize output array
+        # Initialize output array with appropriate fill values based on blend method
         shape = scenes[0].shape
+        if self.blend_method == "max":
+            fill_value = -np.inf
+        elif self.blend_method == "min":
+            fill_value = np.inf
+        else:
+            fill_value = nodata or np.nan
+            
         if len(shape) == 2:
-            merged = np.full((height, width), nodata or np.nan, dtype=scenes[0].dtype)
+            merged = np.full((height, width), fill_value, dtype=scenes[0].dtype)
         else:
             merged = np.full(
-                (shape[0], height, width), nodata or np.nan, dtype=scenes[0].dtype
+                (shape[0], height, width), fill_value, dtype=scenes[0].dtype
             )
 
         # Apply priority order if specified
@@ -483,12 +497,20 @@ class SceneMerger(ComposableComponent):
                 ]
 
                 # Blend with distance weights
-                blend_mask = valid_mask & ~np.isnan(out_slice)
-                out_slice[valid_mask] = scene[valid_mask]
-                out_slice[blend_mask] = (
-                    distance[blend_mask] * scene[blend_mask]
-                    + (1 - distance[blend_mask]) * out_slice[blend_mask]
-                )
+                # Check where we have overlapping data
+                existing_valid = ~np.isnan(out_slice)
+                blend_mask = valid_mask & existing_valid
+                
+                # For overlapping regions, blend based on distance
+                if np.any(blend_mask):
+                    out_slice[blend_mask] = (
+                        distance[blend_mask] * scene[blend_mask]
+                        + (1 - distance[blend_mask]) * out_slice[blend_mask]
+                    )
+                
+                # For non-overlapping regions, just copy the data
+                new_data_mask = valid_mask & ~existing_valid
+                out_slice[new_data_mask] = scene[new_data_mask]
             else:
                 # Multi-band case
                 for b in range(scene.shape[0]):
@@ -499,13 +521,21 @@ class SceneMerger(ComposableComponent):
                     ]
 
                     band_valid = valid_mask if valid_mask.ndim == 2 else valid_mask[b]
-                    blend_mask = band_valid & ~np.isnan(out_slice)
-
-                    out_slice[band_valid] = scene[b][band_valid]
-                    out_slice[blend_mask] = (
-                        distance[blend_mask] * scene[b][blend_mask]
-                        + (1 - distance[blend_mask]) * out_slice[blend_mask]
-                    )
+                    
+                    # Check where we have overlapping data
+                    existing_valid = ~np.isnan(out_slice)
+                    blend_mask = band_valid & existing_valid
+                    
+                    # For overlapping regions, blend based on distance
+                    if np.any(blend_mask):
+                        out_slice[blend_mask] = (
+                            distance[blend_mask] * scene[b][blend_mask]
+                            + (1 - distance[blend_mask]) * out_slice[blend_mask]
+                        )
+                    
+                    # For non-overlapping regions, just copy the data
+                    new_data_mask = band_valid & ~existing_valid
+                    out_slice[new_data_mask] = scene[b][new_data_mask]
 
         return output
 
@@ -539,9 +569,8 @@ class SceneMerger(ComposableComponent):
                     row_off : row_off + scene.shape[0],
                     col_off : col_off + scene.shape[1],
                 ]
-                out_slice[:] = np.maximum(
-                    out_slice, np.where(valid_mask, scene, -np.inf)
-                )
+                # Use where to only update valid pixels
+                np.maximum(out_slice, scene, out=out_slice, where=valid_mask)
             else:
                 for b in range(scene.shape[0]):
                     out_slice = output[
@@ -550,9 +579,7 @@ class SceneMerger(ComposableComponent):
                         col_off : col_off + scene.shape[2],
                     ]
                     band_valid = valid_mask if valid_mask.ndim == 2 else valid_mask[b]
-                    out_slice[:] = np.maximum(
-                        out_slice, np.where(band_valid, scene[b], -np.inf)
-                    )
+                    np.maximum(out_slice, scene[b], out=out_slice, where=band_valid)
 
         # Replace -inf with nodata
         output[output == -np.inf] = nodata or np.nan
@@ -586,9 +613,8 @@ class SceneMerger(ComposableComponent):
                     row_off : row_off + scene.shape[0],
                     col_off : col_off + scene.shape[1],
                 ]
-                out_slice[:] = np.minimum(
-                    out_slice, np.where(valid_mask, scene, np.inf)
-                )
+                # Use where to only update valid pixels
+                np.minimum(out_slice, scene, out=out_slice, where=valid_mask)
             else:
                 for b in range(scene.shape[0]):
                     out_slice = output[
@@ -597,9 +623,7 @@ class SceneMerger(ComposableComponent):
                         col_off : col_off + scene.shape[2],
                     ]
                     band_valid = valid_mask if valid_mask.ndim == 2 else valid_mask[b]
-                    out_slice[:] = np.minimum(
-                        out_slice, np.where(band_valid, scene[b], np.inf)
-                    )
+                    np.minimum(out_slice, scene[b], out=out_slice, where=band_valid)
 
         output[output == np.inf] = nodata or np.nan
         return output
@@ -666,18 +690,19 @@ class SceneMerger(ComposableComponent):
                 else:
                     count_slice[np.any(valid_mask, axis=0)] += 1
 
-        # Calculate mean
+        # Calculate mean and return the result
         if output.ndim == 2:
-            output = np.where(
+            result = np.where(
                 count_array > 0, sum_array / count_array, nodata or np.nan
             )
         else:
+            result = np.zeros_like(output)
             for b in range(output.shape[0]):
-                output[b] = np.where(
+                result[b] = np.where(
                     count_array > 0, sum_array[b] / count_array, nodata or np.nan
                 )
 
-        return output
+        return result
 
 
 class DateRangeSelector(ComposableComponent):

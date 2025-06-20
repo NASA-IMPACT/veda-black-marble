@@ -66,7 +66,7 @@ class TestCOGGenerator:
         data = np.array([
             np.ones((5, 5)) * 100,
             np.ones((5, 5)) * 200,
-            np.ones((5, 5)) * 300
+            np.ones((5, 5)) * 250  # Changed from 300 to 250 to fit in uint8
         ], dtype=np.uint8)
         
         metadata = OutputMetadata(
@@ -86,7 +86,7 @@ class TestCOGGenerator:
                 assert src.count == 3
                 assert src.read(1)[0, 0] == 100
                 assert src.read(2)[0, 0] == 200
-                assert src.read(3)[0, 0] == 300
+                assert src.read(3)[0, 0] == 250  # Changed from 300 to 250
                 
     def test_cog_profile_options(self):
         """Test different COG profile options."""
@@ -498,8 +498,8 @@ class TestVisualizationEnhancer:
         assert enhanced.dtype == np.uint8
         assert enhanced.min() == 0  # Values below 2 -> 0
         assert enhanced.max() == 255  # Values at 8 -> 255
-        # Check middle value
-        assert enhanced[5, 0] == pytest.approx(127, abs=2)
+        # Check middle value (data[5,0] ≈ 5.05, scaled: (5.05-2)/(8-2)*255 ≈ 130)
+        assert enhanced[5, 0] == pytest.approx(130, abs=2)
         
     def test_gamma_correction(self):
         """Test gamma correction application."""
@@ -545,15 +545,15 @@ class TestVisualizationEnhancer:
         assert rgb.dtype == np.uint8
         
         # Check specific colors
-        # Value 0.0 -> Red (255, 0, 0)
-        assert rgb[0, 1, 0] == 255  # R
-        assert rgb[1, 1, 0] == 0    # G
-        assert rgb[2, 1, 0] == 0    # B
+        # Value 0.0 -> Red (255, 0, 0) at position [2,1]
+        assert rgb[0, 2, 1] == 255  # R
+        assert rgb[1, 2, 1] == 0    # G
+        assert rgb[2, 2, 1] == 0    # B
         
-        # Value 1.0 -> Blue (0, 0, 255)
-        assert rgb[0, 0, 2] == 0    # R
-        assert rgb[1, 0, 2] == 0    # G
-        assert rgb[2, 0, 2] == 255  # B
+        # Value 1.0 -> Blue (0, 0, 255) at position [2,0]
+        assert rgb[0, 2, 0] == 0    # R
+        assert rgb[1, 2, 0] == 0    # G
+        assert rgb[2, 2, 0] == 255  # B
         
     def test_grayscale_fallback(self):
         """Test grayscale output when no colormap specified."""

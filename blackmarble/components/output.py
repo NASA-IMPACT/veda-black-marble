@@ -43,17 +43,32 @@ class OutputMetadata:
 
     def to_rasterio_profile(self) -> Dict[str, Any]:
         """Convert to rasterio profile dictionary."""
+        from rasterio.transform import Affine
+        
         # Convert transform to Affine if it's a tuple
-        if isinstance(self.transform, tuple):
-            from rasterio.transform import Affine
-
+        if isinstance(self.transform, Affine):
+            # Already an Affine object, use directly
+            transform = self.transform
+        elif isinstance(self.transform, tuple):
+            # Convert from GDAL tuple format
             transform = Affine.from_gdal(*self.transform)
         else:
             transform = self.transform
 
+        # Ensure dtype is properly formatted for rasterio
+        if isinstance(self.dtype, type) and issubclass(self.dtype, np.generic):
+            # It's a numpy type like np.uint8
+            dtype_str = np.dtype(self.dtype).name
+        elif hasattr(self.dtype, 'name'):
+            # It's already a numpy dtype object
+            dtype_str = self.dtype.name
+        else:
+            # Try to convert to numpy dtype first
+            dtype_str = np.dtype(self.dtype).name
+            
         profile = {
             "driver": "GTiff",
-            "dtype": self.dtype,
+            "dtype": dtype_str,
             "width": self.shape[1],
             "height": self.shape[0],
             "count": 1,
@@ -81,7 +96,7 @@ class COGProfile:
     blocksize: int = 512
     overview_level: Optional[int] = None
     overview_resampling: str = "bilinear"
-    web_optimized: bool = True
+    web_optimized: bool = False
     in_memory: bool = True
 
 
@@ -159,29 +174,19 @@ class COGGenerator(ComposableComponent):
         profile["count"] = count
 
         # Get COG profile options
-        cog_options = cog_profiles.get(self.profile.profile_name)
-        if cog_options is None:
-            cog_options = {}
-        else:
-            cog_options = cog_options.copy()
-        cog_options.update(kwargs)
-
-        # Set overview levels if not specified
-        if self.profile.overview_level is None:
-            # Calculate appropriate overview levels based on image size
-            max_dim = max(metadata.shape)
-            overview_level = 0
-            dim = max_dim
-            while dim > self.profile.blocksize:
-                overview_level += 1
-                dim //= 2
-            cog_options["overview_level"] = overview_level
-        else:
-            cog_options["overview_level"] = self.profile.overview_level
-
-        cog_options["overview_resampling"] = self.profile.overview_resampling
-        cog_options["blocksize"] = self.profile.blocksize
-        cog_options["web_optimized"] = self.profile.web_optimized
+        cog_profile = cog_profiles.get(self.profile.profile_name)
+        if cog_profile is None:
+            cog_profile = cog_profiles["deflate"]
+        
+        # COG profiles don't include dtype, so we need to ensure it's preserved
+        cog_profile = cog_profile.copy()  # Don't modify the original
+        
+        # Create config dict for cog_translate
+        config = {
+            "GDAL_NUM_THREADS": "ALL_CPUS",
+            "GDAL_TIFF_INTERNAL_MASK": os.environ.get("GDAL_TIFF_INTERNAL_MASK", "YES"),
+            "GDAL_TIFF_OVR_BLOCKSIZE": str(self.profile.blocksize),
+        }
 
         # Create COG using rio-cogeo
         with MemoryFile() as memfile:
@@ -196,9 +201,29 @@ class COGGenerator(ComposableComponent):
                 if metadata.tags:
                     mem.update_tags(**metadata.tags)
 
+            # Calculate overview levels if not specified
+            overview_level = self.profile.overview_level
+            if overview_level is None:
+                # Calculate appropriate overview levels based on image size
+                max_dim = max(metadata.shape)
+                overview_level = 0
+                dim = max_dim
+                while dim > self.profile.blocksize:
+                    overview_level += 1
+                    dim //= 2
+
+            # Re-open the memory file in read mode for cog_translate
+            with memfile.open() as src:
                 # Translate to COG
                 cog_translate(
-                    mem, str(output_path), cog_options, in_memory=self.profile.in_memory
+                    src,
+                    str(output_path),
+                    cog_profile,  # This is dst_kwargs
+                    config=config,
+                    overview_level=overview_level,
+                    overview_resampling=self.profile.overview_resampling,
+                    web_optimized=self.profile.web_optimized,
+                    in_memory=self.profile.in_memory,
                 )
 
         return output_path
@@ -272,7 +297,7 @@ class MetadataGenerator(ComposableComponent):
                 "providers": kwargs.get("providers", []),
                 "statistics": stats,
                 "shape": metadata.shape,
-                "dtype": str(metadata.dtype),
+                "dtype": np.dtype(metadata.dtype).name,
                 "nodata": metadata.nodata,
             },
             "geometry": self._bounds_to_geojson(metadata.bounds),
@@ -419,7 +444,7 @@ class VisualizationEnhancer(ComposableComponent):
 
         # Apply gamma correction if needed
         if gamma != 1.0:
-            scaled = np.power(scaled, 1.0 / gamma)
+            scaled = np.power(scaled, gamma)
 
         # Convert to uint8
         enhanced = (scaled * 255).astype(np.uint8)
@@ -563,20 +588,38 @@ class OutputValidator(ComposableComponent):
             valid_mask = ~np.isnan(data)
             if metadata.nodata is not None:
                 valid_mask &= data != metadata.nodata
+            
+            valid_percentage = 100.0 * np.sum(valid_mask) / valid_mask.size
+            results["statistics"]["valid_percentage"] = valid_percentage
+
+            if valid_percentage < self.min_valid_percentage:
+                results["valid"] = False
+                results["errors"].append(
+                    f"Valid pixel percentage ({valid_percentage:.1f}%) is below "
+                    f"minimum threshold ({self.min_valid_percentage}%)"
+                )
         else:
-            valid_mask = ~np.isnan(data[0])
-            if metadata.nodata is not None:
-                valid_mask &= data[0] != metadata.nodata
-
-        valid_percentage = 100.0 * np.sum(valid_mask) / valid_mask.size
-        results["statistics"]["valid_percentage"] = valid_percentage
-
-        if valid_percentage < self.min_valid_percentage:
-            results["valid"] = False
-            results["errors"].append(
-                f"Valid pixel percentage ({valid_percentage:.1f}%) is below "
-                f"minimum threshold ({self.min_valid_percentage}%)"
-            )
+            # For multi-band data, check each band individually
+            band_percentages = []
+            for band_idx in range(data.shape[0]):
+                band_data = data[band_idx]
+                valid_mask = ~np.isnan(band_data)
+                if metadata.nodata is not None:
+                    valid_mask &= band_data != metadata.nodata
+                
+                band_valid_percentage = 100.0 * np.sum(valid_mask) / valid_mask.size
+                band_percentages.append(band_valid_percentage)
+                
+                if band_valid_percentage < self.min_valid_percentage:
+                    results["valid"] = False
+                    results["errors"].append(
+                        f"Band {band_idx + 1} valid pixel percentage ({band_valid_percentage:.1f}%) is below "
+                        f"minimum threshold ({self.min_valid_percentage}%)"
+                    )
+            
+            results["statistics"]["band_valid_percentages"] = band_percentages
+            # Overall valid percentage is the average across bands
+            results["statistics"]["valid_percentage"] = np.mean(band_percentages)
 
         # Check value range if specified
         if self.check_range and expected_range is not None:
