@@ -12,7 +12,7 @@ import os
 @dataclass
 class LandsatConfig:
     """Configuration for Landsat data processing.
-    
+
     Attributes:
         composite_months: Number of months to include in temporal composite
         band_scale_factor: Scale factor for DN to reflectance conversion
@@ -21,6 +21,7 @@ class LandsatConfig:
         valid_dn_max: Maximum valid digital number value
         qa_dilation_radius: Radius for dilating QA masks (pixels)
     """
+
     composite_months: int = 12
     band_scale_factor: float = 0.0000275
     band_offset: float = -0.2
@@ -32,7 +33,7 @@ class LandsatConfig:
 @dataclass
 class VIIRSConfig:
     """Configuration for VIIRS nighttime lights processing.
-    
+
     Attributes:
         resolution: Spatial resolution in decimal degrees
         floor: Minimum valid radiance value (nW/cm²/sr)
@@ -41,6 +42,7 @@ class VIIRSConfig:
         lunar_unit_conversion: Factor to convert to standard units
         quality_valid_flags: List of quality flag values to consider valid
     """
+
     resolution: float = 0.00011111111
     floor: float = 0.1
     ceiling: float = 10.0
@@ -52,7 +54,7 @@ class VIIRSConfig:
 @dataclass
 class NDUIConfig:
     """Configuration for NDUI (Normalized Difference Urban Index) calculation.
-    
+
     Attributes:
         floor: Minimum NDUI value threshold
         water_threshold: NDWI threshold for water masking
@@ -60,6 +62,7 @@ class NDUIConfig:
         road_enhancement_minor: Enhancement factor for minor roads
         epsilon: Small value to prevent division by zero
     """
+
     floor: float = 0.02
     water_threshold: float = 0.0
     road_enhancement_major: float = 1.3
@@ -70,10 +73,10 @@ class NDUIConfig:
 @dataclass
 class ProcessingConfig:
     """Master configuration for Black Marble processing pipeline.
-    
+
     This class aggregates all configuration subsections and provides
     methods for loading from environment variables and validation.
-    
+
     Attributes:
         landsat: Landsat-specific configuration
         viirs: VIIRS-specific configuration
@@ -86,36 +89,37 @@ class ProcessingConfig:
         use_parallel: Enable parallel processing where possible
         verbose: Enable verbose output
     """
+
     landsat: LandsatConfig = field(default_factory=LandsatConfig)
     viirs: VIIRSConfig = field(default_factory=VIIRSConfig)
     ndui: NDUIConfig = field(default_factory=NDUIConfig)
-    
+
     # Output configuration
     final_resolution: float = 0.0001
     osm_buffer: float = 0.00005
     display_min: float = 0.3
     display_max: float = 0.8
-    
+
     # Processing options
     min_valid_pixel_percentage: float = 10.0
     use_parallel: bool = True
     verbose: bool = True
-    
+
     @classmethod
     def from_env(cls) -> "ProcessingConfig":
         """Create configuration from environment variables.
-        
+
         Environment variables are prefixed with BLACKMARBLE_ and follow
         the pattern BLACKMARBLE_SECTION_PARAMETER. For example:
         - BLACKMARBLE_COMPOSITE_MONTHS -> landsat.composite_months
         - BLACKMARBLE_NTL_FLOOR -> viirs.floor
         - BLACKMARBLE_NDUI_FLOOR -> ndui.floor
-        
+
         Returns:
             ProcessingConfig with values updated from environment
         """
         config = cls()
-        
+
         # Landsat configuration
         if val := os.getenv("BLACKMARBLE_COMPOSITE_MONTHS"):
             config.landsat.composite_months = int(val)
@@ -123,7 +127,7 @@ class ProcessingConfig:
             config.landsat.band_scale_factor = float(val)
         if val := os.getenv("BLACKMARBLE_BAND_OFFSET"):
             config.landsat.band_offset = float(val)
-            
+
         # VIIRS configuration
         if val := os.getenv("BLACKMARBLE_NTL_FLOOR"):
             config.viirs.floor = float(val)
@@ -131,7 +135,7 @@ class ProcessingConfig:
             config.viirs.ceiling = float(val)
         if val := os.getenv("BLACKMARBLE_NTL_RESOLUTION"):
             config.viirs.resolution = float(val)
-            
+
         # NDUI configuration
         if val := os.getenv("BLACKMARBLE_NDUI_FLOOR"):
             config.ndui.floor = float(val)
@@ -141,7 +145,7 @@ class ProcessingConfig:
             config.ndui.road_enhancement_major = float(val)
         if val := os.getenv("BLACKMARBLE_ROAD_ENHANCEMENT_MINOR"):
             config.ndui.road_enhancement_minor = float(val)
-            
+
         # Output configuration
         if val := os.getenv("BLACKMARBLE_FINAL_RESOLUTION"):
             config.final_resolution = float(val)
@@ -151,7 +155,7 @@ class ProcessingConfig:
             config.display_min = float(val)
         if val := os.getenv("BLACKMARBLE_DISPLAY_MAX"):
             config.display_max = float(val)
-            
+
         # Processing options
         if val := os.getenv("BLACKMARBLE_MIN_VALID_PIXELS"):
             config.min_valid_pixel_percentage = float(val)
@@ -159,12 +163,12 @@ class ProcessingConfig:
             config.use_parallel = val.lower() in ("true", "1", "yes")
         if val := os.getenv("BLACKMARBLE_VERBOSE"):
             config.verbose = val.lower() in ("true", "1", "yes")
-            
+
         return config
-    
+
     def validate(self) -> None:
         """Validate configuration values.
-        
+
         Raises:
             ValueError: If any configuration values are invalid
         """
@@ -174,25 +178,27 @@ class ProcessingConfig:
                 f"VIIRS floor ({self.viirs.floor}) must be less than "
                 f"ceiling ({self.viirs.ceiling})"
             )
-        
+
         # Display range validation
         if self.display_min >= self.display_max:
             raise ValueError(
                 f"Display min ({self.display_min}) must be less than "
                 f"max ({self.display_max})"
             )
-        
+
         # Percentage validation
         if not 0 <= self.min_valid_pixel_percentage <= 100:
             raise ValueError(
                 f"min_valid_pixel_percentage must be between 0 and 100, "
                 f"got {self.min_valid_pixel_percentage}"
             )
-        
+
         # Resolution validation
         if self.final_resolution <= 0:
-            raise ValueError(f"final_resolution must be positive, got {self.final_resolution}")
-        
+            raise ValueError(
+                f"final_resolution must be positive, got {self.final_resolution}"
+            )
+
         # Enhancement factor validation
         if self.ndui.road_enhancement_major < 1.0:
             raise ValueError(
@@ -204,10 +210,10 @@ class ProcessingConfig:
                 f"road_enhancement_minor must be >= 1.0, "
                 f"got {self.ndui.road_enhancement_minor}"
             )
-    
+
     def to_dict(self) -> dict:
         """Convert configuration to dictionary for serialization.
-        
+
         Returns:
             Dictionary representation of configuration
         """
@@ -245,5 +251,5 @@ class ProcessingConfig:
                 "min_valid_pixel_percentage": self.min_valid_pixel_percentage,
                 "use_parallel": self.use_parallel,
                 "verbose": self.verbose,
-            }
+            },
         }

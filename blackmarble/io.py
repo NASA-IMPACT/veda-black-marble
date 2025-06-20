@@ -36,40 +36,53 @@ def get_geo(filepath: str, band: int) -> tuple[np.ndarray, tuple[float, ...], st
         raise RuntimeError(f"Could not open raster file: {filepath}")
     cols = ds.RasterXSize
     rows = ds.RasterYSize
-    
+
     # Get the band and check for NoData value
     band_obj = ds.GetRasterBand(band)
     array = band_obj.ReadAsArray(0, 0, cols, rows)
     nodata = band_obj.GetNoDataValue()
-    
+
     # Convert NoData to NaN for consistent handling
     # BUT: Be careful with QA bands - they might use 0 as a valid value!
     if nodata is not None:
         print(f"DEBUG get_geo: File {filepath} has NoData value: {nodata}")
-        
+
         # Check if this is likely a QA band (contains QA, PIXEL, RADSAT, or AEROSOL in filename)
-        is_qa_band = any(qa in os.path.basename(filepath).upper() for qa in ['QA', 'PIXEL', 'RADSAT', 'AEROSOL'])
-        
+        is_qa_band = any(
+            qa in os.path.basename(filepath).upper()
+            for qa in ["QA", "PIXEL", "RADSAT", "AEROSOL"]
+        )
+
         if is_qa_band and nodata == 0:
-            print(f"DEBUG get_geo: This appears to be a QA band with NoData=0. Checking if 0 is actually used...")
+            print(
+                f"DEBUG get_geo: This appears to be a QA band with NoData=0. Checking if 0 is actually used..."
+            )
             zero_count = np.sum(array == 0)
             unique_vals = np.unique(array)
             print(f"DEBUG get_geo: Found {zero_count} zeros out of {array.size} pixels")
             print(f"DEBUG get_geo: Unique values: {unique_vals[:10]}... (first 10)")
-            
+
             # If all or most pixels are 0, it's likely NoData
             if zero_count == array.size or zero_count > 0.9 * array.size:
-                print(f"DEBUG get_geo: {100.0 * zero_count / array.size:.1f}% pixels are 0 - treating as NoData")
+                print(
+                    f"DEBUG get_geo: {100.0 * zero_count / array.size:.1f}% pixels are 0 - treating as NoData"
+                )
                 array = array.astype(np.float32)
                 array = np.where(array == nodata, np.nan, array)
-                print(f"DEBUG get_geo: Replaced {np.sum(np.isnan(array))} NoData pixels with NaN")
+                print(
+                    f"DEBUG get_geo: Replaced {np.sum(np.isnan(array))} NoData pixels with NaN"
+                )
             else:
-                print(f"DEBUG get_geo: Only {100.0 * zero_count / array.size:.1f}% pixels are 0 - keeping as valid QA values")
+                print(
+                    f"DEBUG get_geo: Only {100.0 * zero_count / array.size:.1f}% pixels are 0 - keeping as valid QA values"
+                )
         else:
             # For non-QA bands or non-zero NoData, proceed as normal
             array = array.astype(np.float32)  # Ensure float type for NaN
             array = np.where(array == nodata, np.nan, array)
-            print(f"DEBUG get_geo: Replaced {np.sum(np.isnan(array))} NoData pixels with NaN")
+            print(
+                f"DEBUG get_geo: Replaced {np.sum(np.isnan(array))} NoData pixels with NaN"
+            )
 
     geotransform = ds.GetGeoTransform()
     projection = ds.GetProjectionRef()
@@ -192,7 +205,9 @@ def scale_image(
     """
     # Handle NaN values first
     if np.any(np.isnan(input_array)):
-        print(f"WARNING scale_image: Input contains {np.sum(np.isnan(input_array))} NaN values")
+        print(
+            f"WARNING scale_image: Input contains {np.sum(np.isnan(input_array))} NaN values"
+        )
         # Use nanmin/nanmax to ignore NaN values
         arr = np.where(input_array > max_value, max_value, input_array)
         arr = np.where(arr < min_value, min_value, arr)
@@ -207,10 +222,12 @@ def scale_image(
     # Handle potential division by zero if min == max after clamping
     if arr_max == arr_min or np.isnan(arr_min) or np.isnan(arr_max):
         # Return an array of zeros or a constant value, depending on desired behavior
-        print(f"WARNING scale_image: arr_min={arr_min}, arr_max={arr_max}, returning zeros")
+        print(
+            f"WARNING scale_image: arr_min={arr_min}, arr_max={arr_max}, returning zeros"
+        )
         return np.zeros_like(arr, dtype="uint8")
 
     # Scale to 0-255, replacing NaN with 0
-    scaled = ((arr - arr_min) * (255.0 / (arr_max - arr_min)))
+    scaled = (arr - arr_min) * (255.0 / (arr_max - arr_min))
     scaled = np.where(np.isnan(scaled), 0, scaled).astype("uint8")
     return scaled

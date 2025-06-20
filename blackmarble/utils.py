@@ -62,7 +62,7 @@ def rescale_bands(band_data: np.ndarray) -> np.ndarray:
     # Check if data appears to already be scaled (reflectance values)
     data_min = np.nanmin(band_data)
     data_max = np.nanmax(band_data)
-    
+
     # If data is already in reflectance range (0-1) or contains NoData (-9999), handle specially
     if data_min < 0 and data_min < -1000:  # Likely contains NoData values like -9999
         print(f"DEBUG rescale_bands: Detected NoData values (min={data_min})")
@@ -70,14 +70,18 @@ def rescale_bands(band_data: np.ndarray) -> np.ndarray:
         band_data = np.where(band_data < -1000, np.nan, band_data)
         data_min = np.nanmin(band_data)
         data_max = np.nanmax(band_data)
-    
+
     if data_max <= 1.5 and data_min >= -0.5:  # Already reflectance
-        print(f"DEBUG rescale_bands: Data appears to already be reflectance (range {data_min:.3f} to {data_max:.3f})")
+        print(
+            f"DEBUG rescale_bands: Data appears to already be reflectance (range {data_min:.3f} to {data_max:.3f})"
+        )
         # Just ensure no negative reflectance
         return np.where(band_data < 0, np.nan, band_data)
-    
-    print(f"DEBUG rescale_bands: Scaling DN values (range {data_min:.0f} to {data_max:.0f})")
-    
+
+    print(
+        f"DEBUG rescale_bands: Scaling DN values (range {data_min:.0f} to {data_max:.0f})"
+    )
+
     # Apply scaling formula first to get reflectance values
     scaled = band_data * 0.0000275 - 0.2
 

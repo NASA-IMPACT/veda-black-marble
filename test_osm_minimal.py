@@ -32,6 +32,7 @@ except Exception as e:
 # Test 4: Check what parameters the function expects
 print("\nTest 4: Checking function signature")
 import inspect
+
 sig = inspect.signature(ox.graph_from_bbox)
 print(f"Function signature: {sig}")
 

@@ -11,7 +11,7 @@ from .raster_io import GDALRasterAdapter
 
 __all__ = [
     "StorageAdapter",
-    "APIAdapter", 
+    "APIAdapter",
     "RasterAdapter",
     "S3Adapter",
     "NASAEarthdataAdapter",
