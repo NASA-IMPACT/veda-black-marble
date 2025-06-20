@@ -39,19 +39,24 @@ class OSMUtil:
         os.makedirs(temp_dir, exist_ok=True)
         shapefile_dir = os.path.join(temp_dir, "roads_osm_flat")
         try:
+            print(f"\nDEBUG OSM: Downloading roads for bbox: ({lat1}, {lon1}) to ({lat2}, {lon2})")
+            # osmnx expects bbox as (west, south, east, north)
             G = ox.graph_from_bbox(
                 bbox=(
-                    min(lon1, lon2),
-                    min(lat1, lat2),
-                    max(lon1, lon2),
-                    max(lat1, lat2),
+                    min(lon1, lon2),  # west
+                    min(lat1, lat2),  # south  
+                    max(lon1, lon2),  # east
+                    max(lat1, lat2),  # north
                 ),
                 retain_all=True,
                 network_type="all",
             )
+            print(f"DEBUG OSM: Downloaded graph with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges")
             if G.number_of_edges() == 0:
+                print("WARNING OSM: No roads found in the area!")
                 mask: np.ndarray = np.zeros((height, width), dtype=np.uint8)
             else:
+                print(f"DEBUG OSM: Processing {G.number_of_edges()} road edges")
                 # Convert graph to GeoDataFrames and save as shapefiles
                 nodes_gdf, edges_gdf = ox.graph_to_gdfs(G)
                 os.makedirs(shapefile_dir, exist_ok=True)
@@ -65,20 +70,32 @@ class OSMUtil:
                             geom
                         ).buffer(path_thickness)
                         road_shapes.append(shapely.geometry.mapping(poly))
+                print(f"DEBUG OSM: Rasterizing {len(road_shapes)} road shapes")
+                print(f"DEBUG OSM: Path thickness: {path_thickness} degrees")
+                
                 mask = rasterio.features.rasterize(
                     road_shapes,
                     out_shape=(height, width),
                     transform=transform,
                     fill=0,
-                    all_touched=False,
+                    all_touched=True,  # Changed to True to capture more pixels
                     default_value=5,
                     dtype=np.uint8,
                 )
+                
+                road_pixel_count = np.sum(mask > 0)
+                print(f"DEBUG OSM: Rasterized {road_pixel_count} road pixels ({100.0 * road_pixel_count / mask.size:.2f}%)")
         except Exception as e:
-            print(e)
+            print(f"ERROR OSM: Failed to download/rasterize roads: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             mask = np.zeros((height, width), dtype=np.uint8)
         profile.pop("nodata", None)
         profile.update(count=1, dtype="uint8")
+        
+        print(f"DEBUG OSM: Saving road raster to {output_path}")
+        print(f"DEBUG OSM: Final mask - min: {mask.min()}, max: {mask.max()}, non-zero: {np.sum(mask > 0)}")
+        
         with rasterio.open(output_path, "w", **profile) as dst:
             dst.write(mask, 1)
         if os.path.exists(shapefile_dir):
@@ -142,21 +159,32 @@ class OSMUtil:
                             geom
                         ).buffer(path_thickness)
                         shapes.append(shapely.geometry.mapping(poly))
+                print(f"DEBUG OSM: Rasterizing {len(shapes)} shapes for road type {idx}")
+                
                 mask: np.ndarray = rasterio.features.rasterize(
                     shapes,
                     out_shape=(height, width),
                     transform=transform,
                     fill=0,
-                    all_touched=False,
+                    all_touched=True,  # Changed to True to capture more pixels
                     default_value=idx,
                     dtype=np.uint8,
                 )
+                
+                type_pixels = np.sum(mask > 0)
+                print(f"DEBUG OSM: Road type {idx} has {type_pixels} pixels")
                 base = np.maximum(base, mask)
             except Exception as e:
-                print(e)
+                print(f"DEBUG OSM: Error with filter {custom_filter}: {type(e).__name__}: {e}")
                 continue
         profile.pop("nodata", None)
         profile.update(count=1, dtype="uint8")
+        
+        total_road_pixels = np.sum(base > 0)
+        print(f"\nDEBUG OSM: Final road raster summary:")
+        print(f"  Total road pixels: {total_road_pixels} ({100.0 * total_road_pixels / base.size:.2f}%)")
+        print(f"  Output path: {output_path}")
+        
         with rasterio.open(output_path, "w", **profile) as dst:
             dst.write(base, 1)
         if os.path.exists(shapefile_dir):
