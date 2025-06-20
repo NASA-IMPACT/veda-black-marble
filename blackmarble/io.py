@@ -190,15 +190,27 @@ def scale_image(
         numpy.ndarray: A new NumPy array with dtype 'uint8', containing the clamped and scaled values.
                        Returns an array of zeros if min_value equals max_value after clamping.
     """
-    arr = np.where(input_array > max_value, max_value, input_array)
-    arr = np.where(arr < min_value, min_value, arr)
+    # Handle NaN values first
+    if np.any(np.isnan(input_array)):
+        print(f"WARNING scale_image: Input contains {np.sum(np.isnan(input_array))} NaN values")
+        # Use nanmin/nanmax to ignore NaN values
+        arr = np.where(input_array > max_value, max_value, input_array)
+        arr = np.where(arr < min_value, min_value, arr)
+        arr_min = np.nanmin(arr)
+        arr_max = np.nanmax(arr)
+    else:
+        arr = np.where(input_array > max_value, max_value, input_array)
+        arr = np.where(arr < min_value, min_value, arr)
+        arr_min = arr.min()
+        arr_max = arr.max()
 
     # Handle potential division by zero if min == max after clamping
-    arr_min = arr.min()
-    arr_max = arr.max()
-    if arr_max == arr_min:
+    if arr_max == arr_min or np.isnan(arr_min) or np.isnan(arr_max):
         # Return an array of zeros or a constant value, depending on desired behavior
+        print(f"WARNING scale_image: arr_min={arr_min}, arr_max={arr_max}, returning zeros")
         return np.zeros_like(arr, dtype="uint8")
 
-    scaled = ((arr - arr_min) * (255.0 / (arr_max - arr_min))).astype("uint8")
+    # Scale to 0-255, replacing NaN with 0
+    scaled = ((arr - arr_min) * (255.0 / (arr_max - arr_min)))
+    scaled = np.where(np.isnan(scaled), 0, scaled).astype("uint8")
     return scaled

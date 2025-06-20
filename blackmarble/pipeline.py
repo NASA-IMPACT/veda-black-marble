@@ -752,6 +752,12 @@ def run_pipeline(
     img_ndvi: np.ndarray = ndvi
     img_ndwi: np.ndarray = ndwi
     img_road: np.ndarray = osm_px
+    
+    # Debug intermediate values
+    print(f"\nDEBUG: Before NDUI calculation:")
+    print(f"DEBUG: NTL pixels > 0: {np.sum(img_ntl > 0)} ({100.0 * np.sum(img_ntl > 0) / img_ntl.size:.1f}%)")
+    print(f"DEBUG: NDVI pixels > 0: {np.sum(img_ndvi > 0)} ({100.0 * np.sum(img_ndvi > 0) / img_ndvi.size:.1f}%)")
+    print(f"DEBUG: OSM road pixels > 0: {np.sum(img_road > 0)} ({100.0 * np.sum(img_road > 0) / img_road.size:.1f}%)")
 
     # NDUI
     print(f"\nDEBUG: Computing NDUI...")
@@ -769,6 +775,11 @@ def run_pipeline(
     # Transform to 0-1 range (simplified without unnecessary abs)
     ndui = (ndui + 1.0) / 2.0
     ndui = np.where(ndui < NDUI_FLOOR, 0.0, ndui)
+    
+    # Debug NDUI computation
+    print(f"\nDEBUG: NDUI after transformation to 0-1:")
+    print(f"DEBUG: NDUI range: {np.nanmin(ndui)} - {np.nanmax(ndui)}")
+    print(f"DEBUG: Pixels > NDUI_FLOOR ({NDUI_FLOOR}): {np.sum(ndui > NDUI_FLOOR)} ({100.0 * np.sum(ndui > NDUI_FLOOR) / ndui.size:.1f}%)")
 
     # Road enhancement (OSM produces values 1-5 only)
     ndui = np.where((img_road == 1) | (img_road == 4), ndui * 1.3, ndui)
@@ -805,13 +816,25 @@ def run_pipeline(
         outputs_final[0]
     ) as src:  # Use one of the final resampled files for metadata
         meta: Dict[str, Any] = src.meta.copy()
-    meta.update(dtype="uint8", count=3, driver="GTiff", predictor=2)
+    
+    # Update metadata for uint8 RGB output
+    meta.update(
+        dtype="uint8", 
+        count=3, 
+        driver="GTiff", 
+        predictor=2,
+        nodata=None  # Remove nodata since we're creating an RGB image
+    )
+    
+    print(f"\nDEBUG: Creating COG with metadata: dtype={meta['dtype']}, count={meta['count']}, nodata={meta.get('nodata')}")
+    
     arr: np.ndarray = np.stack([rr, gg, bb]).astype("uint8")
     out_cog: str = os.path.join(final_dir, "ndui-co.tif")
     with MemoryFile() as memfile:
         with memfile.open(**meta) as mem:
             mem.write(arr)
             profile: Dict[str, Any] = cog_profiles.get("deflate")
+            profile['nodata'] = None  # Ensure COG profile doesn't have nodata
             cog_translate(mem, out_cog, profile, in_memory=False)
 
     # 12) Upload (skip if no bucket/key provided)
