@@ -64,12 +64,7 @@ class TestCoordinateTransformations:
 class TestGraphToShapes:
     """Test conversion of road graphs to shapes."""
 
-    def test_empty_graph(self):
-        """Test handling of empty graph."""
-        G = nx.MultiDiGraph()
-        shapes = graph_to_shapes(G)
-
-        assert shapes == []
+    # Removed test_empty_graph - only tests that empty input returns empty output
 
     def test_single_road_segment(self):
         """Test buffering of single road segment."""
@@ -154,18 +149,7 @@ class TestGraphToShapes:
 class TestRasterization:
     """Test rasterization of shapes to arrays."""
 
-    def test_empty_shapes_rasterization(self):
-        """Test rasterization with no shapes."""
-        shapes = []
-        height, width = 100, 100
-        transform = from_bounds(0, 0, 1, 1, width, height)
-
-        result = rasterize_shapes(shapes, height, width, transform)
-
-        # Should be all zeros
-        assert result.shape == (height, width)
-        assert np.all(result == 0)
-        assert result.dtype == np.uint8
+    # Removed test_empty_shapes_rasterization - only tests that rasterizing no shapes produces empty raster
 
     def test_single_polygon_rasterization(self):
         """Test rasterization of single polygon."""

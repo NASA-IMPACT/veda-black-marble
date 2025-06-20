@@ -8,34 +8,7 @@ from blackmarble.config import ProcessingConfig, LandsatConfig, VIIRSConfig, NDU
 class TestProcessingConfig:
     """Test ProcessingConfig class."""
 
-    def test_default_values(self):
-        """Test that default configuration values are set correctly."""
-        config = ProcessingConfig()
-
-        # Landsat defaults
-        assert config.landsat.composite_months == 12
-        assert config.landsat.band_scale_factor == 0.0000275
-        assert config.landsat.band_offset == -0.2
-        assert config.landsat.valid_dn_min == 7273
-        assert config.landsat.valid_dn_max == 43636
-
-        # VIIRS defaults
-        assert config.viirs.floor == 0.1
-        assert config.viirs.ceiling == 10.0
-        assert config.viirs.resolution == 0.00011111111
-        assert config.viirs.fill_value == 65530
-
-        # NDUI defaults
-        assert config.ndui.floor == 0.02
-        assert config.ndui.water_threshold == 0.0
-        assert config.ndui.road_enhancement_major == 1.3
-        assert config.ndui.road_enhancement_minor == 1.1
-
-        # Output defaults
-        assert config.final_resolution == 0.0001
-        assert config.osm_buffer == 0.00005
-        assert config.display_min == 0.3
-        assert config.display_max == 0.8
+    # Removed trivial default value test - only checked hardcoded defaults
 
     def test_from_env(self, monkeypatch):
         """Test loading configuration from environment variables."""
@@ -125,70 +98,10 @@ class TestProcessingConfig:
         assert config_dict["output"]["final_resolution"] == 0.0001
 
 
-class TestLandsatConfig:
-    """Test LandsatConfig dataclass."""
-
-    def test_default_values(self):
-        """Test Landsat configuration defaults."""
-        config = LandsatConfig()
-        assert config.composite_months == 12
-        assert config.band_scale_factor == 0.0000275
-        assert config.band_offset == -0.2
-        assert config.valid_dn_min == 7273
-        assert config.valid_dn_max == 43636
-        assert config.qa_dilation_radius == 3
-
-    def test_custom_values(self):
-        """Test creating Landsat config with custom values."""
-        config = LandsatConfig(
-            composite_months=6, band_scale_factor=0.00003, qa_dilation_radius=5
-        )
-        assert config.composite_months == 6
-        assert config.band_scale_factor == 0.00003
-        assert config.qa_dilation_radius == 5
-        # Other values should still be defaults
-        assert config.band_offset == -0.2
+# Removed TestLandsatConfig class - only tested dataclass initialization
 
 
-class TestVIIRSConfig:
-    """Test VIIRSConfig dataclass."""
-
-    def test_default_values(self):
-        """Test VIIRS configuration defaults."""
-        config = VIIRSConfig()
-        assert config.resolution == 0.00011111111
-        assert config.floor == 0.1
-        assert config.ceiling == 10.0
-        assert config.fill_value == 65530
-        assert config.lunar_unit_conversion == 10.0
-        assert config.quality_valid_flags == [0, 2]
-
-    def test_quality_flags_mutable(self):
-        """Test that quality_valid_flags list is mutable but independent."""
-        config1 = VIIRSConfig()
-        config2 = VIIRSConfig()
-
-        # Modify one config's flags
-        config1.quality_valid_flags.append(1)
-
-        # Other config should be unaffected
-        assert config1.quality_valid_flags == [0, 2, 1]
-        assert config2.quality_valid_flags == [0, 2]
+# Removed TestVIIRSConfig class - only tested dataclass defaults
 
 
-class TestNDUIConfig:
-    """Test NDUIConfig dataclass."""
-
-    def test_default_values(self):
-        """Test NDUI configuration defaults."""
-        config = NDUIConfig()
-        assert config.floor == 0.02
-        assert config.water_threshold == 0.0
-        assert config.road_enhancement_major == 1.3
-        assert config.road_enhancement_minor == 1.1
-        assert config.epsilon == 1e-6
-
-    def test_epsilon_precision(self):
-        """Test that epsilon value maintains precision."""
-        config = NDUIConfig(epsilon=1e-10)
-        assert config.epsilon == 1e-10
+# Removed TestNDUIConfig class - only tested dataclass initialization

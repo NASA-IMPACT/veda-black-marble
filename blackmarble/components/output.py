@@ -44,7 +44,7 @@ class OutputMetadata:
     def to_rasterio_profile(self) -> Dict[str, Any]:
         """Convert to rasterio profile dictionary."""
         from rasterio.transform import Affine
-        
+
         # Convert transform to Affine if it's a tuple
         if isinstance(self.transform, Affine):
             # Already an Affine object, use directly
@@ -59,13 +59,13 @@ class OutputMetadata:
         if isinstance(self.dtype, type) and issubclass(self.dtype, np.generic):
             # It's a numpy type like np.uint8
             dtype_str = np.dtype(self.dtype).name
-        elif hasattr(self.dtype, 'name'):
+        elif hasattr(self.dtype, "name"):
             # It's already a numpy dtype object
             dtype_str = self.dtype.name
         else:
             # Try to convert to numpy dtype first
             dtype_str = np.dtype(self.dtype).name
-            
+
         profile = {
             "driver": "GTiff",
             "dtype": dtype_str,
@@ -177,10 +177,10 @@ class COGGenerator(ComposableComponent):
         cog_profile = cog_profiles.get(self.profile.profile_name)
         if cog_profile is None:
             cog_profile = cog_profiles["deflate"]
-        
+
         # COG profiles don't include dtype, so we need to ensure it's preserved
         cog_profile = cog_profile.copy()  # Don't modify the original
-        
+
         # Create config dict for cog_translate
         config = {
             "GDAL_NUM_THREADS": "ALL_CPUS",
@@ -588,7 +588,7 @@ class OutputValidator(ComposableComponent):
             valid_mask = ~np.isnan(data)
             if metadata.nodata is not None:
                 valid_mask &= data != metadata.nodata
-            
+
             valid_percentage = 100.0 * np.sum(valid_mask) / valid_mask.size
             results["statistics"]["valid_percentage"] = valid_percentage
 
@@ -606,17 +606,17 @@ class OutputValidator(ComposableComponent):
                 valid_mask = ~np.isnan(band_data)
                 if metadata.nodata is not None:
                     valid_mask &= band_data != metadata.nodata
-                
+
                 band_valid_percentage = 100.0 * np.sum(valid_mask) / valid_mask.size
                 band_percentages.append(band_valid_percentage)
-                
+
                 if band_valid_percentage < self.min_valid_percentage:
                     results["valid"] = False
                     results["errors"].append(
                         f"Band {band_idx + 1} valid pixel percentage ({band_valid_percentage:.1f}%) is below "
                         f"minimum threshold ({self.min_valid_percentage}%)"
                     )
-            
+
             results["statistics"]["band_valid_percentages"] = band_percentages
             # Overall valid percentage is the average across bands
             results["statistics"]["valid_percentage"] = np.mean(band_percentages)

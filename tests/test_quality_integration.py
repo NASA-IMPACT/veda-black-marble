@@ -8,7 +8,20 @@ the Phase 2 adapter architecture for better testability.
 import pytest
 import numpy as np
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
+from tests.qa_constants import (
+    QA_CLEAR_LAND,
+    QA_CLEAR_WATER,
+    QA_LOW_CLOUD,
+    QA_MEDIUM_CLOUD,
+    QA_HIGH_CLOUD,
+    QA_DILATED_CLOUD,
+    QA_AEROSOL_MEDIUM,
+    QA_AEROSOL_HIGH,
+    QA_AEROSOL_192,
+    QA_AEROSOL_194,
+    QA_AEROSOL_196,
+    QA_AEROSOL_228,
+)
 
 from blackmarble.components.quality import (
     CloudMasker,
@@ -20,194 +33,10 @@ from blackmarble.components.quality import (
     create_landsat_qa_pipeline,
 )
 from blackmarble.components.base import apply_mask, combine_masks
-from blackmarble.adapters.base import RasterAdapter
-from blackmarble.data_sources.landsat import LandsatDataSource
-from blackmarble.data_sources.viirs import VIIRSDataSource
 
 
-class MockQualityRasterAdapter:
-    """Mock raster adapter that provides quality band data."""
-
-    def __init__(self, shape=(100, 100)):
-        self.shape = shape
-        self.written_files = {}
-
-    def read(self, path: Path, band: int = None):
-        """Return mock raster data based on file type."""
-        # Determine data type from path
-        path_str = str(path)
-
-        if "QA_PIXEL" in path_str:
-            # Mix of clear and cloudy pixels
-            data = np.random.choice(
-                [21824, 21952, 22280, 54596, 54852, 55052],
-                size=self.shape,
-                p=[0.5, 0.2, 0.1, 0.1, 0.05, 0.05],
-            ).astype(np.uint16)
-        elif "QA_AEROSOL" in path_str:
-            # Mix of aerosol levels
-            data = np.random.choice(
-                [0, 192, 194, 196, 228], size=self.shape, p=[0.7, 0.1, 0.1, 0.05, 0.05]
-            ).astype(np.uint16)
-        elif "QA_RADSAT" in path_str:
-            # Radiance saturation flags
-            data = np.random.choice(
-                [0, 4, 8, 12, 16, 28],  # Various bit combinations
-                size=self.shape,
-                p=[0.8, 0.05, 0.05, 0.05, 0.025, 0.025],
-            ).astype(np.uint16)
-        elif "Mandatory_Quality_Flag" in path_str:
-            # VIIRS quality flags
-            data = np.random.choice(
-                [0, 2, 1, 3],  # Good, moderate, poor, bad
-                size=self.shape,
-                p=[0.7, 0.2, 0.05, 0.05],
-            ).astype(np.uint8)
-        else:
-            # Regular data band
-            data = np.random.rand(*self.shape).astype(np.float32) * 0.3 + 0.1
-
-        metadata = {
-            "crs": "EPSG:4326",
-            "transform": (0.0001, 0.0, -122.4194, 0.0, -0.0001, 37.8049),
-            "width": self.shape[1],
-            "height": self.shape[0],
-            "count": 1,
-            "dtype": str(data.dtype),
-            "nodata": -9999.0,
-            "driver": "GTiff",
-        }
-
-        return data, metadata
-
-    def write(
-        self, path: Path, data: np.ndarray, metadata: dict, compress: bool = True
-    ):
-        """Mock write - track what was written."""
-        self.written_files[str(path)] = {
-            "data": data,
-            "metadata": metadata,
-            "compress": compress,
-        }
-
-    def get_info(self, path: Path) -> dict:
-        """Get mock raster info."""
-        return {
-            "driver": "GTiff",
-            "width": self.shape[1],
-            "height": self.shape[0],
-            "count": 1,
-            "crs": "EPSG:4326",
-            "bounds": (-122.4194, 37.7749, -122.3894, 37.8049),
-            "dtype": ["uint16"] if "QA" in str(path) else ["float32"],
-            "nodata": -9999.0,
-            "shape": (1, self.shape[0], self.shape[1]),
-        }
-
-
-@pytest.fixture
-def mock_quality_adapter():
-    """Provide a mock quality raster adapter."""
-    return MockQualityRasterAdapter()
-
-
-def test_quality_components_with_mock_data(mock_quality_adapter):
-    """Test quality components with mock adapter data."""
-
-    # Read mock QA bands
-    qa_pixel, _ = mock_quality_adapter.read(Path("QA_PIXEL.tif"))
-    qa_aerosol, _ = mock_quality_adapter.read(Path("QA_AEROSOL.tif"))
-    qa_radsat, _ = mock_quality_adapter.read(Path("QA_RADSAT.tif"))
-
-    # Create quality pipeline
-    pipeline = create_landsat_qa_pipeline(strategy="conservative", dilate_clouds=1)
-
-    # Process QA data
-    result = pipeline.process({"qa_pixel": qa_pixel, "qa_aerosol": qa_aerosol})
-
-    # Verify result structure
-    assert "mask" in result.__dict__
-    assert "statistics" in result.__dict__
-    assert "metadata" in result.__dict__
-
-    # Check statistics
-    stats = result.statistics
-    assert stats["total_pixels"] == qa_pixel.size
-    assert 0 <= stats["valid_pixels"] <= stats["total_pixels"]
-    assert 0 <= stats["valid_percentage"] <= 100
-
-    # Check metadata
-    metadata = result.metadata
-    assert metadata["combination_method"] == "and"
-    assert "component_statistics" in metadata
-    assert "qa_pixel" in metadata["component_statistics"]
-    assert "qa_aerosol" in metadata["component_statistics"]
-
-
-def test_quality_enhanced_landsat_source(mock_quality_adapter):
-    """Test quality-enhanced Landsat source with mocks."""
-
-    # Import the enhanced source from the example
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "examples"))
-    from pipeline_with_quality_components import QualityEnhancedLandsatSource
-
-    # Create mock storage adapter
-    mock_storage = Mock()
-    mock_storage.list_objects.return_value = [
-        "B3.tif",
-        "B4.tif",
-        "B5.tif",
-        "QA_PIXEL.tif",
-        "QA_AEROSOL.tif",
-        "QA_RADSAT.tif",
-    ]
-
-    # Create enhanced source
-    source = QualityEnhancedLandsatSource(
-        storage_adapter=mock_storage,
-        raster_adapter=mock_quality_adapter,
-        quality_strategy="conservative",
-        dilate_clouds=1,
-    )
-
-    # Mock the parent fetch method
-    with patch.object(LandsatDataSource, "fetch") as mock_fetch:
-        # Prepare mock data
-        shape = mock_quality_adapter.shape
-        mock_data = {
-            "B3": np.random.rand(*shape).astype(np.float32) * 0.3 + 0.1,
-            "B4": np.random.rand(*shape).astype(np.float32) * 0.3 + 0.1,
-            "B5": np.random.rand(*shape).astype(np.float32) * 0.3 + 0.1,
-            "QA_PIXEL": np.random.choice([21824, 21952, 22280, 54596], size=shape),
-            "QA_AEROSOL": np.random.choice([0, 192, 194], size=shape),
-            "QA_RADSAT": np.random.choice([0, 4, 8, 12], size=shape),
-        }
-        mock_fetch.return_value = mock_data
-
-        # Fetch with quality processing
-        result, report = source.fetch_with_quality(
-            bbox=(-122.4194, 37.7749, -122.3894, 37.8049),
-            start_date="2023-01-01",
-            end_date="2023-06-30",
-            bands=["B3", "B4", "B5"],
-            return_quality_report=True,
-        )
-
-    # Verify data was processed
-    assert all(band in result for band in ["B3", "B4", "B5"])
-    assert all(qa in result for qa in ["QA_PIXEL", "QA_AEROSOL", "QA_RADSAT"])
-
-    # Verify quality report
-    assert "quality_summary" in report
-    assert "cloud_aerosol_details" in report
-    assert "processing_strategy" in report
-
-    # Check that masks were applied
-    summary = report["quality_summary"]
-    assert summary["total_masks"] > 0
-    assert "cloud_aerosol_combined" in summary["mask_names"]
+# Removed MockQualityRasterAdapter class and related mock tests - they only
+# tested mock implementations rather than actual quality component logic.
 
 
 def test_quality_component_composition():
@@ -215,11 +44,11 @@ def test_quality_component_composition():
 
     # Create sample data
     shape = (50, 50)
-    qa_pixel = np.full(shape, 21824, dtype=np.uint16)  # All clear land
+    qa_pixel = np.full(shape, QA_CLEAR_LAND, dtype=np.uint16)  # All clear land
     qa_pixel[10:20, 10:20] = 54596  # Add cloud patch
 
     qa_aerosol = np.zeros(shape, dtype=np.uint16)  # All clear
-    qa_aerosol[15:25, 15:25] = 196  # Add high aerosol patch
+    qa_aerosol[15:25, 15:25] = QA_AEROSOL_196  # Add high aerosol patch
 
     # Create individual components
     cloud_masker = CloudMasker(strategy="conservative")

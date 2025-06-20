@@ -232,31 +232,40 @@ class ResolutionResampler(ComposableComponent):
 
         # Use GDAL for resampling
         nodata = kwargs.get("nodata", np.nan)
-        
+
         # First create a mask of valid pixels in the original data
         if np.isnan(nodata):
             original_valid_mask = (~np.isnan(data)).astype(float)
         else:
             original_valid_mask = (data != nodata).astype(float)
-            
+
         # For multi-band data, combine masks
         if data.ndim > 2:
             original_valid_mask = np.all(original_valid_mask, axis=0).astype(float)
-        
+
         # Resample the data
         if data.ndim == 2:
-            resampled = self._resample_array(data, new_width, new_height, transform, nodata)
+            resampled = self._resample_array(
+                data, new_width, new_height, transform, nodata
+            )
         else:
             # Handle multi-band
             resampled = np.empty(
                 (data.shape[0], new_height, new_width), dtype=data.dtype
             )
             for i in range(data.shape[0]):
-                resampled[i] = self._resample_array(data[i], new_width, new_height, transform, nodata)
+                resampled[i] = self._resample_array(
+                    data[i], new_width, new_height, transform, nodata
+                )
 
         # Resample the mask using average method to get proportion of valid pixels
         resampled_mask = self._resample_array(
-            original_valid_mask, new_width, new_height, transform, None, method="average"
+            original_valid_mask,
+            new_width,
+            new_height,
+            transform,
+            None,
+            method="average",
         )
         # Conservative approach: require ALL source pixels to be valid
         # Average resampling gives exact proportion of valid pixels
@@ -293,39 +302,55 @@ class ResolutionResampler(ComposableComponent):
         return MaskResult(mask=mask, statistics=stats.__dict__, metadata=metadata)
 
     def _resample_array(
-        self, data: np.ndarray, new_width: int, new_height: int, 
-        transform: Affine = None, nodata: Optional[float] = None,
-        method: Optional[str] = None
+        self,
+        data: np.ndarray,
+        new_width: int,
+        new_height: int,
+        transform: Affine = None,
+        nodata: Optional[float] = None,
+        method: Optional[str] = None,
     ) -> np.ndarray:
         """Resample a 2D array using GDAL."""
         # Create in-memory dataset
         driver = gdal.GetDriverByName("MEM")
         src_ds = driver.Create("", data.shape[1], data.shape[0], 1, gdal.GDT_Float32)
-        
+
         # Set geotransform if provided
         if transform is not None:
-            gt = (transform.c, transform.a, transform.b, 
-                  transform.f, transform.d, transform.e)
+            gt = (
+                transform.c,
+                transform.a,
+                transform.b,
+                transform.f,
+                transform.d,
+                transform.e,
+            )
             src_ds.SetGeoTransform(gt)
-            
+
         src_band = src_ds.GetRasterBand(1)
         src_band.WriteArray(data)
-        
+
         # Set nodata value if provided
         if nodata is not None and not np.isnan(nodata):
             src_band.SetNoDataValue(float(nodata))
 
         # Create output dataset
         dst_ds = driver.Create("", new_width, new_height, 1, gdal.GDT_Float32)
-        
+
         # Calculate output geotransform
         if transform is not None:
             scale_x = data.shape[1] / new_width
             scale_y = data.shape[0] / new_height
-            dst_gt = (transform.c, transform.a * scale_x, transform.b,
-                      transform.f, transform.d, transform.e * scale_y)
+            dst_gt = (
+                transform.c,
+                transform.a * scale_x,
+                transform.b,
+                transform.f,
+                transform.d,
+                transform.e * scale_y,
+            )
             dst_ds.SetGeoTransform(dst_gt)
-            
+
         dst_band = dst_ds.GetRasterBand(1)
         if nodata is not None and not np.isnan(nodata):
             dst_band.SetNoDataValue(float(nodata))
@@ -623,7 +648,7 @@ class SpatialAligner(ComposableComponent):
             dummy_crs = "EPSG:4326"
             src_crs = dummy_crs
             ref_crs = dummy_crs
-            
+
         # Create output array
         if data.ndim == 2:
             aligned = np.empty(ref_shape, dtype=data.dtype)

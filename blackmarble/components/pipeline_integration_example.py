@@ -33,10 +33,10 @@ def generate_black_marble_outputs(
     processing_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Path]:
     """Generate all Black Marble output products using components.
-    
+
     This function replaces the output generation section of the pipeline
     with modular, testable components.
-    
+
     Args:
         ndui: Computed NDUI array
         roads: OSM road classification array
@@ -44,13 +44,13 @@ def generate_black_marble_outputs(
         config: Processing configuration
         output_dir: Output directory path
         processing_metadata: Optional metadata about processing
-        
+
     Returns:
         Dictionary of output paths
     """
     geotransform, projection = georef
     height, width = ndui.shape
-    
+
     # Create output metadata
     metadata = OutputMetadata(
         crs=projection,
@@ -59,66 +59,61 @@ def generate_black_marble_outputs(
         shape=(height, width),
         dtype=np.float32,
         nodata=np.nan,
-        tags=processing_metadata
+        tags=processing_metadata,
     )
-    
+
     # 1. Apply road enhancement
     road_enhancer = RoadEnhancer(
         major_factor=config.ndui.road_enhancement_major,
-        minor_factor=config.ndui.road_enhancement_minor
+        minor_factor=config.ndui.road_enhancement_minor,
     )
     enhanced_result = road_enhancer.enhance(ndui, roads)
-    
-    print(f"Road enhancement applied: {enhanced_result.statistics['road_pixels']} pixels enhanced")
-    
-    # 2. Validate the enhanced data
-    validator = OutputValidator(
-        min_valid_percentage=config.min_valid_pixel_percentage
+
+    print(
+        f"Road enhancement applied: {enhanced_result.statistics['road_pixels']} pixels enhanced"
     )
-    
+
+    # 2. Validate the enhanced data
+    validator = OutputValidator(min_valid_percentage=config.min_valid_pixel_percentage)
+
     try:
         validation = validator.validate(
-            enhanced_result.data,
-            metadata,
-            expected_range=(0.0, 1.0)
+            enhanced_result.data, metadata, expected_range=(0.0, 1.0)
         )
-        print(f"Validation passed: {validation['statistics']['valid_percentage']:.1f}% valid pixels")
+        print(
+            f"Validation passed: {validation['statistics']['valid_percentage']:.1f}% valid pixels"
+        )
     except ValueError as e:
         print(f"Warning: Validation failed - {e}")
         # Could decide to proceed anyway or return early
-    
+
     # 3. Generate data COG
     cog_generator = COGGenerator(
-        profile=COGProfile(
-            profile_name="deflate",
-            blocksize=512,
-            web_optimized=True
-        )
+        profile=COGProfile(profile_name="deflate", blocksize=512, web_optimized=True)
     )
-    
+
     data_cog_path = output_dir / "ndui_enhanced.tif"
     cog_generator.generate(enhanced_result.data, metadata, data_cog_path)
     print(f"Generated data COG: {data_cog_path}")
-    
+
     # 4. Create visualization
     # Load colormap arrays (in real pipeline, these would be loaded once)
     colormap_arrays = _load_inferno_colormap()
-    
+
     # Apply contrast enhancement for visualization
     contrast_enhancer = ContrastEnhancer(method="percentile", clip_percentiles=(2, 98))
     contrast_result = contrast_enhancer.enhance(
-        enhanced_result.data,
-        output_range=(config.display_min, config.display_max)
+        enhanced_result.data, output_range=(config.display_min, config.display_max)
     )
-    
+
     # Create RGB visualization
     viz_enhancer = VisualizationEnhancer(colormap_arrays=colormap_arrays)
     rgb_data = viz_enhancer.apply_colormap(
         contrast_result.data,
         display_min=config.display_min,
-        display_max=config.display_max
+        display_max=config.display_max,
     )
-    
+
     # 5. Generate RGB COG
     rgb_metadata = OutputMetadata(
         crs=projection,
@@ -127,16 +122,16 @@ def generate_black_marble_outputs(
         shape=(height, width),
         dtype=np.uint8,
         nodata=None,  # No nodata for RGB
-        tags={**processing_metadata, "visualization": "inferno_colormap"}
+        tags={**processing_metadata, "visualization": "inferno_colormap"},
     )
-    
+
     rgb_cog_path = output_dir / "ndui_rgb.tif"
     cog_generator.generate(rgb_data, rgb_metadata, rgb_cog_path)
     print(f"Generated RGB COG: {rgb_cog_path}")
-    
+
     # 6. Generate metadata
     metadata_generator = MetadataGenerator(metadata_format="stac")
-    
+
     stac_item = metadata_generator.generate(
         enhanced_result.data,
         metadata,
@@ -144,7 +139,9 @@ def generate_black_marble_outputs(
             "pipeline_version": "2.0",
             "road_enhancement": enhanced_result.metadata,
             "contrast_enhancement": contrast_result.metadata,
-            "validation": validation['statistics'] if 'validation' in locals() else None,
+            "validation": validation["statistics"]
+            if "validation" in locals()
+            else None,
         },
         title="Black Marble NDUI Product",
         description="Normalized Difference Urban Index with road network enhancement",
@@ -155,24 +152,25 @@ def generate_black_marble_outputs(
                 "href": str(rgb_cog_path.name),
                 "type": "image/tiff; application=geotiff; profile=cloud-optimized",
                 "roles": ["visual"],
-                "title": "RGB visualization"
+                "title": "RGB visualization",
             },
             "data": {
                 "href": str(data_cog_path.name),
                 "type": "image/tiff; application=geotiff; profile=cloud-optimized",
                 "roles": ["data"],
-                "title": "NDUI data"
-            }
-        }
+                "title": "NDUI data",
+            },
+        },
     )
-    
+
     # Save STAC metadata
     import json
+
     stac_path = output_dir / "ndui_stac.json"
-    with open(stac_path, 'w') as f:
+    with open(stac_path, "w") as f:
         json.dump(stac_item, f, indent=2)
     print(f"Generated STAC metadata: {stac_path}")
-    
+
     return {
         "data_cog": data_cog_path,
         "rgb_cog": rgb_cog_path,
@@ -189,10 +187,10 @@ def refactored_pipeline_output_section(
     final_dir: str,
 ) -> str:
     """Refactored version of the pipeline output section.
-    
+
     This shows how to replace the existing output logic in pipeline.py
     with the new component-based approach.
-    
+
     Args:
         ndui: Computed NDUI array
         roads: OSM road classification array
@@ -200,20 +198,20 @@ def refactored_pipeline_output_section(
         projection: Projection WKT string
         config: Processing configuration
         final_dir: Final output directory
-        
+
     Returns:
         Path to final COG file
     """
     # The old code did this inline - now we use components
     output_dir = Path(final_dir)
-    
+
     # Prepare processing metadata
     processing_metadata = {
         "product": "black_marble",
         "version": "2.0",
         "processing_date": "2024-01-15",  # Would be datetime.now() in real code
     }
-    
+
     # Generate all outputs using components
     outputs = generate_black_marble_outputs(
         ndui=ndui,
@@ -223,12 +221,14 @@ def refactored_pipeline_output_section(
         output_dir=output_dir,
         processing_metadata=processing_metadata,
     )
-    
+
     # Return the RGB COG path (matching original pipeline behavior)
     return str(outputs["rgb_cog"])
 
 
-def _get_bounds_from_transform(transform: Tuple[float, ...], width: int, height: int) -> Tuple[float, float, float, float]:
+def _get_bounds_from_transform(
+    transform: Tuple[float, ...], width: int, height: int
+) -> Tuple[float, float, float, float]:
     """Calculate bounds from GDAL transform."""
     # GDAL transform: (x_origin, pixel_width, 0, y_origin, 0, -pixel_height)
     minx = transform[0]
@@ -240,7 +240,7 @@ def _get_bounds_from_transform(transform: Tuple[float, ...], width: int, height:
 
 def _load_inferno_colormap() -> Dict[str, np.ndarray]:
     """Load inferno colormap arrays.
-    
+
     In the real pipeline, this loads from the bundled .npy files.
     """
     # This would load from blackmarble/data/inferno_*.npy
@@ -249,8 +249,8 @@ def _load_inferno_colormap() -> Dict[str, np.ndarray]:
     g = np.linspace(0, 200, 256).astype(np.uint8)
     b = np.linspace(100, 50, 256).astype(np.uint8)
     r[0] = g[0] = b[0] = 0  # Black for zero
-    
-    return {'r': r, 'g': g, 'b': b}
+
+    return {"r": r, "g": g, "b": b}
 
 
 # Example of how to update the main pipeline.py:

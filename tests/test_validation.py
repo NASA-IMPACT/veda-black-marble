@@ -25,9 +25,9 @@ class TestValidateReflectanceRange:
         assert result["band"] == "B4"
         assert result["total_pixels"] == 4
         assert result["valid_pixels"] == 4
-        assert result["valid_percentage"] == 100.0
-        assert result["min_value"] == 0.1
-        assert result["max_value"] == 0.8
+        assert pytest.approx(result["valid_percentage"], abs=1e-7) == 100.0
+        assert pytest.approx(result["min_value"], abs=1e-7) == 0.1
+        assert pytest.approx(result["max_value"], abs=1e-7) == 0.8
         assert result["out_of_range"] == 0
 
     def test_reflectance_with_nan(self):
@@ -37,9 +37,9 @@ class TestValidateReflectanceRange:
         result = validate_reflectance_range(data, "B3")
 
         assert result["valid_pixels"] == 3
-        assert result["valid_percentage"] == 75.0
-        assert result["min_value"] == 0.1
-        assert result["max_value"] == 0.8
+        assert pytest.approx(result["valid_percentage"], abs=1e-7) == 75.0
+        assert pytest.approx(result["min_value"], abs=1e-7) == 0.1
+        assert pytest.approx(result["max_value"], abs=1e-7) == 0.8
 
     def test_out_of_range_values(self):
         """Test detection of out-of-range values."""

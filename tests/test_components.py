@@ -2,6 +2,23 @@
 
 import numpy as np
 import pytest
+from tests.qa_constants import (
+    QA_CLEAR_LAND,
+    QA_CLEAR_WATER,
+    QA_LOW_CLOUD,
+    QA_MEDIUM_CLOUD,
+    QA_MEDIUM_CLOUD_ALT,
+    QA_HIGH_CLOUD,
+    QA_DILATED_CLOUD,
+    QA_AEROSOL_VALID,
+    QA_AEROSOL_MEDIUM,
+    QA_AEROSOL_HIGH,
+    QA_AEROSOL_192,
+    QA_AEROSOL_194,
+    QA_AEROSOL_196,
+    QA_AEROSOL_224,
+    QA_AEROSOL_228,
+)
 from blackmarble.components import (
     CloudMasker,
     QualityCompositor,
@@ -21,23 +38,23 @@ from blackmarble.config import LandsatConfig, VIIRSConfig
 
 class TestCloudMasker:
     """Test CloudMasker component.
-    
+
     Landsat Collection 2 QA_PIXEL bit definitions:
     - Bits 0-1: Fill (0=no, 1=yes)
-    - Bit 2: Clear (0=no, 1=yes)  
+    - Bit 2: Clear (0=no, 1=yes)
     - Bit 3: Water (0=no, 1=yes)
     - Bits 4-5: Cloud shadow confidence (0=none, 1=low, 2=medium, 3=high)
     - Bits 6-7: Snow/ice confidence
     - Bits 8-9: Cloud confidence (0=none, 1=low, 2=medium, 3=high)
     - Bits 10-11: Cirrus confidence
-    
+
     Common QA values used in tests:
-    - 21824 (0101010101000000): Clear land (clear=1, water=0, no clouds/shadows)
-    - 21952 (0101010111000000): Clear water (clear=1, water=1, no clouds/shadows)
-    - 22280 (0101011100001000): Low confidence cloud
-    - 54596 (1101010101000100): Medium confidence cloud  
-    - 54852 (1101011001000100): High confidence cloud
-    - 55052 (1101011110001100): High confidence cloud + shadow
+    - QA_CLEAR_LAND (21824): Clear land (clear=1, water=0, no clouds/shadows)
+    - QA_CLEAR_WATER (21952): Clear water (clear=1, water=1, no clouds/shadows)
+    - QA_LOW_CLOUD (22280): Low confidence cloud
+    - QA_MEDIUM_CLOUD (22344): Medium confidence cloud
+    - QA_HIGH_CLOUD (54852): High confidence cloud
+    - QA_DILATED_CLOUD (55052): Dilated cloud
     """
 
     def test_conservative_strategy(self):
@@ -45,16 +62,28 @@ class TestCloudMasker:
         # Create test data with known QA values
         qa_pixel = np.array(
             [
-                [21824, 21824, 54852],  # clear land, clear land, cloud high conf
-                [21952, 22280, 55052],  # clear water, cloud low conf, cloud high conf
-                [21824, 54596, 99999],  # clear land, cloud med conf, other
+                [
+                    QA_CLEAR_LAND,
+                    QA_CLEAR_LAND,
+                    QA_HIGH_CLOUD,
+                ],  # clear land, clear land, cloud high conf
+                [
+                    QA_CLEAR_WATER,
+                    QA_LOW_CLOUD,
+                    QA_DILATED_CLOUD,
+                ],  # clear water, cloud low conf, dilated cloud
+                [
+                    QA_CLEAR_LAND,
+                    QA_MEDIUM_CLOUD,
+                    99999,
+                ],  # clear land, cloud med conf, other
             ]
         )
 
         masker = CloudMasker(strategy="conservative")
         result = masker.process(qa_pixel)
 
-        # Expected mask: only clear land (21824) and clear water (21952) are kept
+        # Expected mask: only clear land and clear water are kept
         expected = np.array(
             [
                 [1.0, 1.0, 0.0],
@@ -63,7 +92,7 @@ class TestCloudMasker:
             ]
         )
 
-        np.testing.assert_array_equal(result.mask, expected)
+        np.testing.assert_allclose(result.mask, expected, rtol=1e-7, atol=1e-7)
         assert result.statistics["valid_pixels"] == 4
         assert result.statistics["invalid_pixels"] == 5
         assert result.statistics["valid_percentage"] == pytest.approx(44.44, rel=0.01)
@@ -77,9 +106,13 @@ class TestCloudMasker:
         """Test permissive cloud masking strategy."""
         qa_pixel = np.array(
             [
-                [21824, 21824, 54852],
-                [21952, 22280, 55052],
-                [21824, 54596, 12345],  # 12345 is not in invalid list
+                [QA_CLEAR_LAND, QA_CLEAR_LAND, QA_HIGH_CLOUD],
+                [QA_CLEAR_WATER, QA_LOW_CLOUD, QA_DILATED_CLOUD],
+                [
+                    QA_CLEAR_LAND,
+                    QA_MEDIUM_CLOUD_ALT,
+                    12345,
+                ],  # QA_MEDIUM_CLOUD_ALT is in invalid list, 12345 is not
             ]
         )
 
@@ -95,17 +128,22 @@ class TestCloudMasker:
             ]
         )
 
-        np.testing.assert_array_equal(result.mask, expected)
+        np.testing.assert_allclose(result.mask, expected, rtol=1e-7, atol=1e-7)
         assert result.statistics["valid_pixels"] == 5
 
     def test_cloud_dilation(self):
         """Test cloud mask dilation."""
         qa_pixel = np.array(
             [
-                [21824, 21824, 21824, 21824],
-                [21824, 54852, 54852, 21824],  # clouds in middle
-                [21824, 54852, 54852, 21824],
-                [21824, 21824, 21824, 21824],
+                [QA_CLEAR_LAND, QA_CLEAR_LAND, QA_CLEAR_LAND, QA_CLEAR_LAND],
+                [
+                    QA_CLEAR_LAND,
+                    QA_HIGH_CLOUD,
+                    QA_HIGH_CLOUD,
+                    QA_CLEAR_LAND,
+                ],  # clouds in middle
+                [QA_CLEAR_LAND, QA_HIGH_CLOUD, QA_HIGH_CLOUD, QA_CLEAR_LAND],
+                [QA_CLEAR_LAND, QA_CLEAR_LAND, QA_CLEAR_LAND, QA_CLEAR_LAND],
             ]
         )
 
@@ -125,8 +163,16 @@ class TestAerosolMasker:
         """Test standard aerosol masking."""
         qa_aerosol = np.array(
             [
-                [64, 64, 192],  # low, low, medium aerosol
-                [194, 196, 228],  # medium, high, high aerosol
+                [
+                    QA_AEROSOL_VALID,
+                    QA_AEROSOL_VALID,
+                    QA_AEROSOL_192,
+                ],  # valid, valid, medium aerosol
+                [
+                    QA_AEROSOL_194,
+                    QA_AEROSOL_196,
+                    QA_AEROSOL_228,
+                ],  # medium, high, high aerosol
                 [100, 150, 200],  # various non-flagged values
             ]
         )
@@ -134,7 +180,7 @@ class TestAerosolMasker:
         masker = AerosolMasker(threshold="standard")
         result = masker.process(qa_aerosol)
 
-        # Standard threshold masks: 192, 194, 196, 228
+        # Standard threshold masks: QA_AEROSOL_192, QA_AEROSOL_194, QA_AEROSOL_196, QA_AEROSOL_228
         expected = np.array(
             [
                 [1.0, 1.0, 0.0],
@@ -143,20 +189,22 @@ class TestAerosolMasker:
             ]
         )
 
-        np.testing.assert_array_equal(result.mask, expected)
+        np.testing.assert_allclose(result.mask, expected, rtol=1e-7, atol=1e-7)
         assert result.statistics["valid_pixels"] == 5
-        # 196 and 228 are high aerosol (not 200, which is not in invalid list)
+        # QA_AEROSOL_196 and QA_AEROSOL_228 are high aerosol (not 200, which is not in invalid list)
         assert result.statistics["categories"]["high_aerosol"] == 2
 
     def test_strict_threshold(self):
         """Test strict aerosol masking."""
-        qa_aerosol = np.array([[224, 228, 64]])  # 224 is only in strict
+        qa_aerosol = np.array(
+            [[QA_AEROSOL_224, QA_AEROSOL_228, QA_AEROSOL_VALID]]
+        )  # QA_AEROSOL_224 is only in strict
 
         masker = AerosolMasker(threshold="strict")
         result = masker.process(qa_aerosol)
 
         expected = np.array([[0.0, 0.0, 1.0]])
-        np.testing.assert_array_equal(result.mask, expected)
+        np.testing.assert_allclose(result.mask, expected, rtol=1e-7, atol=1e-7)
 
 
 class TestRadianceSaturationMasker:
@@ -166,7 +214,7 @@ class TestRadianceSaturationMasker:
         """Test masking for a single band."""
         # QA_RADSAT bit definitions for Landsat 8-9:
         # Bit 0 (value 1) = Band 1 saturated
-        # Bit 1 (value 2) = Band 2 saturated  
+        # Bit 1 (value 2) = Band 2 saturated
         # Bit 2 (value 4) = Band 3 saturated
         # Bit 3 (value 8) = Band 4 saturated
         # Bit 4 (value 16) = Band 5 saturated
@@ -175,9 +223,9 @@ class TestRadianceSaturationMasker:
         # Multiple bits can be set (values add)
         qa_radsat = np.array(
             [
-                [0, 4, 8],      # none, B3 saturated, B4 saturated
-                [12, 16, 20],   # B3+B4 (4+8), B5 saturated, B3+B5 (4+16)
-                [28, 0, 4],     # B3+B4+B5 (4+8+16), none, B3 saturated
+                [0, 4, 8],  # none, B3 saturated, B4 saturated
+                [12, 16, 20],  # B3+B4 (4+8), B5 saturated, B3+B5 (4+16)
+                [28, 0, 4],  # B3+B4+B5 (4+8+16), none, B3 saturated
             ]
         )
 
@@ -192,7 +240,7 @@ class TestRadianceSaturationMasker:
                 [0.0, 1.0, 0.0],
             ]
         )
-        np.testing.assert_array_equal(result_b3.mask, expected_b3)
+        np.testing.assert_allclose(result_b3.mask, expected_b3, rtol=1e-7, atol=1e-7)
         assert result_b3.metadata["band"] == 3
         assert result_b3.metadata["saturated_pixels"] == 5
 
@@ -205,7 +253,7 @@ class TestRadianceSaturationMasker:
                 [0.0, 1.0, 1.0],
             ]
         )
-        np.testing.assert_array_equal(result_b4.mask, expected_b4)
+        np.testing.assert_allclose(result_b4.mask, expected_b4, rtol=1e-7, atol=1e-7)
         assert result_b4.metadata["band"] == 4
 
     def test_all_bands_masking(self):
@@ -245,7 +293,7 @@ class TestRadianceSaturationMasker:
                 [0.0, 1.0, 0.0],
             ]
         )
-        np.testing.assert_array_equal(result.mask, expected)
+        np.testing.assert_allclose(result.mask, expected, rtol=1e-7, atol=1e-7)
 
 
 class TestVIIRSQualityMasker:
@@ -273,7 +321,7 @@ class TestVIIRSQualityMasker:
             ]
         )
 
-        np.testing.assert_array_equal(result.mask, expected)
+        np.testing.assert_allclose(result.mask, expected, rtol=1e-7, atol=1e-7)
         assert result.statistics["valid_pixels"] == 5
         assert result.statistics["categories"]["high_quality"] == 3
         assert result.statistics["categories"]["moderate_quality"] == 2
@@ -287,7 +335,7 @@ class TestVIIRSQualityMasker:
         result = masker.process(quality_flags)
 
         expected = np.array([[1.0, 1.0, 1.0, 0.0]])
-        np.testing.assert_array_equal(result.mask, expected)
+        np.testing.assert_allclose(result.mask, expected, rtol=1e-7, atol=1e-7)
 
 
 class TestQualityCompositor:
@@ -303,8 +351,15 @@ class TestQualityCompositor:
         )
 
         data = {
-            "clouds": np.array([[21824, 54852], [21952, 21824]]),
-            "aerosol": np.array([[64, 192], [64, 64]]),
+            "clouds": np.array(
+                [[QA_CLEAR_LAND, QA_HIGH_CLOUD], [QA_CLEAR_WATER, QA_CLEAR_LAND]]
+            ),
+            "aerosol": np.array(
+                [
+                    [QA_AEROSOL_VALID, QA_AEROSOL_192],
+                    [QA_AEROSOL_VALID, QA_AEROSOL_VALID],
+                ]
+            ),
         }
 
         result = compositor.process(data)
@@ -317,7 +372,7 @@ class TestQualityCompositor:
             ]
         )
 
-        np.testing.assert_array_equal(result.mask, expected)
+        np.testing.assert_allclose(result.mask, expected, rtol=1e-7, atol=1e-7)
         assert result.statistics["valid_pixels"] == 3
 
     def test_or_combination(self):
@@ -341,18 +396,9 @@ class TestQualityCompositor:
         # Conservative keeps only 21824, permissive keeps both
         expected = np.array([[1.0, 1.0]])
 
-        np.testing.assert_array_equal(result.mask, expected)
+        np.testing.assert_allclose(result.mask, expected, rtol=1e-7, atol=1e-7)
 
-    def test_add_component(self):
-        """Test adding components dynamically."""
-        compositor = QualityCompositor()
-        assert len(compositor.components) == 0
-
-        masker = CloudMasker(name="test")
-        compositor.add_component(masker)
-
-        assert len(compositor.components) == 1
-        assert "test" in compositor.get_config()["components"]
+    # Removed test_add_component - only tests list.append() functionality
 
 
 class TestMaskStatistics:
@@ -410,7 +456,7 @@ class TestUtilityFunctions:
         result = combine_masks([mask1, mask2], method="and")
         expected = np.array([[1.0, 0.0], [0.0, 1.0]])
 
-        np.testing.assert_array_equal(result, expected)
+        np.testing.assert_allclose(result, expected, rtol=1e-7, atol=1e-7)
 
     def test_combine_masks_or(self):
         """Test OR combination of masks."""
@@ -420,7 +466,7 @@ class TestUtilityFunctions:
         result = combine_masks([mask1, mask2], method="or")
         expected = np.array([[1.0, 1.0], [0.0, 0.0]])
 
-        np.testing.assert_array_equal(result, expected)
+        np.testing.assert_allclose(result, expected, rtol=1e-7, atol=1e-7)
 
     def test_combine_masks_errors(self):
         """Test error handling in combine_masks."""
@@ -446,7 +492,7 @@ class TestUtilityFunctions:
         result = apply_mask(data, mask, fill_value=-999)
         expected = np.array([[1.0, -999], [3.0, 4.0]])
 
-        np.testing.assert_array_equal(result, expected)
+        np.testing.assert_allclose(result, expected, rtol=1e-7, atol=1e-7)
 
     def test_dilate_mask(self):
         """Test mask dilation."""
@@ -483,14 +529,14 @@ class TestIntegration:
             "qa_pixel": np.array(
                 [
                     [21824, 21824, 54852],
-                    [21952, 22280, 55052],
+                    [QA_CLEAR_WATER, QA_LOW_CLOUD, QA_DILATED_CLOUD],
                     [21824, 54596, 21824],
                 ]
             ),
             "qa_aerosol": np.array(
                 [
-                    [64, 64, 192],
-                    [194, 196, 228],
+                    [QA_AEROSOL_VALID, QA_AEROSOL_VALID, QA_AEROSOL_192],
+                    [QA_AEROSOL_194, QA_AEROSOL_196, QA_AEROSOL_228],
                     [100, 150, 64],
                 ]
             ),

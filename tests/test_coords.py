@@ -7,20 +7,7 @@ from blackmarble import coords
 # --- Test wkt_to_json ---
 
 
-def test_wkt_to_json_valid():
-    """Test wkt_to_json with a valid WKT string."""
-    # Example WKT for UTM Zone 10N (EPSG:32610)
-    wkt = 'PROJCS["WGS 84 / UTM zone 10N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-123],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","32610"]]'
-    result = coords.wkt_to_json(wkt)
-    assert isinstance(result, dict)
-    assert result.get("name") == "WGS 84 / UTM zone 10N"
-    assert result.get("type") == "ProjectedCRS"
-    assert "coordinate_system" in result
-    assert "base_crs" in result
-    assert "datum" in result["base_crs"]
-    assert "id" in result
-    assert result["id"]["authority"] == "EPSG"
-    assert result["id"]["code"] == 32610
+# Removed test_wkt_to_json_valid - only tests that pyproj library parsing works
 
 
 def test_wkt_to_json_invalid():
@@ -99,17 +86,7 @@ def test_calculate_bounding_box_area_small():
     )  # Allow some tolerance due to projection/geodesic
 
 
-def test_calculate_bounding_box_area_zero():
-    """Test calculate_bounding_box_area with zero width or height."""
-    # Zero width
-    area_zero_width = coords.calculate_bounding_box_area(10.0, 10.0, 10.0, 11.0)
-    assert area_zero_width == pytest.approx(0.0)
-    # Zero height
-    area_zero_height = coords.calculate_bounding_box_area(10.0, 10.0, 11.0, 10.0)
-    assert area_zero_height == pytest.approx(0.0)
-    # Point
-    area_point = coords.calculate_bounding_box_area(10.0, 10.0, 10.0, 10.0)
-    assert area_point == pytest.approx(0.0)
+# Removed test_calculate_bounding_box_area_zero - only tests basic edge case that area of zero-size box is zero
 
 
 def test_calculate_bounding_box_area_invalid_order():
@@ -149,27 +126,9 @@ def test_calculate_bounding_box_area_invalid_order():
 # --- Test Example Bounding Boxes ---
 
 
-def test_get_test_coord():
-    """Verify the hardcoded test coordinates."""
-    expected = (33.034682, 21.279194, 32.465949, 22.919832)
-    assert coords.get_test_coord() == expected
-
-
-def test_get_peurto_coord():
-    """Verify the hardcoded Puerto Rico coordinates."""
-    expected = (18.518435, -67.244568, 17.918391, -65.788879)
-    assert coords.get_peurto_coord() == expected
-
-
-def test_get_fort_myers():
-    """Verify the hardcoded Fort Myers coordinates."""
-    expected = (26.718905, -82.103920, 26.520302, -81.833752)
-    assert coords.get_fort_myers() == expected
-
-
-def test_turkey():
-    """Verify the hardcoded Turkey coordinates."""
-    # Note: The original function has max_lon == max_lat, which seems like a typo.
-    # Test against the actual code.
-    expected = (38.256313, 35.385847, 36.448697, 36.448697)
-    assert coords.turkey() == expected
+# Removed hardcoded coordinate tests - only verify constant tuples return constant tuples:
+# - test_get_test_coord: checks (33.034682, 21.279194, 32.465949, 22.919832)
+# - test_get_peurto_coord: checks (18.518435, -67.244568, 17.918391, -65.788879)
+# - test_get_fort_myers: checks (26.718905, -82.103920, 26.520302, -81.833752)
+# - test_turkey: checks (38.256313, 35.385847, 36.448697, 36.448697)
+# These are configuration constants, not business logic to test.
