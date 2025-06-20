@@ -35,7 +35,18 @@ def get_geo(filepath: str, band: int) -> tuple[np.ndarray, tuple[float, ...], st
         raise RuntimeError(f"Could not open raster file: {filepath}")
     cols = ds.RasterXSize
     rows = ds.RasterYSize
-    array = ds.GetRasterBand(band).ReadAsArray(0, 0, cols, rows)
+    
+    # Get the band and check for NoData value
+    band_obj = ds.GetRasterBand(band)
+    array = band_obj.ReadAsArray(0, 0, cols, rows)
+    nodata = band_obj.GetNoDataValue()
+    
+    # Convert NoData to NaN for consistent handling
+    if nodata is not None:
+        print(f"DEBUG get_geo: File {filepath} has NoData value: {nodata}")
+        array = array.astype(np.float32)  # Ensure float type for NaN
+        array = np.where(array == nodata, np.nan, array)
+        print(f"DEBUG get_geo: Replaced {np.sum(np.isnan(array))} NoData pixels with NaN")
 
     geotransform = ds.GetGeoTransform()
     projection = ds.GetProjectionRef()

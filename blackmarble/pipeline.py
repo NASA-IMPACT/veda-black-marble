@@ -350,15 +350,45 @@ def run_pipeline(
     print(f"DEBUG: B4 median range: {np.nanmin(b4_med)} - {np.nanmax(b4_med)}")
     print(f"DEBUG: B5 median range: {np.nanmin(b5_med)} - {np.nanmax(b5_med)}")
     
-    # Apply rescaling to convert DN to reflectance
-    b3_med_scaled = rescale_bands(b3_med)
-    b4_med_scaled = rescale_bands(b4_med)
-    b5_med_scaled = rescale_bands(b5_med)
+    # Check if data is already scaled (reflectance) or needs scaling (DN)
+    b3_needs_scaling = np.nanmax(b3_med) > 1.5
+    b4_needs_scaling = np.nanmax(b4_med) > 1.5
+    b5_needs_scaling = np.nanmax(b5_med) > 1.5
+    
+    print(f"\nDEBUG: Checking if bands need scaling:")
+    print(f"DEBUG: B3 needs scaling: {b3_needs_scaling} (max value: {np.nanmax(b3_med)})")
+    print(f"DEBUG: B4 needs scaling: {b4_needs_scaling} (max value: {np.nanmax(b4_med)})")
+    print(f"DEBUG: B5 needs scaling: {b5_needs_scaling} (max value: {np.nanmax(b5_med)})")
+    
+    # Apply rescaling to convert DN to reflectance (only if needed)
+    if b3_needs_scaling:
+        b3_med_scaled = rescale_bands(b3_med)
+    else:
+        print("DEBUG: B3 appears to already be reflectance, skipping rescale")
+        b3_med_scaled = b3_med
+        
+    if b4_needs_scaling:
+        b4_med_scaled = rescale_bands(b4_med)
+    else:
+        print("DEBUG: B4 appears to already be reflectance, skipping rescale")
+        b4_med_scaled = b4_med
+        
+    if b5_needs_scaling:
+        b5_med_scaled = rescale_bands(b5_med)
+    else:
+        print("DEBUG: B5 appears to already be reflectance, skipping rescale")
+        b5_med_scaled = b5_med
     
     print(f"\nDEBUG: Band value ranges AFTER rescaling:")
     print(f"DEBUG: B3 scaled range: {np.nanmin(b3_med_scaled)} - {np.nanmax(b3_med_scaled)}")
     print(f"DEBUG: B4 scaled range: {np.nanmin(b4_med_scaled)} - {np.nanmax(b4_med_scaled)}")
     print(f"DEBUG: B5 scaled range: {np.nanmin(b5_med_scaled)} - {np.nanmax(b5_med_scaled)}")
+    
+    # Check valid pixel counts
+    print(f"\nDEBUG: Valid pixel counts after processing:")
+    print(f"DEBUG: B3: {np.sum(~np.isnan(b3_med_scaled))} valid pixels")
+    print(f"DEBUG: B4: {np.sum(~np.isnan(b4_med_scaled))} valid pixels")
+    print(f"DEBUG: B5: {np.sum(~np.isnan(b5_med_scaled))} valid pixels")
     
     # get georef from first band
     _unused, gt_temp, proj_temp = get_geo(b3_final[0], 1)
@@ -521,7 +551,7 @@ def run_pipeline(
     )
 
     # 8) Resample all to final resolution
-    print("Resampling to final resolution...")
+    print("\nDEBUG: Resampling to final resolution...")
     desired_res: Tuple[float, float] = (final_resolution, -final_resolution)
     inputs: List[str] = [
         b3_wgs84_path,
@@ -541,13 +571,42 @@ def run_pipeline(
         os.path.join(final_dir, "mandatory_quality_flag.tif"),
         os.path.join(final_dir, "osm.tif"),
     ]
-    for inp, outp in zip(inputs, outputs_final):
+    
+    print(f"DEBUG: Resampling {len(inputs)} files to resolution {desired_res}")
+    
+    for i, (inp, outp) in enumerate(zip(inputs, outputs_final)):
+        print(f"\nDEBUG: Resampling file {i+1}/{len(inputs)}: {os.path.basename(inp)}")
+        
+        # Check input file
+        try:
+            with rasterio.open(inp) as src:
+                print(f"  Input shape: {src.shape}, CRS: {src.crs}")
+                print(f"  Input bounds: {src.bounds}")
+                data = src.read(1)
+                print(f"  Input data range: {np.nanmin(data)} to {np.nanmax(data)}")
+                print(f"  Input NoData value: {src.nodata}")
+        except Exception as e:
+            print(f"  ERROR reading input: {e}")
+        
         # Resample to final resolution
         warp_opts = gdal.WarpOptions(
             format="GTiff", xRes=desired_res[0], yRes=desired_res[1]
         )
         # Execute warp
-        gdal.Warp(outp, inp, options=warp_opts)
+        result = gdal.Warp(outp, inp, options=warp_opts)
+        
+        if result is None:
+            print(f"  ERROR: Failed to resample {inp}!")
+        else:
+            print(f"  Successfully resampled to {outp}")
+            # Check output
+            try:
+                with rasterio.open(outp) as dst:
+                    print(f"  Output shape: {dst.shape}")
+                    data = dst.read(1)
+                    print(f"  Output data range: {np.nanmin(data)} to {np.nanmax(data)}")
+            except Exception as e:
+                print(f"  ERROR reading output: {e}")
 
     # 9) Load final rasters and stack
     print("\nDEBUG: Loading final rasters and stacking...")
@@ -598,9 +657,28 @@ def run_pipeline(
     )
     
     print(f"\nDEBUG: Final raster value ranges BEFORE rescaling:")
-    print(f"DEBUG: B3: {np.nanmin(stack[0])} - {np.nanmax(stack[0])}")
-    print(f"DEBUG: B4: {np.nanmin(stack[1])} - {np.nanmax(stack[1])}")
-    print(f"DEBUG: B5: {np.nanmin(stack[2])} - {np.nanmax(stack[2])}")
+    print(f"DEBUG: B3: min={np.nanmin(stack[0])}, max={np.nanmax(stack[0])}, shape={stack[0].shape}")
+    print(f"DEBUG: B4: min={np.nanmin(stack[1])}, max={np.nanmax(stack[1])}, shape={stack[1].shape}")
+    print(f"DEBUG: B5: min={np.nanmin(stack[2])}, max={np.nanmax(stack[2])}, shape={stack[2].shape}")
+    
+    # Check for NoData values
+    b3_nodata_count = np.sum(stack[0] == -9999.0)
+    b4_nodata_count = np.sum(stack[1] == -9999.0)
+    b5_nodata_count = np.sum(stack[2] == -9999.0)
+    print(f"\nDEBUG: NoData value (-9999) counts:")
+    print(f"DEBUG: B3: {b3_nodata_count} pixels ({100.0 * b3_nodata_count / stack[0].size:.1f}%)")
+    print(f"DEBUG: B4: {b4_nodata_count} pixels ({100.0 * b4_nodata_count / stack[1].size:.1f}%)")
+    print(f"DEBUG: B5: {b5_nodata_count} pixels ({100.0 * b5_nodata_count / stack[2].size:.1f}%)")
+    
+    # Check actual valid data range (excluding NoData)
+    b3_valid = stack[0][stack[0] > -1000]
+    b4_valid = stack[1][stack[1] > -1000]
+    b5_valid = stack[2][stack[2] > -1000]
+    if len(b3_valid) > 0:
+        print(f"\nDEBUG: Valid data ranges (excluding NoData):")
+        print(f"DEBUG: B3: {np.min(b3_valid):.4f} to {np.max(b3_valid):.4f} ({len(b3_valid)} valid pixels)")
+        print(f"DEBUG: B4: {np.min(b4_valid):.4f} to {np.max(b4_valid):.4f} ({len(b4_valid)} valid pixels)")
+        print(f"DEBUG: B5: {np.min(b5_valid):.4f} to {np.max(b5_valid):.4f} ({len(b5_valid)} valid pixels)")
     
     b3_px = rescale_bands(stack[0])
     b4_px = rescale_bands(stack[1])
