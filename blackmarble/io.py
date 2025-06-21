@@ -179,11 +179,25 @@ def save_geotiff_single(
         array_copy = array
 
     dst = driver.Create(out_path, cols, rows, 1, gdal_dtype)
+
+    # Check if dataset was created successfully
+    if dst is None:
+        raise RuntimeError(f"Failed to create GeoTIFF at {out_path}")
+
+    # Set projection and geotransform
     dst.SetProjection(projection)
     dst.SetGeoTransform(geotransform)
+
+    # Write data
     band = dst.GetRasterBand(1)
     band.SetNoDataValue(nodata_value)
     band.WriteArray(array_copy)
+
+    # Explicitly flush to disk
+    band.FlushCache()
+    dst.FlushCache()
+
+    # Close dataset
     dst = None
 
 
@@ -231,3 +245,40 @@ def scale_image(
     scaled = (arr - arr_min) * (255.0 / (arr_max - arr_min))
     scaled = np.where(np.isnan(scaled), 0, scaled).astype("uint8")
     return scaled
+
+
+# Use rasterio implementations
+print("INFO: Switching to rasterio-based I/O implementations")
+try:
+    from .io_rasterio import get_geo as _rio_get_geo
+    from .io_rasterio import save_image as _rio_save_image
+    from .io_rasterio import save_geotiff_single as _rio_save_geotiff_single
+    from .io_rasterio import save_geotiff_rgb as _rio_save_geotiff_rgb
+    
+    # Replace GDAL implementations with rasterio ones
+    get_geo = _rio_get_geo
+    save_image = _rio_save_image
+    save_geotiff_single = _rio_save_geotiff_single
+    save_geotiff_rgb = _rio_save_geotiff_rgb
+    
+    print("INFO: Successfully loaded rasterio I/O implementations")
+except ImportError as e:
+    print(f"WARNING: Could not import rasterio implementations: {e}")
+    print("INFO: Using GDAL implementations")
+
+
+# Conditional import of rasterio-based implementation
+# This allows switching between GDAL and rasterio implementations via environment variable
+try:
+    import os
+
+    if os.environ.get("BM_USE_RASTERIO_WRITER", "false").lower() == "true":
+        from .io_rasterio import save_geotiff_single as _save_geotiff_single_rasterio
+
+        # Store original GDAL implementation
+        _save_geotiff_single_gdal = save_geotiff_single
+        # Replace with rasterio version
+        save_geotiff_single = _save_geotiff_single_rasterio
+        print("INFO: Using rasterio-based save_geotiff_single implementation")
+except ImportError:
+    pass  # Keep GDAL implementation if rasterio module not available

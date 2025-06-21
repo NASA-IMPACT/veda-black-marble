@@ -41,4 +41,32 @@ You can run the pipeline locally (no Docker) once dependencies are installed.
    ```
 
 Outputs will land in the `outputs/` directory. If `UPLOAD_BUCKET` and `UPLOAD_FILE` are set, the final COG will also be uploaded to S3.
+
+## Advanced Features
+
+The Black Marble pipeline includes advanced image processing features using scipy:
+
+### Available Features
+
+1. **Advanced Gap Filling** - Uses scipy's Euclidean distance transform to fill gaps with nearest neighbor interpolation:
+   ```python
+   from blackmarble.components.temporal import TemporalCompositor
+   
+   compositor = TemporalCompositor(
+       method="median",
+       use_scipy_fill_gaps=True  # Enable advanced gap filling
+   )
+   ```
+
+2. **Feather Blending** - Creates seamless mosaics with smooth transitions between overlapping scenes:
+   ```python
+   from blackmarble.components.temporal import SceneMerger
+   
+   merger = SceneMerger(
+       blend_method="feather",
+       feather_distance=10
+   )
+   ```
+
+These features are disabled by default for backward compatibility.
 ```

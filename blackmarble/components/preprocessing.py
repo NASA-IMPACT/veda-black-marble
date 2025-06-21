@@ -310,7 +310,32 @@ class ResolutionResampler(ComposableComponent):
         nodata: Optional[float] = None,
         method: Optional[str] = None,
     ) -> np.ndarray:
-        """Resample a 2D array using GDAL."""
+        """Resample a 2D array using scipy/rasterio."""
+        # Import here to allow gradual migration
+        try:
+            from .preprocessing_rasterio import resample_array
+            use_method = method or self.method
+            return resample_array(
+                data, new_width, new_height, 
+                transform, nodata, use_method
+            )
+        except ImportError:
+            # Fall back to GDAL implementation
+            return self._resample_array_gdal(
+                data, new_width, new_height, 
+                transform, nodata, method
+            )
+    
+    def _resample_array_gdal(
+        self,
+        data: np.ndarray,
+        new_width: int,
+        new_height: int,
+        transform: Affine = None,
+        nodata: Optional[float] = None,
+        method: Optional[str] = None,
+    ) -> np.ndarray:
+        """Original GDAL implementation kept as fallback."""
         # Create in-memory dataset
         driver = gdal.GetDriverByName("MEM")
         src_ds = driver.Create("", data.shape[1], data.shape[0], 1, gdal.GDT_Float32)

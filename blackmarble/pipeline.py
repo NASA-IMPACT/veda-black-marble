@@ -805,21 +805,10 @@ def run_pipeline(
 
         # Mosaic tiles if multiple, or use single tile
         if len(ntl_tiles) > 1:
-            print("Mosaicing VIIRS tiles...")
-            ntl_temp_tif = os.path.join(temp_dir, "ntl_raw_mosaic.tif")
-            gdal.Warp(ntl_temp_tif, ntl_tiles, format="GTiff", resampleAlg="bilinear")
-
-            lunar_temp_tif = os.path.join(temp_dir, "lunar_irradiance_mosaic.tif")
-            gdal.Warp(
-                lunar_temp_tif, lunar_tiles, format="GTiff", resampleAlg="bilinear"
+            from .pipeline_ops import mosaic_viirs_tiles
+            ntl_temp_tif, lunar_temp_tif, quality_temp_tif = mosaic_viirs_tiles(
+                ntl_tiles, lunar_tiles, quality_tiles, temp_dir
             )
-
-            quality_temp_tif = os.path.join(
-                temp_dir, "mandatory_quality_flag_mosaic.tif"
-            )
-            gdal.Warp(
-                quality_temp_tif, quality_tiles, format="GTiff", resampleAlg="nearest"
-            )  # Use nearest for quality flags
         else:
             # Single tile, use directly
             ntl_temp_tif = ntl_tiles[0]
@@ -910,13 +899,10 @@ def run_pipeline(
             print(f"  ERROR reading input: {e}")
 
         # Resample to final resolution
-        warp_opts = gdal.WarpOptions(
-            format="GTiff", xRes=desired_res[0], yRes=desired_res[1]
-        )
-        # Execute warp
-        result = gdal.Warp(outp, inp, options=warp_opts)
+        from .pipeline_ops import resample_to_resolution
+        success = resample_to_resolution(inp, outp, desired_res)
 
-        if result is None:
+        if not success:
             print(f"  ERROR: Failed to resample {inp}!")
         else:
             print(f"  Successfully resampled to {outp}")

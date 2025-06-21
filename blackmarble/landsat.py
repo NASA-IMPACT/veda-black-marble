@@ -15,12 +15,11 @@ from typing import Any, Union
 from boto3.session import Session
 import collections
 from osgeo import gdal
-from osgeo import ogr
-import shapely.wkt
+try:
+    from osgeo import ogr
+except ImportError:
+    ogr = None  # Will be replaced by Fiona implementation
 import shapely.geometry
-
-# Enable GDAL/OGR exceptions (avoids FutureWarning and uses Python exceptions)
-ogr.UseExceptions()
 
 # Default path to WRS2 descending shapefile bundled with this package
 DEFAULT_WRS_SHAPEFILE: str = str(
@@ -351,3 +350,30 @@ def process_band_data(
     aerosol_tifs = [a for a in aerosol_tifs if a]
 
     return outputs, pixel_tifs, radsat_tifs, aerosol_tifs
+
+
+# Use Fiona implementation if available
+print("INFO: Switching to Fiona-based vector operations")
+try:
+    from .landsat_fiona import LandsatUtil as _FionaLandsatUtil
+    
+    # Replace OGR implementation with Fiona
+    LandsatUtil = _FionaLandsatUtil
+    
+    print("INFO: Successfully loaded Fiona implementation for Landsat")
+except ImportError as e:
+    print(f"WARNING: Could not import Fiona implementation: {e}")
+    print("INFO: Using OGR implementation")
+
+# Use rasterio implementation for raster operations if available
+print("INFO: Switching to rasterio-based Landsat raster operations")
+try:
+    from .landsat_rasterio import process_band_data as _rio_process_band_data
+    
+    # Replace GDAL implementation with rasterio
+    process_band_data = _rio_process_band_data
+    
+    print("INFO: Successfully loaded rasterio implementation for Landsat raster operations")
+except ImportError as e:
+    print(f"WARNING: Could not import rasterio implementation: {e}")
+    print("INFO: Using GDAL implementation for raster operations")

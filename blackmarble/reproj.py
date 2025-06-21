@@ -99,20 +99,21 @@ def convert_to_wgs84(
     output_dir: str,
 ) -> None:
     """Reproject raster to WGS84 and crop to lon/lat bounds, using output_dir for temp."""
-    ds = gdal.Open(input_path)
-    srs_wkt: str = ds.GetProjection()
+    # Open the input dataset
+    ds = gdal.Open(input_path, gdal.GA_ReadOnly)
+    if ds is None:
+        raise RuntimeError(f"Failed to open input file: {input_path}")
 
-    json_data: dict[str, Any] = wkt_to_json(srs_wkt)
-    src_srs_code: int | None = None  # Initialize
-    if "id" in json_data and "code" in json_data["id"]:
-        src_srs_code = json_data["id"]["code"]
-    else:
-        # Attempt to parse from authority string if available
-        # This part might need refinement based on actual WKT variations
-        print(
-            f"Warning: Could not directly find EPSG code in WKT for {input_path}. Using WKT directly."
-        )
-        # Fallback or raise error depending on requirements
+    # Get the projection - it should be set by save_geotiff_single
+    srs_wkt: str = ds.GetProjection()
+    if not srs_wkt:
+        print(f"Warning: No projection found in {input_path}")
+        # Check if geotransform exists
+        gt = ds.GetGeoTransform()
+        print(f"Geotransform: {gt}")
+
+    # Close the dataset before warping
+    ds = None
 
     # Define intermediate file path within output_dir (or its temp subdir)
     temp_conv_path = os.path.join(
@@ -121,19 +122,20 @@ def convert_to_wgs84(
     if os.path.exists(temp_conv_path):
         os.remove(temp_conv_path)
 
-    # Reproject to WGS84
-    warp_opts_list = ["-r", "bilinear", "-wm", "4000", "-multi", "-t_srs", "EPSG:4326"]
-    if src_srs_code:
-        warp_opts_list.extend(["-s_srs", f"EPSG:{src_srs_code}"])
-    else:
-        # If no code, GDAL might infer from WKT, or you might need to pass WKT explicitly
-        # For simplicity, assume GDAL handles it or rely on the WKT embedded in the source file
-        pass
+    # Reproject to WGS84 using WarpOptions object
+    # Let GDAL read the projection from the file itself
+    warp_opts = gdal.WarpOptions(
+        dstSRS="EPSG:4326",
+        resampleAlg="bilinear",
+        warpMemoryLimit=4000,
+        multithread=True,
+    )
 
-    warp_opts = gdal.WarpOptions(gdal.ParseCommandLine(" ".join(warp_opts_list)))
-
-    ds = gdal.Warp(temp_conv_path, ds, options=warp_opts)
-    ds = None
+    # Perform the warp
+    ds_result = gdal.Warp(temp_conv_path, input_path, options=warp_opts)
+    if ds_result is None:
+        raise RuntimeError(f"Failed to reproject {input_path} to WGS84")
+    ds_result = None
 
     # Crop to provided lon/lat box
     min_x, max_x = sorted([lon1, lon2])
@@ -171,3 +173,25 @@ def crop_to_bb_utm(
         output_path, ds, projWin=[min_x, max_y, max_x, min_y], resampleAlg="bilinear"
     )
     ds = None
+
+
+# Use rasterio implementations
+print("INFO: Switching to rasterio-based reprojection implementations")
+try:
+    from .reproj_rasterio import (
+        subset_raster_normal as _rio_subset_raster_normal,
+        subset_raster as _rio_subset_raster,
+        convert_to_wgs84 as _rio_convert_to_wgs84,
+        crop_to_bb_utm as _rio_crop_to_bb_utm,
+    )
+    
+    # Replace GDAL implementations with rasterio ones
+    subset_raster_normal = _rio_subset_raster_normal
+    subset_raster = _rio_subset_raster
+    convert_to_wgs84 = _rio_convert_to_wgs84
+    crop_to_bb_utm = _rio_crop_to_bb_utm
+    
+    print("INFO: Successfully loaded rasterio reprojection implementations")
+except ImportError as e:
+    print(f"WARNING: Could not import rasterio reprojection implementations: {e}")
+    print("INFO: Using GDAL implementations")

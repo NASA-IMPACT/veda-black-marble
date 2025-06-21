@@ -13,8 +13,8 @@ import pytest
 
 from blackmarble.pipeline import run_pipeline
 from blackmarble.config import ProcessingConfig
+from tests.test_scene_generator import create_test_scene
 from tests.test_data_generators import (
-    create_test_scene,
     create_test_landsat_data,
     create_test_viirs_data,
     create_test_road_data,
@@ -229,7 +229,7 @@ class TestPipelineIntegration:
         """Test pipeline with edge case scenarios."""
         # Test all clouds scenario
         all_cloud_data = create_test_landsat_data(
-            shape=(100, 100), scenario="urban", cloud_coverage=1.0
+            shape=(100, 100), include_clouds=True
         )
 
         # Verify cloud mask works correctly
@@ -247,12 +247,23 @@ class TestPipelineIntegration:
         # Calculate indices
         from blackmarble.calculations import calculate_ndvi, calculate_ndwi
 
-        ndvi = calculate_ndvi(all_water_data["B4"], all_water_data["B5"])
-        ndwi = calculate_ndwi(all_water_data["B3"], all_water_data["B5"])
+        # Check QA_PIXEL values - should be QA_CLEAR_WATER for water scenario
+        qa_pixel = all_water_data["QA_PIXEL"]
+        unique_qa = np.unique(qa_pixel)
+        assert len(unique_qa) == 1 and unique_qa[0] == 21952, f"Water scenario should have only QA_CLEAR_WATER (21952), got {unique_qa}"
+
+        # Scale bands to reflectance if needed
+        from blackmarble.calculations import scale_landsat_to_reflectance
+        b3_refl = scale_landsat_to_reflectance(all_water_data["B3"])
+        b4_refl = scale_landsat_to_reflectance(all_water_data["B4"])
+        b5_refl = scale_landsat_to_reflectance(all_water_data["B5"])
+
+        ndvi = calculate_ndvi(b4_refl, b5_refl)
+        ndwi = calculate_ndwi(b3_refl, b5_refl)
 
         # Water should have negative NDVI and positive NDWI
-        assert np.mean(ndvi) < 0, "Water should have negative NDVI"
-        assert np.mean(ndwi) > 0, "Water should have positive NDWI"
+        assert np.nanmean(ndvi) < 0, f"Water should have negative NDVI, got {np.nanmean(ndvi)}"
+        assert np.nanmean(ndwi) > 0, f"Water should have positive NDWI, got {np.nanmean(ndwi)}"
 
     def test_multi_temporal_processing(self):
         """Test processing multiple time steps."""

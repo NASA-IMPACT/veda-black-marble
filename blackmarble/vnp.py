@@ -190,3 +190,21 @@ class VNP46A2Util:
             )
         )
         gdal.Translate(output_file, rlayer, options=opts)
+
+
+# Use rasterio implementation
+print("INFO: Switching to rasterio-based VIIRS HDF5 handling")
+try:
+    from .vnp_rasterio import (
+        convert_VNP46A2_HDF2TIFF as _rio_convert_VNP46A2_HDF2TIFF,
+        VNP46A2Util as _rio_VNP46A2Util,
+    )
+    
+    # Replace GDAL implementations
+    convert_VNP46A2_HDF2TIFF = _rio_convert_VNP46A2_HDF2TIFF
+    VNP46A2Util = _rio_VNP46A2Util
+    
+    print("INFO: Successfully loaded rasterio VIIRS implementations")
+except ImportError as e:
+    print(f"WARNING: Could not import rasterio VIIRS implementations: {e}")
+    print("INFO: Using GDAL implementations")
