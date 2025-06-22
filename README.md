@@ -69,4 +69,33 @@ The Black Marble pipeline includes advanced image processing features using scip
    ```
 
 These features are disabled by default for backward compatibility.
+
+## Module Organization
+
+The Black Marble codebase is organized to follow the natural flow of the data processing pipeline. If you look at the original `bm.py` script, you'll see it can be thought of as following a clear sequence: acquire data, prepare it for analysis, perform calculations, enhance the results, and export the final product. Modules are organized around that structure:
+
+```
+blackmarble/
+├── acquire/
+│   ├── landsat.py      # Download and tile selection for Landsat data
+│   ├── viirs.py        # VIIRS nighttime lights data acquisition
+│   ├── osm.py          # OpenStreetMap road network fetching
+├── prepare/
+│   ├── scaling.py      # Convert DN to reflectance, apply lunar correction
+│   ├── quality.py      # Cloud masks, aerosol masks, quality filtering
+│   ├── spatial.py      # Reprojection, alignment, cropping to bounds
+├── analyze/
+│   ├── indices.py      # Calculate NDVI, NDWI, NDUI indices
+│   ├── temporal.py     # Create composites, merge scenes
+├── enhance/
+│   ├── contrast.py     # Dynamic range adjustments
+│   ├── features.py     # Road enhancement, urban feature highlighting
+│   ├── visualize.py    # Apply colormaps, prepare for display
+├── export/
+│   ├── cog.py          # Generate Cloud-Optimized GeoTIFFs
+│   ├── metadata.py     # Create metadata and statistics
+│   ├── validate.py     # Validate output quality
+```
+
+This makes it easy to find what you need - if you're working on data acquisition, look in `acquire/`. If you need to calculate indices, check `analyze/indices.py`. Each module contains functions that work together for that stage of processing, keeping related functionality close while maintaining clear boundaries between pipeline stages.
 ```
