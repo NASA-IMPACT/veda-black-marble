@@ -281,25 +281,18 @@ class TestPipelineIntegration:
             scenes.append(scene_data)
 
         # Test temporal compositing
-        from blackmarble.components.temporal import TemporalCompositor
-
-        compositor = TemporalCompositor(method="median")
+        from blackmarble.processing import create_temporal_composite
 
         # Stack NTL data
         ntl_stack = np.stack([s["NTL"] for s in scenes], axis=0)
 
         # Create composite
-        result = compositor.process(ntl_stack)
+        composite = create_temporal_composite(ntl_stack, method="median")
 
-        # The result contains the composite in the mask field and metadata
-        assert result.mask.shape == (128, 128)
-        if result.metadata is not None:
-            assert result.metadata["method"] == "median"
+        # The composite is now returned directly
+        assert composite.shape == (128, 128)
         # Check that we processed 3 time steps
         assert ntl_stack.shape[0] == 3
-
-        # The composite data is in result.mask for MaskResult
-        composite = result.mask
 
     def test_output_generation(self, tmp_path):
         """Test output file generation."""

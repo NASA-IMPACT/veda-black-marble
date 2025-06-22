@@ -56,9 +56,7 @@ class S3Adapter:
                 "s3", region_name=region_name, config=config, use_ssl=use_ssl
             )
 
-    def download(
-        self, bucket: str, key: str, local_path: Path | None = None
-    ) -> bytes:
+    def download(self, bucket: str, key: str, local_path: Path | None = None) -> bytes:
         """Download object from S3.
 
         Args:

@@ -47,11 +47,12 @@ def mosaic_viirs_tiles_rasterio(
 
     print("Mosaicing VIIRS tiles using rasterio...")
     from typing import cast
+
     return mosaic_viirs_tiles(
         cast(list[str | Path], ntl_tiles),
-        cast(list[str | Path], lunar_tiles), 
+        cast(list[str | Path], lunar_tiles),
         cast(list[str | Path], quality_tiles),
-        temp_dir
+        temp_dir,
     )
 
 

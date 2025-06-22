@@ -27,11 +27,12 @@ def mosaic_viirs_with_rasterio(
             # Use the specialized VIIRS mosaic function
             from typing import cast
             from pathlib import Path
+
             ntl_temp_tif, lunar_temp_tif, quality_temp_tif = mosaic_viirs_tiles(
                 cast(list[str | Path], ntl_tiles),
                 cast(list[str | Path], lunar_tiles),
                 cast(list[str | Path], quality_tiles),
-                temp_dir
+                temp_dir,
             )
 
             print("Successfully mosaiced using rasterio")

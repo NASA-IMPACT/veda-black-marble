@@ -54,6 +54,7 @@ class LandsatUtil:
             row = feat["ROW"]
             geom = feat.GetGeometryRef()
             from shapely import wkt
+
             shape = wkt.loads(geom.ExportToWkt())
             if isinstance(shape, shapely.geometry.Polygon):
                 self.polygons.append((shape, path, row))

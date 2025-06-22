@@ -70,9 +70,7 @@ class OSMUtil:
                 with fiona.open(shp) as feats:
                     for feat in feats:
                         geom: dict[str, Any] = feat["geometry"]
-                        poly = shapely.geometry.shape(
-                            geom
-                        ).buffer(path_thickness)
+                        poly = shapely.geometry.shape(geom).buffer(path_thickness)
                         road_shapes.append(shapely.geometry.mapping(poly))
                 print(f"DEBUG OSM: Rasterizing {len(road_shapes)} road shapes")
                 print(f"DEBUG OSM: Path thickness: {path_thickness} degrees")
@@ -166,9 +164,7 @@ class OSMUtil:
                 with fiona.open(shp) as feats:
                     for feat in feats:
                         geom: dict[str, Any] = feat["geometry"]
-                        poly = shapely.geometry.shape(
-                            geom
-                        ).buffer(path_thickness)
+                        poly = shapely.geometry.shape(geom).buffer(path_thickness)
                         shapes.append(shapely.geometry.mapping(poly))
                 print(
                     f"DEBUG OSM: Rasterizing {len(shapes)} shapes for road type {idx}"

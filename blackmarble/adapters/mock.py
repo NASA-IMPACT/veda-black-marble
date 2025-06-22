@@ -29,9 +29,7 @@ class MockS3Adapter(StorageAdapter):
         self.calls = []  # Track all method calls
         self.fail_on_next_call = False  # For testing error handling
 
-    def download(
-        self, bucket: str, key: str, local_path: Path | None = None
-    ) -> bytes:
+    def download(self, bucket: str, key: str, local_path: Path | None = None) -> bytes:
         """Mock download from S3."""
         self.calls.append(("download", bucket, key, local_path))
 

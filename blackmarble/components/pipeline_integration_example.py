@@ -144,7 +144,9 @@ def generate_black_marble_outputs(
         },
         title="Black Marble NDUI Product",
         description="Normalized Difference Urban Index with road network enhancement",
-        datetime=processing_metadata.get("acquisition_date") if processing_metadata else None,
+        datetime=processing_metadata.get("acquisition_date")
+        if processing_metadata
+        else None,
         id=f"black-marble-ndui-{processing_metadata.get('acquisition_date', 'unknown') if processing_metadata else 'unknown'}",
         assets={
             "visual": {

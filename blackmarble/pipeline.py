@@ -178,7 +178,7 @@ def run_pipeline(
 
     # 1) Landsat bands
     print("Downloading and processing Landsat bands...")
-    
+
     # Initialize band variables
     b3_out: list[str] = []
     b4_out: list[str] = []
@@ -295,8 +295,7 @@ def run_pipeline(
     p_final: list[str] = []
     r_final: list[str] = []
     a_final: list[str] = []
-    
-    
+
     for i, fn in enumerate(b3_out):
         out: str = os.path.join(output_dir, f"B3_{i}.TIFF")
         crop_to_bb_utm(fn, out, e1, n1, e2, n2)
@@ -698,7 +697,7 @@ def run_pipeline(
 
     # 6) Download & subset Nightlights (VIIRS)
     print("\nDEBUG: Downloading nightlights (VIIRS)...")
-    
+
     # Initialize VIIRS temp file paths
     ntl_temp_tif: str = ""
     lunar_temp_tif: str = ""

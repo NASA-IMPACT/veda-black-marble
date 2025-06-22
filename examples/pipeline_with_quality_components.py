@@ -357,7 +357,10 @@ def demonstrate_quality_components_standalone():
     )
 
     # Show component contributions
-    if composite_result.metadata is not None and "component_statistics" in composite_result.metadata:
+    if (
+        composite_result.metadata is not None
+        and "component_statistics" in composite_result.metadata
+    ):
         comp_stats = composite_result.metadata["component_statistics"]
         print(
             f"   - Cloud mask contribution: {comp_stats['qa_pixel']['valid_percentage']:.1f}%"

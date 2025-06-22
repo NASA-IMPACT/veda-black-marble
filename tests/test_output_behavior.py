@@ -110,6 +110,7 @@ class TestCOGGenerator:
         north = 0 + (256 * 156543.03)
 
         from rasterio import transform as rio_transform
+
         transform = rio_transform.from_bounds(west, south, east, north, 256, 256)
 
         metadata = OutputMetadata(

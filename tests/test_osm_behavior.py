@@ -50,9 +50,12 @@ class TestCoordinateTransformations:
     def test_affine_transform_basics(self):
         """Test basic affine transform for georeferencing."""
         # Create transform for known bounds
-        transform = cast(Affine, from_bounds(
-            west=0.0, south=0.0, east=1.0, north=1.0, width=100, height=100
-        ))
+        transform = cast(
+            Affine,
+            from_bounds(
+                west=0.0, south=0.0, east=1.0, north=1.0, width=100, height=100
+            ),
+        )
 
         # Pixel size should be 0.01 degrees
         assert abs(transform.a - 0.01) < 1e-6  # x pixel size

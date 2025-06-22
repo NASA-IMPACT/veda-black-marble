@@ -327,6 +327,7 @@ class ResolutionResampler(ComposableComponent):
             else:
                 # Use identity transform if none provided
                 from rasterio.transform import Affine as RioAffine
+
                 identity = RioAffine.identity()
                 return resample_array(
                     data, new_width, new_height, identity, nodata, use_method

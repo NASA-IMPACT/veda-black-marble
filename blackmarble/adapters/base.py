@@ -12,9 +12,7 @@ import numpy as np
 class StorageAdapter(Protocol):
     """Interface for cloud storage operations (S3, GCS, etc.)."""
 
-    def download(
-        self, bucket: str, key: str, local_path: Path | None = None
-    ) -> bytes:
+    def download(self, bucket: str, key: str, local_path: Path | None = None) -> bytes:
         """Download object from storage.
 
         Args:

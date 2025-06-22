@@ -47,7 +47,7 @@ def demo_gap_filling():
         raise ValueError("Basic compositor did not return composite in metadata")
     if result_scipy.metadata is None or "composite" not in result_scipy.metadata:
         raise ValueError("Scipy compositor did not return composite in metadata")
-        
+
     composite_basic = result_basic.metadata["composite"]
     composite_scipy = result_scipy.metadata["composite"]
 
