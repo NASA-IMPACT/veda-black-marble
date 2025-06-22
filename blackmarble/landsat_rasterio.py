@@ -5,7 +5,6 @@ Drop-in replacements for GDAL-based operations in landsat.py.
 """
 
 import os
-from typing import List, Tuple, Union
 import numpy as np
 import rasterio
 from rasterio.merge import merge
@@ -14,7 +13,7 @@ from rasterio.crs import CRS
 
 
 def process_band_data(
-    band: Union[int, str],
+    band: int | str,
     year: int,
     month: int,
     day: int,
@@ -25,26 +24,26 @@ def process_band_data(
     output_prefix: str,
     temp_dir: str,
     composite_months: int = 12,
-) -> Tuple[List[str], List[str], List[str], List[str]]:
+) -> tuple[list[str], list[str], list[str], list[str]]:
     """
     Download, warp, and merge source + QA into multi-scene TIFFs using rasterio.
-    
+
     This is a drop-in replacement for the GDAL-based version.
     """
     # Import here to avoid circular imports
     from .landsat import download_tiles_for_band_with_composites
-    
-    composites: List[Tuple[List[str], List[str], List[str], List[str]]] = (
+
+    composites: list[tuple[list[str], list[str], list[str], list[str]]] = (
         download_tiles_for_band_with_composites(
             band, year, month, day, lat1, lon1, lat2, lon2, temp_dir, composite_months
         )
     )
-    
-    outputs: List[str] = []
-    pixel_tifs: List[str] = []
-    radsat_tifs: List[str] = []
-    aerosol_tifs: List[str] = []
-    
+
+    outputs: list[str] = []
+    pixel_tifs: list[str] = []
+    radsat_tifs: list[str] = []
+    aerosol_tifs: list[str] = []
+
     for idx, (srcs, pxs, rxs, axs) in enumerate(composites):
         # Skip processing if no source files were found for this composite period
         if not srcs:
@@ -55,14 +54,10 @@ def process_band_data(
 
         print(f"Merging base {idx}")
         outb: str = f"{output_prefix}{idx}.TIFF"
-        
+
         # Merge source band files using rasterio
         _merge_rasters(
-            srcs, 
-            outb,
-            resampling=Resampling.bilinear,
-            compress='lzw',
-            tiled=True
+            srcs, outb, resampling=Resampling.bilinear, compress="lzw", tiled=True
         )
         outputs.append(outb)
 
@@ -83,15 +78,15 @@ def process_band_data(
 
             print(f"Merging {name} {idx}")
             outf: str = f"{output_prefix}{idx}{name}.TIFF"
-            
+
             # Merge QA bands with nearest neighbor resampling
             _merge_rasters(
                 tifs,
                 outf,
                 resampling=Resampling.nearest,  # Use nearest for QA flags
-                compress='lzw',
+                compress="lzw",
                 tiled=True,
-                nodata=0  # Set nodata to 0 for QA bands
+                nodata=0,  # Set nodata to 0 for QA bands
             )
             output_list.append(outf)
 
@@ -104,16 +99,16 @@ def process_band_data(
 
 
 def _merge_rasters(
-    input_files: List[str],
+    input_files: list[str],
     output_file: str,
     resampling: Resampling = Resampling.bilinear,
-    compress: str = 'lzw',
+    compress: str = "lzw",
     tiled: bool = True,
-    nodata: Union[int, float, None] = None
+    nodata: int | float | None = None,
 ) -> None:
     """
     Merge multiple raster files into a single output file using rasterio.
-    
+
     Args:
         input_files: List of input file paths
         output_file: Output file path
@@ -127,38 +122,38 @@ def _merge_rasters(
     for fp in input_files:
         src = rasterio.open(fp)
         src_files_to_mosaic.append(src)
-    
+
     try:
         # Merge the rasters
         mosaic, out_trans = merge(
-            src_files_to_mosaic,
-            resampling=resampling,
-            nodata=nodata
+            src_files_to_mosaic, resampling=resampling, nodata=nodata
         )
-        
+
         # Get metadata from first file and update
         out_meta = src_files_to_mosaic[0].meta.copy()
-        out_meta.update({
-            "driver": "GTiff",
-            "height": mosaic.shape[1],
-            "width": mosaic.shape[2],
-            "transform": out_trans,
-            "compress": compress,
-            "tiled": tiled,
-            "blockxsize": 256 if tiled else None,
-            "blockysize": 256 if tiled else None,
-        })
-        
+        out_meta.update(
+            {
+                "driver": "GTiff",
+                "height": mosaic.shape[1],
+                "width": mosaic.shape[2],
+                "transform": out_trans,
+                "compress": compress,
+                "tiled": tiled,
+                "blockxsize": 256 if tiled else None,
+                "blockysize": 256 if tiled else None,
+            }
+        )
+
         if nodata is not None:
             out_meta["nodata"] = nodata
-            
+
         # Ensure output directory exists
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
-        
+
         # Write the mosaic
         with rasterio.open(output_file, "w", **out_meta) as dest:
             dest.write(mosaic)
-            
+
     finally:
         # Close all source files
         for src in src_files_to_mosaic:

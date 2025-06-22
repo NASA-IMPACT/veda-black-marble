@@ -1,7 +1,7 @@
 """Landsat data source implementation."""
 
 import logging
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Any
 from datetime import datetime, timedelta
 from pathlib import Path
 import numpy as np
@@ -35,8 +35,8 @@ class LandsatDataSource:
 
     def __init__(
         self,
-        storage_adapter: Optional[StorageAdapter] = None,
-        raster_adapter: Optional[RasterAdapter] = None,
+        storage_adapter: StorageAdapter | None = None,
+        raster_adapter: RasterAdapter | None = None,
         collection: str = "02",
         level: str = "L2",
         sensor: str = "LC09",
@@ -60,12 +60,12 @@ class LandsatDataSource:
 
     def fetch(
         self,
-        bbox: Tuple[float, float, float, float],
+        bbox: tuple[float, float, float, float],
         start_date: datetime,
         end_date: datetime,
-        bands: Optional[List[str]] = None,
+        bands: list[str] | None = None,
         composite_months: int = 1,
-    ) -> Dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """Fetch Landsat data for given bounds.
 
         Args:
@@ -140,7 +140,7 @@ class LandsatDataSource:
 
         return result
 
-    def get_metadata(self) -> Dict[str, Any]:
+    def get_metadata(self) -> dict[str, Any]:
         """Get Landsat data source metadata."""
         return {
             "name": "Landsat Collection 2 Level-2",
@@ -155,7 +155,7 @@ class LandsatDataSource:
 
     def validate_request(
         self,
-        bbox: Tuple[float, float, float, float],
+        bbox: tuple[float, float, float, float],
         start_date: datetime,
         end_date: datetime,
     ) -> None:
@@ -182,8 +182,8 @@ class LandsatDataSource:
             )
 
     def _get_wrs2_tiles(
-        self, bbox: Tuple[float, float, float, float]
-    ) -> List[Tuple[int, int]]:
+        self, bbox: tuple[float, float, float, float]
+    ) -> list[tuple[int, int]]:
         """Get WRS-2 path/row tiles covering bbox.
 
         This is a simplified implementation. In production, you would
@@ -207,7 +207,7 @@ class LandsatDataSource:
 
     def _search_scenes(
         self, path: int, row: int, start_date: datetime, end_date: datetime
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Search for Landsat scenes in S3.
 
         This is a simplified implementation that constructs S3 paths.
@@ -267,7 +267,7 @@ class LandsatDataSource:
 
         return scenes
 
-    def _download_band(self, scene: Dict[str, Any], band: str, tmpdir: Path) -> Path:
+    def _download_band(self, scene: dict[str, Any], band: str, tmpdir: Path) -> Path:
         """Download a band file from S3."""
         # Get internal band name
         internal_band = self.BAND_MAPPING.get(band, band)
@@ -284,7 +284,7 @@ class LandsatDataSource:
 
         return local_path
 
-    def get_scene_metadata(self, scene_id: str) -> Dict[str, Any]:
+    def get_scene_metadata(self, scene_id: str) -> dict[str, Any]:
         """Get metadata for a specific scene."""
         # Parse scene ID for metadata
         # Format: LC09_L2SP_001002_20230615_20230617_02_T1

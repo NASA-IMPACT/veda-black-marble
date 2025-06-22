@@ -1,15 +1,15 @@
 """GDAL raster I/O adapter implementation."""
 
 import logging
-from typing import Tuple, Dict, Any, Optional, Union
+from typing import Any
 from pathlib import Path
 import numpy as np
-from osgeo import gdal, osr, gdal_array
+from osgeo import gdal, gdal_array
 import rasterio
 from rasterio.warp import reproject, Resampling, calculate_default_transform
 from rasterio.transform import Affine
 
-from .base import RasterAdapter, RasterIOError
+from .base import RasterIOError
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +33,8 @@ class GDALRasterAdapter:
         self.use_rasterio = use_rasterio
 
     def read(
-        self, path: Path, band: Optional[int] = None
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        self, path: Path, band: int | None = None
+    ) -> tuple[np.ndarray, dict[str, Any]]:
         """Read raster data and metadata.
 
         Args:
@@ -59,8 +59,8 @@ class GDALRasterAdapter:
             raise RasterIOError(f"Failed to read {path}: {e}")
 
     def _read_with_rasterio(
-        self, path: Path, band: Optional[int]
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        self, path: Path, band: int | None
+    ) -> tuple[np.ndarray, dict[str, Any]]:
         """Read using rasterio."""
         with rasterio.open(path) as src:
             # Read data
@@ -91,8 +91,8 @@ class GDALRasterAdapter:
             return data, metadata
 
     def _read_with_gdal(
-        self, path: Path, band: Optional[int]
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        self, path: Path, band: int | None
+    ) -> tuple[np.ndarray, dict[str, Any]]:
         """Read using GDAL."""
         dataset = gdal.Open(str(path), gdal.GA_ReadOnly)
         if dataset is None:
@@ -148,7 +148,7 @@ class GDALRasterAdapter:
         self,
         path: Path,
         data: np.ndarray,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         compress: bool = True,
     ) -> None:
         """Write raster data to file.
@@ -176,7 +176,7 @@ class GDALRasterAdapter:
             raise RasterIOError(f"Failed to write {path}: {e}")
 
     def _write_with_rasterio(
-        self, path: Path, data: np.ndarray, metadata: Dict[str, Any], compress: bool
+        self, path: Path, data: np.ndarray, metadata: dict[str, Any], compress: bool
     ) -> None:
         """Write using rasterio."""
         # Build profile from metadata
@@ -211,7 +211,7 @@ class GDALRasterAdapter:
             dst.write(data)
 
     def _write_with_gdal(
-        self, path: Path, data: np.ndarray, metadata: Dict[str, Any], compress: bool
+        self, path: Path, data: np.ndarray, metadata: dict[str, Any], compress: bool
     ) -> None:
         """Write using GDAL."""
         # Determine driver and options
@@ -266,7 +266,7 @@ class GDALRasterAdapter:
         finally:
             dataset = None  # Close dataset
 
-    def get_info(self, path: Path) -> Dict[str, Any]:
+    def get_info(self, path: Path) -> dict[str, Any]:
         """Get raster information without reading data.
 
         Args:
@@ -293,7 +293,9 @@ class GDALRasterAdapter:
                     "transform": src.transform,
                     "dtype": [str(dt) for dt in src.dtypes],
                     "nodata": src.nodata,
-                    "shape": (src.count, src.height, src.width),
+                    "shape": (src.count, src.height, src.width)
+                    if src.count > 1
+                    else (src.height, src.width),
                     "size_bytes": path.stat().st_size,
                 }
 
@@ -310,10 +312,10 @@ class GDALRasterAdapter:
         self,
         source_path: Path,
         target_crs: str,
-        output_path: Optional[Path] = None,
-        resolution: Optional[Tuple[float, float]] = None,
+        output_path: Path | None = None,
+        resolution: tuple[float, float] | None = None,
         resampling: str = "bilinear",
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+    ) -> tuple[np.ndarray, dict[str, Any]]:
         """Reproject raster to different CRS.
 
         Args:
@@ -342,7 +344,7 @@ class GDALRasterAdapter:
 
             with rasterio.open(source_path) as src:
                 # Calculate transform for target CRS
-                transform, width, height = calculate_default_transform(
+                result = calculate_default_transform(
                     src.crs,
                     target_crs,
                     src.width,
@@ -350,6 +352,10 @@ class GDALRasterAdapter:
                     *src.bounds,
                     resolution=resolution,
                 )
+                transform = result[0]
+                assert result[1] is not None and result[2] is not None
+                width = int(result[1])
+                height = int(result[2])
 
                 # Update metadata
                 kwargs = src.meta.copy()

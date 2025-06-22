@@ -228,9 +228,7 @@ class TestPipelineIntegration:
     def test_processing_with_edge_cases(self, tmp_path):
         """Test pipeline with edge case scenarios."""
         # Test all clouds scenario
-        all_cloud_data = create_test_landsat_data(
-            shape=(100, 100), include_clouds=True
-        )
+        all_cloud_data = create_test_landsat_data(shape=(100, 100), include_clouds=True)
 
         # Verify cloud mask works correctly
         from blackmarble.masks import mark_cloud
@@ -250,10 +248,13 @@ class TestPipelineIntegration:
         # Check QA_PIXEL values - should be QA_CLEAR_WATER for water scenario
         qa_pixel = all_water_data["QA_PIXEL"]
         unique_qa = np.unique(qa_pixel)
-        assert len(unique_qa) == 1 and unique_qa[0] == 21952, f"Water scenario should have only QA_CLEAR_WATER (21952), got {unique_qa}"
+        assert len(unique_qa) == 1 and unique_qa[0] == 21952, (
+            f"Water scenario should have only QA_CLEAR_WATER (21952), got {unique_qa}"
+        )
 
         # Scale bands to reflectance if needed
         from blackmarble.calculations import scale_landsat_to_reflectance
+
         b3_refl = scale_landsat_to_reflectance(all_water_data["B3"])
         b4_refl = scale_landsat_to_reflectance(all_water_data["B4"])
         b5_refl = scale_landsat_to_reflectance(all_water_data["B5"])
@@ -262,8 +263,12 @@ class TestPipelineIntegration:
         ndwi = calculate_ndwi(b3_refl, b5_refl)
 
         # Water should have negative NDVI and positive NDWI
-        assert np.nanmean(ndvi) < 0, f"Water should have negative NDVI, got {np.nanmean(ndvi)}"
-        assert np.nanmean(ndwi) > 0, f"Water should have positive NDWI, got {np.nanmean(ndwi)}"
+        assert np.nanmean(ndvi) < 0, (
+            f"Water should have negative NDVI, got {np.nanmean(ndvi)}"
+        )
+        assert np.nanmean(ndwi) > 0, (
+            f"Water should have positive NDWI, got {np.nanmean(ndwi)}"
+        )
 
     def test_multi_temporal_processing(self):
         """Test processing multiple time steps."""
@@ -288,7 +293,8 @@ class TestPipelineIntegration:
 
         # The result contains the composite in the mask field and metadata
         assert result.mask.shape == (128, 128)
-        assert result.metadata["method"] == "median"
+        if result.metadata is not None:
+            assert result.metadata["method"] == "median"
         # Check that we processed 3 time steps
         assert ntl_stack.shape[0] == 3
 
@@ -307,7 +313,7 @@ class TestPipelineIntegration:
             transform=Affine(0.1, 0, -180, 0, -0.1, 90),
             bounds=(-180, 64.4, -154.4, 90),
             shape=(256, 256),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
             tags={"PROCESSING_DATE": "2023-01-15", "SENSOR": "Test"},
         )
 

@@ -4,17 +4,16 @@ These Protocol classes define the interfaces that all adapters must implement,
 enabling dependency injection and easy mocking for tests.
 """
 
-from typing import Protocol, Dict, List, Tuple, Optional, Any, BinaryIO
+from typing import Protocol, Any
 from pathlib import Path
 import numpy as np
-from datetime import datetime
 
 
 class StorageAdapter(Protocol):
     """Interface for cloud storage operations (S3, GCS, etc.)."""
 
     def download(
-        self, bucket: str, key: str, local_path: Optional[Path] = None
+        self, bucket: str, key: str, local_path: Path | None = None
     ) -> bytes:
         """Download object from storage.
 
@@ -59,7 +58,7 @@ class StorageAdapter(Protocol):
         """
         ...
 
-    def list_objects(self, bucket: str, prefix: str) -> List[str]:
+    def list_objects(self, bucket: str, prefix: str) -> list[str]:
         """List objects with given prefix.
 
         Args:
@@ -75,7 +74,7 @@ class StorageAdapter(Protocol):
 class APIAdapter(Protocol):
     """Interface for external API operations."""
 
-    def search(self, **params) -> List[Dict[str, Any]]:
+    def search(self, **params) -> list[dict[str, Any]]:
         """Search for resources matching parameters.
 
         Args:
@@ -89,7 +88,7 @@ class APIAdapter(Protocol):
         """
         ...
 
-    def download(self, resource_id: str, output_path: Optional[Path] = None) -> bytes:
+    def download(self, resource_id: str, output_path: Path | None = None) -> bytes:
         """Download resource by ID.
 
         Args:
@@ -104,7 +103,7 @@ class APIAdapter(Protocol):
         """
         ...
 
-    def authenticate(self, credentials: Dict[str, str]) -> None:
+    def authenticate(self, credentials: dict[str, str]) -> None:
         """Authenticate with the API.
 
         Args:
@@ -120,8 +119,8 @@ class RasterAdapter(Protocol):
     """Interface for raster I/O operations."""
 
     def read(
-        self, path: Path, band: Optional[int] = None
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        self, path: Path, band: int | None = None
+    ) -> tuple[np.ndarray, dict[str, Any]]:
         """Read raster data and metadata.
 
         Args:
@@ -140,7 +139,7 @@ class RasterAdapter(Protocol):
         self,
         path: Path,
         data: np.ndarray,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         compress: bool = True,
     ) -> None:
         """Write raster data to file.
@@ -156,7 +155,7 @@ class RasterAdapter(Protocol):
         """
         ...
 
-    def get_info(self, path: Path) -> Dict[str, Any]:
+    def get_info(self, path: Path) -> dict[str, Any]:
         """Get raster information without reading data.
 
         Args:
@@ -174,9 +173,9 @@ class RasterAdapter(Protocol):
         self,
         source_path: Path,
         target_crs: str,
-        output_path: Optional[Path] = None,
-        resolution: Optional[Tuple[float, float]] = None,
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        output_path: Path | None = None,
+        resolution: tuple[float, float] | None = None,
+    ) -> tuple[np.ndarray, dict[str, Any]]:
         """Reproject raster to different CRS.
 
         Args:
@@ -199,7 +198,7 @@ class TileSystemAdapter(Protocol):
 
     def get_tiles_for_bbox(
         self, west: float, south: float, east: float, north: float
-    ) -> List[str]:
+    ) -> list[str]:
         """Get tile identifiers covering bounding box.
 
         Args:
@@ -213,7 +212,7 @@ class TileSystemAdapter(Protocol):
         """
         ...
 
-    def get_tile_bounds(self, tile_id: str) -> Tuple[float, float, float, float]:
+    def get_tile_bounds(self, tile_id: str) -> tuple[float, float, float, float]:
         """Get geographic bounds of a tile.
 
         Args:

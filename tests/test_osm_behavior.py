@@ -8,8 +8,10 @@ with artificial road networks where we know the expected behavior.
 import numpy as np
 import pytest
 import networkx as nx
+from typing import cast
 from shapely.geometry import LineString, Point, mapping
-from rasterio.transform import from_bounds, Affine
+from rasterio.transform import from_bounds
+from affine import Affine
 from blackmarble.osm_functions import graph_to_shapes, rasterize_shapes, bbox_area_km2
 
 
@@ -48,9 +50,9 @@ class TestCoordinateTransformations:
     def test_affine_transform_basics(self):
         """Test basic affine transform for georeferencing."""
         # Create transform for known bounds
-        transform = from_bounds(
+        transform = cast(Affine, from_bounds(
             west=0.0, south=0.0, east=1.0, north=1.0, width=100, height=100
-        )
+        ))
 
         # Pixel size should be 0.01 degrees
         assert abs(transform.a - 0.01) < 1e-6  # x pixel size
@@ -334,7 +336,7 @@ class TestRoadNetworkPatterns:
             result[50:, 50:],  # Bottom-right
         ]
 
-        coverages = [np.sum(q > 0) for q in quadrants]
+        coverages = [int(np.sum(q > 0)) for q in quadrants]
         # All quadrants should have similar coverage
         assert max(coverages) / min(coverages) < 1.5
 

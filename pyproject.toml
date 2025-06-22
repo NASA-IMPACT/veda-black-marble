@@ -50,3 +50,7 @@ dev = [
 [tool.pytest.ini_options]
 addopts = "-raqs"
 testpaths = ["tests"]
+
+[tool.pyright]
+# Docker utility files may have dependencies not available during type checking
+exclude = ["docker/"]

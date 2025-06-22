@@ -38,6 +38,7 @@ class TestProjectionHandler:
         # For same CRS, mask should be all valid
         assert result.mask.shape == data.shape
         assert np.all(result.mask == 1.0)
+        assert result.metadata is not None
         assert result.metadata["source_crs"] == "EPSG:4326"
         assert result.metadata["target_crs"] == "EPSG:4326"
         assert result.metadata["original_shape"] == data.shape
@@ -109,6 +110,7 @@ class TestResolutionResampler:
         result = resampler.process(data, transform=transform, crs="EPSG:4326")
 
         # Check metadata records the scaling
+        assert result.metadata is not None
         assert result.metadata["original_resolution"] == (1.0, 1.0)
         assert result.metadata["target_resolution"] == (2.0, 2.0)
         assert result.metadata["scale_factors"] == (0.5, 0.5)
@@ -127,6 +129,7 @@ class TestResolutionResampler:
         result = resampler.process(data, transform=transform, crs="EPSG:4326")
 
         # Check scaling factors
+        assert result.metadata is not None
         assert result.metadata["scale_factors"] == (4.0, 4.0)
         assert result.metadata["resampled_shape"] == (20, 20)
 
@@ -144,6 +147,7 @@ class TestResolutionResampler:
         result = resampler.process(data, transform=transform)
 
         # Check shapes in metadata
+        assert result.metadata is not None
         assert result.metadata["original_shape"] == (2, 4, 4)
         assert result.metadata["resampled_shape"] == (2, 2, 2)
 
@@ -196,6 +200,7 @@ class TestBoundsCropper:
         # Mask should be 2D even for multiband
         assert result.mask.shape == (2, 2)
         assert np.all(result.mask == 1.0)
+        assert result.metadata is not None
         assert result.metadata["original_shape"] == (3, 4, 4)
         assert result.metadata["cropped_shape"] == (3, 2, 2)
 
@@ -250,6 +255,7 @@ class TestSpatialAligner:
 
         # Reference should be unchanged
         assert np.array_equal(results[1].data, raster2)
+        assert results[1].metadata is not None
         assert results[1].metadata["is_reference"] is True
 
     def test_no_crs_provided(self):

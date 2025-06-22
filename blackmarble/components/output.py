@@ -4,7 +4,7 @@ This module provides components for generating final output products including
 Cloud-Optimized GeoTIFFs, metadata, and visualizations.
 """
 
-from typing import Protocol, Optional, Dict, Any, Tuple, List, Union
+from typing import Protocol, Any
 from dataclasses import dataclass
 import numpy as np
 import rasterio
@@ -13,6 +13,7 @@ from rasterio.crs import CRS
 from rasterio.transform import Affine
 from rio_cogeo.profiles import cog_profiles
 from rio_cogeo.cogeo import cog_translate
+from rasterio.enums import Resampling as RIOResampling
 import os
 from pathlib import Path
 
@@ -33,15 +34,15 @@ class OutputMetadata:
         tags: Additional metadata tags
     """
 
-    crs: Union[CRS, str]
-    transform: Union[Affine, Tuple[float, ...]]
-    bounds: Tuple[float, float, float, float]
-    shape: Tuple[int, int]
+    crs: CRS | str
+    transform: Affine | tuple[float, ...]
+    bounds: tuple[float, float, float, float]
+    shape: tuple[int, int]
     dtype: np.dtype
-    nodata: Optional[float] = None
-    tags: Optional[Dict[str, Any]] = None
+    nodata: float | None = None
+    tags: dict[str, Any] | None = None
 
-    def to_rasterio_profile(self) -> Dict[str, Any]:
+    def to_rasterio_profile(self) -> dict[str, Any]:
         """Convert to rasterio profile dictionary."""
         from rasterio.transform import Affine
 
@@ -94,7 +95,7 @@ class COGProfile:
 
     profile_name: str = "deflate"
     blocksize: int = 512
-    overview_level: Optional[int] = None
+    overview_level: int | None = None
     overview_resampling: str = "bilinear"
     web_optimized: bool = True  # Always true for COGs
     in_memory: bool = True
@@ -127,7 +128,7 @@ class COGGenerator(ComposableComponent):
     def __init__(
         self,
         name: str = "cog_generator",
-        profile: Optional[COGProfile] = None,
+        profile: COGProfile | None = None,
     ):
         """Initialize COG generator.
 
@@ -143,7 +144,7 @@ class COGGenerator(ComposableComponent):
         self,
         data: np.ndarray,
         metadata: OutputMetadata,
-        output_path: Union[str, Path],
+        output_path: str | Path,
         **kwargs,
     ) -> Path:
         """Generate a Cloud-Optimized GeoTIFF.
@@ -221,7 +222,7 @@ class COGGenerator(ComposableComponent):
                     cog_profile,  # This is dst_kwargs
                     config=config,
                     overview_level=overview_level,
-                    overview_resampling=self.profile.overview_resampling,
+                    overview_resampling=self.profile.overview_resampling,  # type: ignore
                     web_optimized=self.profile.web_optimized,
                     in_memory=self.profile.in_memory,
                 )
@@ -237,7 +238,7 @@ class COGGenerator(ComposableComponent):
         # Return a dummy result since this component doesn't create masks
         return MaskResult(
             mask=np.ones(data.shape[:2], dtype=bool),
-            statistics=QualityStatistics.from_mask(np.ones(data.shape[:2])),
+            statistics=QualityStatistics.from_mask(np.ones(data.shape[:2])).to_dict(),
             metadata={"component": "cog_generator", "action": "none"},
         )
 
@@ -268,9 +269,9 @@ class MetadataGenerator(ComposableComponent):
         self,
         data: np.ndarray,
         metadata: OutputMetadata,
-        processing_info: Optional[Dict[str, Any]] = None,
+        processing_info: dict[str, Any] | None = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate metadata for the output.
 
         Args:
@@ -320,7 +321,7 @@ class MetadataGenerator(ComposableComponent):
         else:
             raise ValueError(f"Unsupported metadata format: {self.metadata_format}")
 
-    def _calculate_statistics(self, data: np.ndarray) -> Dict[str, Any]:
+    def _calculate_statistics(self, data: np.ndarray) -> dict[str, Any]:
         """Calculate statistics for the data."""
         # Handle multi-band data
         if data.ndim == 3:
@@ -332,7 +333,7 @@ class MetadataGenerator(ComposableComponent):
         else:
             return self._band_statistics(data)
 
-    def _band_statistics(self, data: np.ndarray) -> Dict[str, float]:
+    def _band_statistics(self, data: np.ndarray) -> dict[str, float | None]:
         """Calculate statistics for a single band."""
         valid_data = data[~np.isnan(data)]
         if len(valid_data) == 0:
@@ -355,8 +356,8 @@ class MetadataGenerator(ComposableComponent):
         }
 
     def _bounds_to_geojson(
-        self, bounds: Tuple[float, float, float, float]
-    ) -> Dict[str, Any]:
+        self, bounds: tuple[float, float, float, float]
+    ) -> dict[str, Any]:
         """Convert bounds to GeoJSON polygon."""
         minx, miny, maxx, maxy = bounds
         return {
@@ -366,7 +367,7 @@ class MetadataGenerator(ComposableComponent):
             ],
         }
 
-    def _format_as_stac(self, metadata: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+    def _format_as_stac(self, metadata: dict[str, Any], **kwargs) -> dict[str, Any]:
         """Format metadata as STAC item."""
         # Add STAC-specific fields
         metadata["stac_version"] = "1.0.0"
@@ -386,7 +387,7 @@ class MetadataGenerator(ComposableComponent):
         # Return a dummy result
         return MaskResult(
             mask=np.ones(data.shape[:2], dtype=bool),
-            statistics=QualityStatistics.from_mask(np.ones(data.shape[:2])),
+            statistics=QualityStatistics.from_mask(np.ones(data.shape[:2])).to_dict(),
             metadata={"component": "metadata_generator", "action": "none"},
         )
 
@@ -401,8 +402,8 @@ class VisualizationEnhancer(ComposableComponent):
     def __init__(
         self,
         name: str = "visualization_enhancer",
-        colormap: Optional[str] = None,
-        colormap_arrays: Optional[Dict[str, np.ndarray]] = None,
+        colormap: str | None = None,
+        colormap_arrays: dict[str, np.ndarray] | None = None,
     ):
         """Initialize visualization enhancer.
 
@@ -511,7 +512,7 @@ class VisualizationEnhancer(ComposableComponent):
         # Return a dummy result
         return MaskResult(
             mask=np.ones(data.shape[:2], dtype=bool),
-            statistics=QualityStatistics.from_mask(np.ones(data.shape[:2])),
+            statistics=QualityStatistics.from_mask(np.ones(data.shape[:2])).to_dict(),
             metadata={"component": "visualization_enhancer", "action": "none"},
         )
 
@@ -552,9 +553,9 @@ class OutputValidator(ComposableComponent):
         self,
         data: np.ndarray,
         metadata: OutputMetadata,
-        expected_range: Optional[Tuple[float, float]] = None,
+        expected_range: tuple[float, float] | None = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Validate output data.
 
         Args:
@@ -672,6 +673,7 @@ class OutputValidator(ComposableComponent):
             ),
         )
 
+        validation_results = None
         try:
             validation_results = self.validate(data, metadata, **kwargs)
             valid = validation_results["valid"]
@@ -687,7 +689,7 @@ class OutputValidator(ComposableComponent):
 
         return MaskResult(
             mask=mask,
-            statistics=QualityStatistics.from_mask(mask),
+            statistics=QualityStatistics.from_mask(mask).to_dict(),
             metadata={
                 "component": "output_validator",
                 "validation_results": validation_results if valid else None,

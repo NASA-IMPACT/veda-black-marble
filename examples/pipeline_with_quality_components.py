@@ -357,13 +357,16 @@ def demonstrate_quality_components_standalone():
     )
 
     # Show component contributions
-    comp_stats = composite_result.metadata["component_statistics"]
-    print(
-        f"   - Cloud mask contribution: {comp_stats['qa_pixel']['valid_percentage']:.1f}%"
-    )
-    print(
-        f"   - Aerosol mask contribution: {comp_stats['qa_aerosol']['valid_percentage']:.1f}%"
-    )
+    if composite_result.metadata is not None and "component_statistics" in composite_result.metadata:
+        comp_stats = composite_result.metadata["component_statistics"]
+        print(
+            f"   - Cloud mask contribution: {comp_stats['qa_pixel']['valid_percentage']:.1f}%"
+        )
+        print(
+            f"   - Aerosol mask contribution: {comp_stats['qa_aerosol']['valid_percentage']:.1f}%"
+        )
+    else:
+        print("   - Component statistics not available in metadata")
 
     # Test statistics tracking
     print("\n4. Statistics Tracking:")

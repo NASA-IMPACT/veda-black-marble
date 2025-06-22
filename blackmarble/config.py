@@ -5,7 +5,6 @@ parameters, supporting both default values and environment variable overrides.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List
 import os
 
 
@@ -48,7 +47,7 @@ class VIIRSConfig:
     ceiling: float = 10.0
     fill_value: float = 65530
     lunar_unit_conversion: float = 10.0
-    quality_valid_flags: List[int] = field(default_factory=lambda: [0, 2])
+    quality_valid_flags: list[int] = field(default_factory=lambda: [0, 2])
 
 
 @dataclass

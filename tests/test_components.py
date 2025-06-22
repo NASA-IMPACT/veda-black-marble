@@ -153,6 +153,7 @@ class TestCloudMasker:
         # With dilation, pixels adjacent to clouds should also be masked
         # The exact result depends on the dilation implementation
         assert result.statistics["valid_pixels"] < 12  # Less than without dilation
+        assert result.metadata is not None
         assert result.metadata["dilate_radius"] == 1
 
 
@@ -241,6 +242,7 @@ class TestRadianceSaturationMasker:
             ]
         )
         np.testing.assert_allclose(result_b3.mask, expected_b3, rtol=1e-7, atol=1e-7)
+        assert result_b3.metadata is not None
         assert result_b3.metadata["band"] == 3
         assert result_b3.metadata["saturated_pixels"] == 5
 
@@ -254,6 +256,7 @@ class TestRadianceSaturationMasker:
             ]
         )
         np.testing.assert_allclose(result_b4.mask, expected_b4, rtol=1e-7, atol=1e-7)
+        assert result_b4.metadata is not None
         assert result_b4.metadata["band"] == 4
 
     def test_all_bands_masking(self):
@@ -547,6 +550,7 @@ class TestIntegration:
         # Should have combined mask
         assert result.mask.shape == (3, 3)
         assert result.statistics["valid_pixels"] < 9  # Some pixels masked
+        assert result.metadata is not None
         assert "qa_pixel" in result.metadata["component_statistics"]
         assert "qa_aerosol" in result.metadata["component_statistics"]
 

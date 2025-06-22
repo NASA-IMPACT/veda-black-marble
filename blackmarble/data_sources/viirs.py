@@ -1,7 +1,7 @@
 """VIIRS nighttime lights data source implementation."""
 
 import logging
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Any
 from datetime import datetime
 from pathlib import Path
 import numpy as np
@@ -34,9 +34,9 @@ class VIIRSDataSource:
 
     def __init__(
         self,
-        api_adapter: Optional[APIAdapter] = None,
-        raster_adapter: Optional[RasterAdapter] = None,
-        earthdata_token: Optional[str] = None,
+        api_adapter: APIAdapter | None = None,
+        raster_adapter: RasterAdapter | None = None,
+        earthdata_token: str | None = None,
     ):
         """Initialize VIIRS data source.
 
@@ -54,11 +54,11 @@ class VIIRSDataSource:
 
     def fetch(
         self,
-        bbox: Tuple[float, float, float, float],
+        bbox: tuple[float, float, float, float],
         start_date: datetime,
         end_date: datetime,
-        layers: Optional[List[str]] = None,
-    ) -> Dict[str, np.ndarray]:
+        layers: list[str] | None = None,
+    ) -> dict[str, np.ndarray]:
         """Fetch VIIRS data for given bounds.
 
         Args:
@@ -118,7 +118,7 @@ class VIIRSDataSource:
 
         return result
 
-    def get_metadata(self) -> Dict[str, Any]:
+    def get_metadata(self) -> dict[str, Any]:
         """Get VIIRS data source metadata."""
         return {
             "name": "VIIRS Black Marble (VNP46A2)",
@@ -132,7 +132,7 @@ class VIIRSDataSource:
 
     def validate_request(
         self,
-        bbox: Tuple[float, float, float, float],
+        bbox: tuple[float, float, float, float],
         start_date: datetime,
         end_date: datetime,
     ) -> None:
@@ -156,7 +156,7 @@ class VIIRSDataSource:
         if start_date.year < 2012:
             raise DataSourceError("VIIRS data not available before 2012")
 
-    def _get_modis_tiles(self, bbox: Tuple[float, float, float, float]) -> List[str]:
+    def _get_modis_tiles(self, bbox: tuple[float, float, float, float]) -> list[str]:
         """Get MODIS tile IDs covering bbox.
 
         This is a simplified implementation.
@@ -182,10 +182,10 @@ class VIIRSDataSource:
 
     def _search_granules(
         self,
-        bbox: Tuple[float, float, float, float],
+        bbox: tuple[float, float, float, float],
         start_date: datetime,
         end_date: datetime,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Search for VIIRS granules using CMR API."""
         # Use the API adapter to search
         granules = self.api.search(
@@ -198,7 +198,7 @@ class VIIRSDataSource:
 
         return granules
 
-    def _download_granule(self, granule: Dict[str, Any], tmpdir: Path) -> Path:
+    def _download_granule(self, granule: dict[str, Any], tmpdir: Path) -> Path:
         """Download granule HDF5 file."""
         # Extract download URL
         download_urls = []
@@ -225,7 +225,7 @@ class VIIRSDataSource:
 
         return local_path
 
-    def _parse_tile_from_filename(self, filename: str) -> Tuple[int, int]:
+    def _parse_tile_from_filename(self, filename: str) -> tuple[int, int]:
         """Extract MODIS tile h,v from filename.
 
         Example: VNP46A2.A2023166.h18v04.001.2023167123456.h5
@@ -253,7 +253,7 @@ class VIIRSDataSource:
         # Dummy 500x500 array
         return np.random.rand(500, 500).astype(np.float32)
 
-    def get_granule_metadata(self, granule: Dict[str, Any]) -> Dict[str, Any]:
+    def get_granule_metadata(self, granule: dict[str, Any]) -> dict[str, Any]:
         """Extract metadata from granule information."""
         metadata = {
             "id": granule.get("id"),

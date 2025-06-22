@@ -7,7 +7,7 @@ for output generation and enhancement.
 from pathlib import Path
 import numpy as np
 import os
-from typing import Dict, Any, Tuple, Optional
+from typing import Any
 
 from blackmarble.components import (
     COGGenerator,
@@ -27,11 +27,11 @@ from blackmarble.io import scale_image
 def generate_black_marble_outputs(
     ndui: np.ndarray,
     roads: np.ndarray,
-    georef: Tuple[Any, Any],  # (geotransform, projection)
+    georef: tuple[Any, Any],  # (geotransform, projection)
     config: ProcessingConfig,
     output_dir: Path,
-    processing_metadata: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Path]:
+    processing_metadata: dict[str, Any] | None = None,
+) -> dict[str, Path]:
     """Generate all Black Marble output products using components.
 
     This function replaces the output generation section of the pipeline
@@ -57,7 +57,7 @@ def generate_black_marble_outputs(
         transform=geotransform,
         bounds=_get_bounds_from_transform(geotransform, width, height),
         shape=(height, width),
-        dtype=np.float32,
+        dtype=np.dtype(np.float32),
         nodata=np.nan,
         tags=processing_metadata,
     )
@@ -75,6 +75,7 @@ def generate_black_marble_outputs(
 
     # 2. Validate the enhanced data
     validator = OutputValidator(min_valid_percentage=config.min_valid_pixel_percentage)
+    validation = None
 
     try:
         validation = validator.validate(
@@ -120,9 +121,9 @@ def generate_black_marble_outputs(
         transform=geotransform,
         bounds=metadata.bounds,
         shape=(height, width),
-        dtype=np.uint8,
+        dtype=np.dtype(np.uint8),
         nodata=None,  # No nodata for RGB
-        tags={**processing_metadata, "visualization": "inferno_colormap"},
+        tags={**(processing_metadata or {}), "visualization": "inferno_colormap"},
     )
 
     rgb_cog_path = output_dir / "ndui_rgb.tif"
@@ -139,14 +140,12 @@ def generate_black_marble_outputs(
             "pipeline_version": "2.0",
             "road_enhancement": enhanced_result.metadata,
             "contrast_enhancement": contrast_result.metadata,
-            "validation": validation["statistics"]
-            if "validation" in locals()
-            else None,
+            "validation": validation["statistics"] if validation else None,
         },
         title="Black Marble NDUI Product",
         description="Normalized Difference Urban Index with road network enhancement",
-        datetime=processing_metadata.get("acquisition_date"),
-        id=f"black-marble-ndui-{processing_metadata.get('acquisition_date', 'unknown')}",
+        datetime=processing_metadata.get("acquisition_date") if processing_metadata else None,
+        id=f"black-marble-ndui-{processing_metadata.get('acquisition_date', 'unknown') if processing_metadata else 'unknown'}",
         assets={
             "visual": {
                 "href": str(rgb_cog_path.name),
@@ -181,7 +180,7 @@ def generate_black_marble_outputs(
 def refactored_pipeline_output_section(
     ndui: np.ndarray,
     roads: np.ndarray,
-    geotransform: Tuple[float, ...],
+    geotransform: tuple[float, ...],
     projection: str,
     config: ProcessingConfig,
     final_dir: str,
@@ -227,8 +226,8 @@ def refactored_pipeline_output_section(
 
 
 def _get_bounds_from_transform(
-    transform: Tuple[float, ...], width: int, height: int
-) -> Tuple[float, float, float, float]:
+    transform: tuple[float, ...], width: int, height: int
+) -> tuple[float, float, float, float]:
     """Calculate bounds from GDAL transform."""
     # GDAL transform: (x_origin, pixel_width, 0, y_origin, 0, -pixel_height)
     minx = transform[0]
@@ -238,7 +237,7 @@ def _get_bounds_from_transform(
     return (minx, miny, maxx, maxy)
 
 
-def _load_inferno_colormap() -> Dict[str, np.ndarray]:
+def _load_inferno_colormap() -> dict[str, np.ndarray]:
     """Load inferno colormap arrays.
 
     In the real pipeline, this loads from the bundled .npy files.

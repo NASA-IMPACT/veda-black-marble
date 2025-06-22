@@ -76,6 +76,8 @@ def test_quality_component_composition():
     assert and_result.statistics["valid_pixels"] <= or_result.statistics["valid_pixels"]
 
     # Check that cloud and aerosol patches were detected
+    assert and_result.metadata is not None
+    assert "component_statistics" in and_result.metadata
     cloud_stats = and_result.metadata["component_statistics"]["cloud_masker"]
     aerosol_stats = and_result.metadata["component_statistics"]["aerosol_masker"]
 
@@ -140,6 +142,7 @@ def test_viirs_quality_masking():
 
     # Check metadata
     metadata = result.metadata
+    assert metadata is not None
     assert "qa_value_distribution" in metadata
     assert metadata["valid_flags"] == [0, 2]
 
@@ -179,6 +182,7 @@ def test_radiance_saturation_masking():
         else:  # band 5
             expected_saturated = 20 * 50  # rows 30-40 and 40-50
 
+        assert result.metadata is not None
         assert result.metadata["saturated_pixels"] == expected_saturated
         assert stats["valid_pixels"] == shape[0] * shape[1] - expected_saturated
 
@@ -196,10 +200,6 @@ def test_radiance_saturation_masking():
 if __name__ == "__main__":
     # Run specific test
     import sys
-
-    adapter = MockQualityRasterAdapter()
-    test_quality_components_with_mock_data(adapter)
-    print("✓ Quality components with mock data test passed")
 
     test_quality_component_composition()
     print("✓ Quality component composition test passed")

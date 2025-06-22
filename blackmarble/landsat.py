@@ -11,10 +11,11 @@ import os
 import boto3
 from importlib.resources import files
 from datetime import datetime
-from typing import Any, Union
+from typing import Any
 from boto3.session import Session
 import collections
 from osgeo import gdal
+
 try:
     from osgeo import ogr
 except ImportError:
@@ -42,6 +43,8 @@ class LandsatUtil:
         # Use bundled default WRS-2 shapefile if none provided
         if shapefile is None:
             shapefile = DEFAULT_WRS_SHAPEFILE
+        if ogr is None:
+            raise ImportError("GDAL/OGR not available. Please install GDAL.")
         self.shapefile = ogr.Open(shapefile)
         self.layer = self.shapefile.GetLayer(0)
         self.polygons = []
@@ -50,7 +53,8 @@ class LandsatUtil:
             path = feat["PATH"]
             row = feat["ROW"]
             geom = feat.GetGeometryRef()
-            shape = shapely.wkt.loads(geom.ExportToWkt())
+            from shapely import wkt
+            shape = wkt.loads(geom.ExportToWkt())
             if isinstance(shape, shapely.geometry.Polygon):
                 self.polygons.append((shape, path, row))
 
@@ -102,7 +106,7 @@ class LandsatUtil:
         return selected
 
     def download_landsat_band(
-        self, directory: str, band: Union[int, str], output_path: str
+        self, directory: str, band: int | str, output_path: str
     ) -> None:
         """Download a specific band (or QA) file from USGS S3 to local output_path."""
         scene: str = directory.split("/")[-2]
@@ -131,7 +135,7 @@ class LandsatUtil:
 
 
 def download_tiles_for_band(
-    band: Union[int, str],
+    band: int | str,
     year: int,
     month: int,
     day: int,
@@ -213,7 +217,7 @@ def download_tiles_for_band(
 
 
 def download_tiles_for_band_with_composites(
-    band: Union[int, str],
+    band: int | str,
     year: int,
     month: int,
     day: int,
@@ -264,7 +268,7 @@ def download_tiles_for_band_with_composites(
 
 
 def process_band_data(
-    band: Union[int, str],
+    band: int | str,
     year: int,
     month: int,
     day: int,
@@ -356,10 +360,10 @@ def process_band_data(
 print("INFO: Switching to Fiona-based vector operations")
 try:
     from .landsat_fiona import LandsatUtil as _FionaLandsatUtil
-    
+
     # Replace OGR implementation with Fiona
-    LandsatUtil = _FionaLandsatUtil
-    
+    LandsatUtil = _FionaLandsatUtil  # type: ignore
+
     print("INFO: Successfully loaded Fiona implementation for Landsat")
 except ImportError as e:
     print(f"WARNING: Could not import Fiona implementation: {e}")
@@ -369,11 +373,13 @@ except ImportError as e:
 print("INFO: Switching to rasterio-based Landsat raster operations")
 try:
     from .landsat_rasterio import process_band_data as _rio_process_band_data
-    
+
     # Replace GDAL implementation with rasterio
     process_band_data = _rio_process_band_data
-    
-    print("INFO: Successfully loaded rasterio implementation for Landsat raster operations")
+
+    print(
+        "INFO: Successfully loaded rasterio implementation for Landsat raster operations"
+    )
 except ImportError as e:
     print(f"WARNING: Could not import rasterio implementation: {e}")
     print("INFO: Using GDAL implementation for raster operations")

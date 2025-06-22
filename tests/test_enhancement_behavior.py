@@ -103,7 +103,7 @@ class TestRoadEnhancer:
         # Mask should be 1 where roads > 0
         expected_mask = (roads > 0).astype(float)
         assert np.array_equal(result.mask, expected_mask)
-        assert result.statistics.valid_pixels == 5  # 5 road pixels
+        assert result.statistics["valid_pixels"] == 5  # 5 road pixels
 
 
 class TestContrastEnhancer:

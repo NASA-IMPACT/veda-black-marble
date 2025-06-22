@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 import typer
-import os
-import sys
 
 app = typer.Typer(
     help="Command-line interface for the VEDA Black Marble processing pipeline."
@@ -63,7 +61,7 @@ def run(
         )
         raise typer.Exit(code=1)
 
-    typer.echo(f"Starting Black Marble pipeline for bounding box:")
+    typer.echo("Starting Black Marble pipeline for bounding box:")
     typer.echo(f"  Lat1: {lat1}, Lon1: {lon1}")
     typer.echo(f"  Lat2: {lat2}, Lon2: {lon2}")
     typer.echo(f"Date: {year}-{month:02d}-{day:02d}")
@@ -87,7 +85,7 @@ def run(
             upload_bucket=upload_bucket,
             upload_key=upload_key,
         )
-        typer.echo(f"\nPipeline completed successfully!")
+        typer.echo("\nPipeline completed successfully!")
         typer.echo(f"Final output generated at: {final_output_path}")
     except Exception as e:
         typer.echo(

@@ -21,7 +21,7 @@ from rasterio.io import MemoryFile
 from rio_cogeo.profiles import cog_profiles
 from rio_cogeo.cogeo import cog_translate
 import os.path
-from typing import List, Tuple, Optional, Dict, Any
+from typing import Any
 from pathlib import Path
 from datetime import datetime
 
@@ -80,8 +80,8 @@ def run_pipeline(
     day: int,
     earthdata_token: str,
     output_dir: str = "outputs",
-    upload_bucket: Optional[str] = None,
-    upload_key: Optional[str] = None,
+    upload_bucket: str | None = None,
+    upload_key: str | None = None,
     # New optional configuration parameters
     composite_months: int = 12,
     ntl_resolution: float = 0.00011111111,
@@ -89,12 +89,12 @@ def run_pipeline(
     osm_buffer: float = 0.00005,
     display_min: float = 0.3,
     display_max: float = 0.8,
-    config: Optional[ProcessingConfig] = None,
+    config: ProcessingConfig | None = None,
     # Optional adapters for dependency injection
-    s3_adapter: Optional[S3Adapter] = None,
-    raster_adapter: Optional[GDALRasterAdapter] = None,
-    landsat_source: Optional[LandsatDataSource] = None,
-    viirs_source: Optional[VIIRSDataSource] = None,
+    s3_adapter: S3Adapter | None = None,
+    raster_adapter: GDALRasterAdapter | None = None,
+    landsat_source: LandsatDataSource | None = None,
+    viirs_source: VIIRSDataSource | None = None,
 ) -> str:
     """
     Runs the Black Marble processing pipeline for a given area and date.
@@ -109,19 +109,19 @@ def run_pipeline(
         day (int): Target day.
         earthdata_token (str): NASA Earthdata login token.
         output_dir (str): Base directory for all outputs and temporary files. Defaults to "outputs".
-        upload_bucket (Optional[str]): S3 bucket name for final upload. Defaults to None.
-        upload_key (Optional[str]): S3 key (path/filename) for final upload. Defaults to None.
+        upload_bucket (str | None): S3 bucket name for final upload. Defaults to None.
+        upload_key (str | None): S3 key (path/filename) for final upload. Defaults to None.
         composite_months (int): Number of months to look back for composite imagery. Defaults to 12.
         ntl_resolution (float): Resolution for VIIRS nighttime lights resampling in degrees. Defaults to 0.00011111111.
         final_resolution (float): Final output resolution in degrees. Defaults to 0.0001.
         osm_buffer (float): Buffer distance for OSM road rasterization in degrees. Defaults to 0.00005.
         display_min (float): Minimum value for display scaling (0-1). Defaults to 0.3.
         display_max (float): Maximum value for display scaling (0-1). Defaults to 0.8.
-        config (Optional[ProcessingConfig]): Configuration object. If None, uses defaults or environment.
-        s3_adapter (Optional[S3Adapter]): S3 storage adapter for dependency injection.
-        raster_adapter (Optional[GDALRasterAdapter]): Raster I/O adapter for dependency injection.
-        landsat_source (Optional[LandsatDataSource]): Landsat data source for dependency injection.
-        viirs_source (Optional[VIIRSDataSource]): VIIRS data source for dependency injection.
+        config (ProcessingConfig | None): Configuration object. If None, uses defaults or environment.
+        s3_adapter (S3Adapter | None): S3 storage adapter for dependency injection.
+        raster_adapter (GDALRasterAdapter | None): Raster I/O adapter for dependency injection.
+        landsat_source (LandsatDataSource | None): Landsat data source for dependency injection.
+        viirs_source (VIIRSDataSource | None): VIIRS data source for dependency injection.
 
     Returns:
         str: The path to the final generated Cloud-Optimized GeoTIFF.
@@ -178,6 +178,20 @@ def run_pipeline(
 
     # 1) Landsat bands
     print("Downloading and processing Landsat bands...")
+    
+    # Initialize band variables
+    b3_out: list[str] = []
+    b4_out: list[str] = []
+    b5_out: list[str] = []
+    b3_p: list[str] = []
+    b4_p: list[str] = []
+    b5_p: list[str] = []
+    b3_r: list[str] = []
+    b4_r: list[str] = []
+    b5_r: list[str] = []
+    b3_a: list[str] = []
+    b4_a: list[str] = []
+    b5_a: list[str] = []
 
     # Check if we should use the new data source approach
     if landsat_source is not None:
@@ -233,10 +247,6 @@ def run_pipeline(
 
     if landsat_source is None:
         # Use legacy process_band_data function
-        b3_out: List[str]
-        b3_p: List[str]
-        b3_r: List[str]
-        b3_a: List[str]
         b3_out, b3_p, b3_r, b3_a = process_band_data(
             3,
             year,
@@ -250,10 +260,6 @@ def run_pipeline(
             temp_dir,
             config.landsat.composite_months,
         )
-        b4_out: List[str]
-        b4_p: List[str]
-        b4_r: List[str]
-        b4_a: List[str]
         b4_out, b4_p, b4_r, b4_a = process_band_data(
             4,
             year,
@@ -267,10 +273,6 @@ def run_pipeline(
             temp_dir,
             config.landsat.composite_months,
         )
-        b5_out: List[str]
-        b5_p: List[str]
-        b5_r: List[str]
-        b5_a: List[str]
         b5_out, b5_p, b5_r, b5_a = process_band_data(
             5,
             year,
@@ -287,12 +289,14 @@ def run_pipeline(
 
     # 2) Crop to UTM bbox
     print("Cropping Landsat bands to UTM bounding box...")
-    b3_final: List[str] = []
-    b4_final: List[str] = []
-    b5_final: List[str] = []
-    p_final: List[str] = []
-    r_final: List[str] = []
-    a_final: List[str] = []
+    b3_final: list[str] = []
+    b4_final: list[str] = []
+    b5_final: list[str] = []
+    p_final: list[str] = []
+    r_final: list[str] = []
+    a_final: list[str] = []
+    
+    
     for i, fn in enumerate(b3_out):
         out: str = os.path.join(output_dir, f"B3_{i}.TIFF")
         crop_to_bb_utm(fn, out, e1, n1, e2, n2)
@@ -321,14 +325,14 @@ def run_pipeline(
     # 3) Mask & Stack
     print("Masking and stacking bands...")
     print(f"DEBUG: Processing {len(b3_final)} scenes")
-    b3_pxs: List[np.ndarray] = []
-    b4_pxs: List[np.ndarray] = []
-    b5_pxs: List[np.ndarray] = []
+    b3_pxs: list[np.ndarray] = []
+    b4_pxs: list[np.ndarray] = []
+    b5_pxs: list[np.ndarray] = []
     for i in range(len(b3_final)):
         print(f"\nDEBUG: Processing scene {i + 1}/{len(b3_final)}")
         p_px: np.ndarray
-        _: Tuple[float, ...] | str
-        __: Tuple[float, ...] | str
+        _: Any  # Can be dict or tuple depending on adapter
+        __: Any  # Can be str or tuple depending on adapter
 
         # Use raster adapter if available, otherwise fall back to get_geo
         if raster_adapter is not None:
@@ -630,7 +634,7 @@ def run_pipeline(
         )
 
         # Direct assignment - get_geo always returns the correct types
-        gt_save: Tuple[float, ...] = gt_temp
+        gt_save: tuple[float, ...] = gt_temp
         proj_save: str = proj_temp
     b3_merged_path = os.path.join(output_dir, "B3.TIFF")
     b4_merged_path = os.path.join(output_dir, "B4.TIFF")
@@ -694,6 +698,11 @@ def run_pipeline(
 
     # 6) Download & subset Nightlights (VIIRS)
     print("\nDEBUG: Downloading nightlights (VIIRS)...")
+    
+    # Initialize VIIRS temp file paths
+    ntl_temp_tif: str = ""
+    lunar_temp_tif: str = ""
+    quality_temp_tif: str = ""
 
     # Check if we should use the new data source approach
     if viirs_source is not None:
@@ -750,9 +759,9 @@ def run_pipeline(
         print(f"Found {len(tiles)} VIIRS tiles to download: {tiles}")
 
         # Download and process each tile
-        ntl_tiles: List[str] = []
-        lunar_tiles: List[str] = []
-        quality_tiles: List[str] = []
+        ntl_tiles: list[str] = []
+        lunar_tiles: list[str] = []
+        quality_tiles: list[str] = []
 
         for i, (vert, horz) in enumerate(tiles):
             print(f"Processing VIIRS tile {i + 1}/{len(tiles)}: h{horz:02d}v{vert:02d}")
@@ -806,6 +815,7 @@ def run_pipeline(
         # Mosaic tiles if multiple, or use single tile
         if len(ntl_tiles) > 1:
             from .pipeline_ops import mosaic_viirs_tiles
+
             ntl_temp_tif, lunar_temp_tif, quality_temp_tif = mosaic_viirs_tiles(
                 ntl_tiles, lunar_tiles, quality_tiles, temp_dir
             )
@@ -857,11 +867,11 @@ def run_pipeline(
 
     # 8) Resample all to final resolution
     print("\nDEBUG: Resampling to final resolution...")
-    desired_res: Tuple[float, float] = (
+    desired_res: tuple[float, float] = (
         config.final_resolution,
         -config.final_resolution,
     )
-    inputs: List[str] = [
+    inputs: list[str] = [
         b3_wgs84_path,
         b4_wgs84_path,
         b5_wgs84_path,
@@ -870,7 +880,7 @@ def run_pipeline(
         quality_subset_path,
         osm_path,
     ]
-    outputs_final: List[str] = [
+    outputs_final: list[str] = [
         os.path.join(final_dir, "B3.TIFF"),
         os.path.join(final_dir, "B4.TIFF"),
         os.path.join(final_dir, "B5.TIFF"),
@@ -900,6 +910,7 @@ def run_pipeline(
 
         # Resample to final resolution
         from .pipeline_ops import resample_to_resolution
+
         success = resample_to_resolution(inp, outp, desired_res)
 
         if not success:
@@ -960,7 +971,7 @@ def run_pipeline(
             f"Expected string for final projection, got {type(proj_temp3)}: {proj_temp3}"
         )
 
-    gt: Tuple[float, ...] = gt_temp3
+    gt: tuple[float, ...] = gt_temp3
     proj: str = proj_temp3
     # Read remaining bands
     b4_px_final: np.ndarray
@@ -981,42 +992,42 @@ def run_pipeline(
         except Exception as e:
             print(f"RasterAdapter failed for other bands: {e}. Using get_geo...")
             # Fall back to get_geo
-            _gt4: Tuple[float, ...] | str
-            _proj4: Tuple[float, ...] | str
+            _gt4: tuple[float, ...] | str
+            _proj4: tuple[float, ...] | str
             b4_px_final, _gt4, _proj4 = get_geo(outputs_final[1], 1)
-            _gt5: Tuple[float, ...] | str
-            _proj5: Tuple[float, ...] | str
+            _gt5: tuple[float, ...] | str
+            _proj5: tuple[float, ...] | str
             b5_px_final, _gt5, _proj5 = get_geo(outputs_final[2], 1)
-            _gt_ntl: Tuple[float, ...] | str
-            _proj_ntl: Tuple[float, ...] | str
+            _gt_ntl: tuple[float, ...] | str
+            _proj_ntl: tuple[float, ...] | str
             ntl_px, _gt_ntl, _proj_ntl = get_geo(outputs_final[3], 1)
-            _gt_lunar: Tuple[float, ...] | str
-            _proj_lunar: Tuple[float, ...] | str
+            _gt_lunar: tuple[float, ...] | str
+            _proj_lunar: tuple[float, ...] | str
             lunar_px, _gt_lunar, _proj_lunar = get_geo(outputs_final[4], 1)
-            _gt_quality: Tuple[float, ...] | str
-            _proj_quality: Tuple[float, ...] | str
+            _gt_quality: tuple[float, ...] | str
+            _proj_quality: tuple[float, ...] | str
             quality_px, _gt_quality, _proj_quality = get_geo(outputs_final[5], 1)
-            _gt_osm: Tuple[float, ...] | str
-            _proj_osm: Tuple[float, ...] | str
+            _gt_osm: tuple[float, ...] | str
+            _proj_osm: tuple[float, ...] | str
             osm_px, _gt_osm, _proj_osm = get_geo(outputs_final[6], 1)
     else:
-        _gt4: Tuple[float, ...] | str
-        _proj4: Tuple[float, ...] | str
+        _gt4: tuple[float, ...] | str
+        _proj4: tuple[float, ...] | str
         b4_px_final, _gt4, _proj4 = get_geo(outputs_final[1], 1)
-        _gt5: Tuple[float, ...] | str
-        _proj5: Tuple[float, ...] | str
+        _gt5: tuple[float, ...] | str
+        _proj5: tuple[float, ...] | str
         b5_px_final, _gt5, _proj5 = get_geo(outputs_final[2], 1)
-        _gt_ntl: Tuple[float, ...] | str
-        _proj_ntl: Tuple[float, ...] | str
+        _gt_ntl: tuple[float, ...] | str
+        _proj_ntl: tuple[float, ...] | str
         ntl_px, _gt_ntl, _proj_ntl = get_geo(outputs_final[3], 1)
-        _gt_lunar: Tuple[float, ...] | str
-        _proj_lunar: Tuple[float, ...] | str
+        _gt_lunar: tuple[float, ...] | str
+        _proj_lunar: tuple[float, ...] | str
         lunar_px, _gt_lunar, _proj_lunar = get_geo(outputs_final[4], 1)
-        _gt_quality: Tuple[float, ...] | str
-        _proj_quality: Tuple[float, ...] | str
+        _gt_quality: tuple[float, ...] | str
+        _proj_quality: tuple[float, ...] | str
         quality_px, _gt_quality, _proj_quality = get_geo(outputs_final[5], 1)
-        _gt_osm: Tuple[float, ...] | str
-        _proj_osm: Tuple[float, ...] | str
+        _gt_osm: tuple[float, ...] | str
+        _proj_osm: tuple[float, ...] | str
         osm_px, _gt_osm, _proj_osm = get_geo(outputs_final[6], 1)
 
     # Apply fill_gaps to ensure all arrays have same shape
@@ -1198,7 +1209,7 @@ def run_pipeline(
     with rasterio.open(
         outputs_final[0]
     ) as src:  # Use one of the final resampled files for metadata
-        meta: Dict[str, Any] = src.meta.copy()
+        meta: dict[str, Any] = src.meta.copy()
 
     # Update metadata for uint8 RGB output
     meta.update(
@@ -1218,7 +1229,7 @@ def run_pipeline(
     with MemoryFile() as memfile:
         with memfile.open(**meta) as mem:
             mem.write(arr)
-            profile: Dict[str, Any] = cog_profiles.get("deflate")
+            profile: dict[str, Any] = cog_profiles.get("deflate")
             profile["nodata"] = None  # Ensure COG profile doesn't have nodata
             cog_translate(mem, out_cog, profile, in_memory=False)
 
@@ -1258,8 +1269,8 @@ def main() -> None:
     """Entry point for the Black Marble pipeline, reads env vars."""
 
     # Environment vars for S3 upload (optional)
-    final_bucket: Optional[str] = os.environ.get("UPLOAD_BUCKET")
-    final_key: Optional[str] = os.environ.get("UPLOAD_FILE")
+    final_bucket: str | None = os.environ.get("UPLOAD_BUCKET")
+    final_key: str | None = os.environ.get("UPLOAD_FILE")
 
     # AWS web identity (optional) - Write token to file if both env vars are set
     # This supports AWS IAM roles for service accounts (IRSA) in Kubernetes environments

@@ -199,11 +199,13 @@ try:
         convert_VNP46A2_HDF2TIFF as _rio_convert_VNP46A2_HDF2TIFF,
         VNP46A2Util as _rio_VNP46A2Util,
     )
-    
+
     # Replace GDAL implementations
     convert_VNP46A2_HDF2TIFF = _rio_convert_VNP46A2_HDF2TIFF
-    VNP46A2Util = _rio_VNP46A2Util
-    
+    # Note: VNP46A2Util classes have slightly different interfaces
+    # but are compatible enough for runtime use
+    VNP46A2Util = _rio_VNP46A2Util  # type: ignore
+
     print("INFO: Successfully loaded rasterio VIIRS implementations")
 except ImportError as e:
     print(f"WARNING: Could not import rasterio VIIRS implementations: {e}")

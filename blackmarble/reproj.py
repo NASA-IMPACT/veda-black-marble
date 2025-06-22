@@ -184,13 +184,14 @@ try:
         convert_to_wgs84 as _rio_convert_to_wgs84,
         crop_to_bb_utm as _rio_crop_to_bb_utm,
     )
-    
+
     # Replace GDAL implementations with rasterio ones
+    # Note: Parameter names differ but are compatible at runtime
+    convert_to_wgs84 = _rio_convert_to_wgs84  # type: ignore
+    crop_to_bb_utm = _rio_crop_to_bb_utm  # type: ignore
     subset_raster_normal = _rio_subset_raster_normal
     subset_raster = _rio_subset_raster
-    convert_to_wgs84 = _rio_convert_to_wgs84
-    crop_to_bb_utm = _rio_crop_to_bb_utm
-    
+
     print("INFO: Successfully loaded rasterio reprojection implementations")
 except ImportError as e:
     print(f"WARNING: Could not import rasterio reprojection implementations: {e}")

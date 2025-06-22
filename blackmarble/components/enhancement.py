@@ -4,12 +4,11 @@ This module provides components for enhancing data through various
 techniques including road enhancement, contrast adjustment, and colormap application.
 """
 
-from typing import Optional, Dict, Any, Tuple, Union, List
+from typing import Any
 from dataclasses import dataclass
 import numpy as np
 
 from .base import ComposableComponent, MaskResult, QualityStatistics
-from ..config import NDUIConfig
 from ..calculations import enhance_with_roads, normalize_to_range
 
 
@@ -24,8 +23,8 @@ class EnhancementResult:
     """
 
     data: np.ndarray
-    statistics: Dict[str, Any]
-    metadata: Optional[Dict[str, Any]] = None
+    statistics: dict[str, Any]
+    metadata: dict[str, Any] | None = None
 
 
 class RoadEnhancer(ComposableComponent):
@@ -40,7 +39,7 @@ class RoadEnhancer(ComposableComponent):
         name: str = "road_enhancer",
         major_factor: float = 1.3,
         minor_factor: float = 1.1,
-        road_classes: Optional[Dict[int, str]] = None,
+        road_classes: dict[int, str] | None = None,
     ):
         """Initialize road enhancer.
 
@@ -71,7 +70,7 @@ class RoadEnhancer(ComposableComponent):
         self,
         data: np.ndarray,
         roads: np.ndarray,
-        custom_factors: Optional[Dict[int, float]] = None,
+        custom_factors: dict[int, float] | None = None,
         **kwargs,
     ) -> EnhancementResult:
         """Apply road enhancement to data.
@@ -111,7 +110,7 @@ class RoadEnhancer(ComposableComponent):
 
     def _calculate_statistics(
         self, original: np.ndarray, enhanced: np.ndarray, roads: np.ndarray
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Calculate enhancement statistics."""
         # Count pixels by road type
         road_counts = {}
@@ -156,7 +155,7 @@ class RoadEnhancer(ComposableComponent):
 
         return MaskResult(
             mask=mask,
-            statistics=QualityStatistics.from_mask(mask),
+            statistics=QualityStatistics.from_mask(mask).to_dict(),
             metadata=result.metadata,
         )
 
@@ -172,7 +171,7 @@ class ContrastEnhancer(ComposableComponent):
         self,
         name: str = "contrast_enhancer",
         method: str = "percentile",
-        clip_percentiles: Tuple[float, float] = (2.0, 98.0),
+        clip_percentiles: tuple[float, float] = (2.0, 98.0),
     ):
         """Initialize contrast enhancer.
 
@@ -189,8 +188,8 @@ class ContrastEnhancer(ComposableComponent):
     def enhance(
         self,
         data: np.ndarray,
-        output_range: Tuple[float, float] = (0.0, 1.0),
-        mask: Optional[np.ndarray] = None,
+        output_range: tuple[float, float] = (0.0, 1.0),
+        mask: np.ndarray | None = None,
         **kwargs,
     ) -> EnhancementResult:
         """Apply contrast enhancement.
@@ -239,7 +238,7 @@ class ContrastEnhancer(ComposableComponent):
         self,
         data: np.ndarray,
         valid_data: np.ndarray,
-        output_range: Tuple[float, float],
+        output_range: tuple[float, float],
     ) -> np.ndarray:
         """Apply percentile-based contrast stretch."""
         # Calculate percentiles from valid data
@@ -248,13 +247,15 @@ class ContrastEnhancer(ComposableComponent):
         vmax = np.percentile(valid_data, high_percentile)
 
         # Apply normalization
-        return normalize_to_range(data, output_range[0], output_range[1], vmin, vmax)
+        return normalize_to_range(
+            data, output_range[0], output_range[1], float(vmin), float(vmax)
+        )
 
     def _minmax_stretch(
         self,
         data: np.ndarray,
         valid_data: np.ndarray,
-        output_range: Tuple[float, float],
+        output_range: tuple[float, float],
     ) -> np.ndarray:
         """Apply min-max contrast stretch."""
         vmin = np.min(valid_data)
@@ -266,7 +267,7 @@ class ContrastEnhancer(ComposableComponent):
         self,
         data: np.ndarray,
         valid_data: np.ndarray,
-        output_range: Tuple[float, float],
+        output_range: tuple[float, float],
         target_mean: float = 0.5,
         target_std: float = 0.15,
         **kwargs,
@@ -294,7 +295,7 @@ class ContrastEnhancer(ComposableComponent):
 
     def _calculate_statistics(
         self, original: np.ndarray, enhanced: np.ndarray, valid_data: np.ndarray
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Calculate enhancement statistics."""
         valid_enhanced = enhanced[~np.isnan(enhanced)]
 
@@ -322,7 +323,7 @@ class ContrastEnhancer(ComposableComponent):
 
         return MaskResult(
             mask=mask,
-            statistics=QualityStatistics.from_mask(mask),
+            statistics=QualityStatistics.from_mask(mask).to_dict(),
             metadata=result.metadata,
         )
 
@@ -337,8 +338,8 @@ class ColorMapper(ComposableComponent):
     def __init__(
         self,
         name: str = "color_mapper",
-        colormap_name: Optional[str] = None,
-        colormap_data: Optional[Dict[str, np.ndarray]] = None,
+        colormap_name: str | None = None,
+        colormap_data: dict[str, np.ndarray] | None = None,
         add_alpha: bool = False,
     ):
         """Initialize color mapper.
@@ -378,8 +379,8 @@ class ColorMapper(ComposableComponent):
     def apply_colormap(
         self,
         data: np.ndarray,
-        scale_range: Optional[Tuple[float, float]] = None,
-        alpha_mask: Optional[np.ndarray] = None,
+        scale_range: tuple[float, float] | None = None,
+        alpha_mask: np.ndarray | None = None,
         **kwargs,
     ) -> np.ndarray:
         """Apply colormap to data.
@@ -442,7 +443,7 @@ class ColorMapper(ComposableComponent):
         height: int = 256,
         width: int = 32,
         orientation: str = "vertical",
-        labels: Optional[Dict[float, str]] = None,
+        labels: dict[float, str] | None = None,
     ) -> np.ndarray:
         """Create a colorbar image.
 
@@ -484,7 +485,7 @@ class ColorMapper(ComposableComponent):
 
         return MaskResult(
             mask=mask,
-            statistics=QualityStatistics.from_mask(mask),
+            statistics=QualityStatistics.from_mask(mask).to_dict(),
             metadata={
                 "component": "color_mapper",
                 "output_shape": result.shape,
@@ -503,7 +504,7 @@ class CompositeEnhancer(ComposableComponent):
     def __init__(
         self,
         name: str = "composite_enhancer",
-        enhancers: Optional[List[ComposableComponent]] = None,
+        enhancers: list[ComposableComponent] | None = None,
     ):
         """Initialize composite enhancer.
 
@@ -541,8 +542,10 @@ class CompositeEnhancer(ComposableComponent):
         # Apply each enhancer in sequence
         for i, enhancer in enumerate(self.enhancers):
             # Check if enhancer has appropriate method
-            if hasattr(enhancer, "enhance"):
-                result = enhancer.enhance(current_data, **kwargs)
+            if hasattr(enhancer, "enhance") and callable(
+                getattr(enhancer, "enhance", None)
+            ):
+                result = getattr(enhancer, "enhance")(current_data, **kwargs)
                 current_data = result.data
                 all_stats[f"step_{i}_{enhancer.name}"] = result.statistics
                 if result.metadata:
@@ -559,7 +562,7 @@ class CompositeEnhancer(ComposableComponent):
             else:
                 # Try process method as fallback
                 mask_result = enhancer.process(current_data, **kwargs)
-                all_stats[f"step_{i}_{enhancer.name}"] = mask_result.statistics.__dict__
+                all_stats[f"step_{i}_{enhancer.name}"] = mask_result.statistics
                 if mask_result.metadata:
                     all_metadata[f"step_{i}_{enhancer.name}"] = mask_result.metadata
 
@@ -581,6 +584,6 @@ class CompositeEnhancer(ComposableComponent):
 
         return MaskResult(
             mask=mask,
-            statistics=QualityStatistics.from_mask(mask),
+            statistics=QualityStatistics.from_mask(mask).to_dict(),
             metadata=result.metadata,
         )

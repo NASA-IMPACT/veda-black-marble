@@ -26,10 +26,10 @@ def conv0(input_ntl: str, output_ntl: str, gdal_type: int) -> None:
 def convert_VNP46A2_HDF2TIFF(h5_file: str, output_file: str) -> None:
     """
     Convert the third subdataset of VNP46A2 HDF to a georeferenced GeoTIFF using rasterio.
-    
+
     VNP46A2 subdatasets typically include:
     0: DNB_BRDF-Corrected_NTL
-    1: Gap_Filled_DNB_BRDF-Corrected_NTL  
+    1: Gap_Filled_DNB_BRDF-Corrected_NTL
     2: DNB_At_Sensor_Radiance_500m (this is what we want)
     3: Latest_High_Quality_Retrieval
     """
@@ -37,64 +37,69 @@ def convert_VNP46A2_HDF2TIFF(h5_file: str, output_file: str) -> None:
     # Note: Opening raw HDF5 files may trigger a "not georeferenced" warning
     # This is expected - the subdatasets contain the georeferencing
     import warnings
+
     with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', 'Dataset has no geotransform')
+        warnings.filterwarnings("ignore", "Dataset has no geotransform")
         with rasterio.open(h5_file) as src:
             subdatasets = src.subdatasets
-        
+
     if len(subdatasets) < 3:
         # Handle case where HDF5 doesn't have proper subdatasets
         # This can happen with malformed or test files
         # Try to read the file directly as a single dataset
-        warnings.warn(f"Expected at least 3 subdatasets in {h5_file}, found {len(subdatasets)}. Attempting direct read.")
-        
+        warnings.warn(
+            f"Expected at least 3 subdatasets in {h5_file}, found {len(subdatasets)}. Attempting direct read."
+        )
+
         # For files without subdatasets, try using h5py
         try:
             import h5py
-            with h5py.File(h5_file, 'r') as hf:
+
+            with h5py.File(h5_file, "r") as hf:
                 # Find first dataset in the file
                 dataset = None
+
                 def find_dataset(name, obj):
                     nonlocal dataset
                     if isinstance(obj, h5py.Dataset) and dataset is None:
                         dataset = obj
-                
+
                 hf.visititems(find_dataset)
-                
+
                 if dataset is None:
                     # Create dummy data if no dataset found
                     data = np.zeros((100, 100), dtype=np.float32)
                 else:
                     data = dataset[:]
-                    
+
                 # Try to get metadata
                 h_num = 0
                 v_num = 0
-                if 'HDFEOS/GRIDS/VNP_Grid_DNB' in hf:
-                    grids = hf['HDFEOS/GRIDS/VNP_Grid_DNB']
-                    h_num = int(grids.attrs.get('HorizontalTileNumber', 0))
-                    v_num = int(grids.attrs.get('VerticalTileNumber', 0))
+                if "HDFEOS/GRIDS/VNP_Grid_DNB" in hf:
+                    grids = hf["HDFEOS/GRIDS/VNP_Grid_DNB"]
+                    h_num = int(grids.attrs.get("HorizontalTileNumber", 0))
+                    v_num = int(grids.attrs.get("VerticalTileNumber", 0))
         except Exception:
             # Last resort: create dummy data
             data = np.zeros((100, 100), dtype=np.float32)
             h_num = 0
             v_num = 0
-    
+
     else:
         # Get the third subdataset (index 2)
         subdataset_name = subdatasets[2]
-        
+
         # Open the subdataset
         with rasterio.open(subdataset_name) as src:
             # Read the data
             data = src.read(1)
-        
+
         # Try to get metadata from the HDF5 attributes
         h_num = None
         v_num = None
-        
+
         # Try to extract from filename first (e.g., h08v05)
-        match = re.search(r'h(\d{2})v(\d{2})', os.path.basename(h5_file))
+        match = re.search(r"h(\d{2})v(\d{2})", os.path.basename(h5_file))
         if match:
             h_num = int(match.group(1))
             v_num = int(match.group(2))
@@ -102,58 +107,66 @@ def convert_VNP46A2_HDF2TIFF(h5_file: str, output_file: str) -> None:
             # Use h5py to read HDF5 metadata directly since rasterio might not expose it
             try:
                 import h5py
-                with h5py.File(h5_file, 'r') as hf:
+
+                with h5py.File(h5_file, "r") as hf:
                     # Navigate to the VIIRS grid metadata
-                    if 'HDFEOS/GRIDS/VNP_Grid_DNB' in hf:
-                        grids = hf['HDFEOS/GRIDS/VNP_Grid_DNB']
-                        h_num = int(grids.attrs.get('HorizontalTileNumber', 0))
-                        v_num = int(grids.attrs.get('VerticalTileNumber', 0))
+                    if "HDFEOS/GRIDS/VNP_Grid_DNB" in hf:
+                        grids = hf["HDFEOS/GRIDS/VNP_Grid_DNB"]
+                        h_num = int(grids.attrs.get("HorizontalTileNumber", 0))
+                        v_num = int(grids.attrs.get("VerticalTileNumber", 0))
             except Exception:
                 # Fall back to defaults if h5py fails
                 h_num = 0
                 v_num = 0
-        
+
         if h_num is None or v_num is None:
             h_num = 0
             v_num = 0
-    
+
     # Calculate geographic bounds for this VIIRS tile
     # VIIRS uses a 10-degree tile system
     west = (10 * h_num) - 180
     north = 90 - (10 * v_num)
     east = west + 10
     south = north - 10
-    
+
     # Create the geotransform
-    transform = from_bounds(west, south, east, north, data.shape[1] if len(data.shape) > 1 else 100, data.shape[0] if len(data.shape) > 0 else 100)
-    
+    transform = from_bounds(
+        west,
+        south,
+        east,
+        north,
+        data.shape[1] if len(data.shape) > 1 else 100,
+        data.shape[0] if len(data.shape) > 0 else 100,
+    )
+
     # Prepare output profile
     profile = {
-        'driver': 'GTiff',
-        'height': data.shape[0] if len(data.shape) > 0 else 100,
-        'width': data.shape[1] if len(data.shape) > 1 else 100,
-        'count': 1,
-        'dtype': data.dtype,
-        'crs': 'EPSG:4326',  # WGS84
-        'transform': transform,
-        'compress': 'lzw',
-        'tiled': True,
-        'blockxsize': 256,
-        'blockysize': 256
+        "driver": "GTiff",
+        "height": data.shape[0] if len(data.shape) > 0 else 100,
+        "width": data.shape[1] if len(data.shape) > 1 else 100,
+        "count": 1,
+        "dtype": data.dtype,
+        "crs": "EPSG:4326",  # WGS84
+        "transform": transform,
+        "compress": "lzw",
+        "tiled": True,
+        "blockxsize": 256,
+        "blockysize": 256,
     }
-    
+
     # Write the georeferenced output
-    with rasterio.open(output_file, 'w', **profile) as dst:
+    with rasterio.open(output_file, "w", **profile) as dst:
         if len(data.shape) == 2:
             dst.write(data, 1)
         else:
             # Handle 1D or malformed data
-            dst.write(data.reshape(profile['height'], profile['width']), 1)
+            dst.write(data.reshape(profile["height"], profile["width"]), 1)
 
 
 class VNP46A2Util:
     """Download and convert VNP46A2 (VIIRS) HDF files using rasterio."""
-    
+
     def __init__(self, output_dir: str = "./"):
         """Initialize with output directory."""
         self.output_dir = Path(output_dir)
@@ -161,7 +174,7 @@ class VNP46A2Util:
 
     def coordinates_to_tile_id(self, lat: float, lon: float) -> tuple[int, int]:
         """Return (vertical, horizontal) tile indices for lat/lon."""
-        # Convert to 0–360/0–180 range  
+        # Convert to 0–360/0–180 range
         v = int(((-lat + 90.0) / 180.0) * 18)
         h = int(((lon + 180.0) / 360.0) * 36)
         return v, h
@@ -218,7 +231,7 @@ class VNP46A2Util:
             if item.get("name", "").startswith(target_filename_part):
                 link = item.get("downloadsLink")
                 break
-        
+
         if not link:
             raise RuntimeError(
                 f"No VNP46A2 product found for tile {tile} on {year}-{day_of_year:03d}"

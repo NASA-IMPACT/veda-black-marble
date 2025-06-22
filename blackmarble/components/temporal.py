@@ -25,7 +25,7 @@ Example:
         method="median",
         use_scipy_fill_gaps=True
     )
-    
+
     # With feather blending
     merger = SceneMerger(
         blend_method="feather",
@@ -33,9 +33,9 @@ Example:
     )
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable, Tuple
+from typing import Any
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 import numpy as np
 from enum import Enum
 
@@ -66,10 +66,10 @@ class TemporalResult:
     """
 
     data: np.ndarray
-    dates: List[datetime]
-    coverage: Dict[str, Any]
+    dates: list[datetime]
+    coverage: dict[str, Any]
     method: str
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
 
 class TemporalCompositor(ComposableComponent):
@@ -83,8 +83,8 @@ class TemporalCompositor(ComposableComponent):
     def __init__(
         self,
         name: str = "temporal_compositor",
-        method: Union[str, CompositeMethod] = CompositeMethod.MEDIAN,
-        percentile: Optional[int] = None,
+        method: str | CompositeMethod = CompositeMethod.MEDIAN,
+        percentile: int | None = None,
         min_valid_observations: int = 1,
         fill_nodata: bool = True,
         use_scipy_fill_gaps: bool = False,
@@ -112,7 +112,7 @@ class TemporalCompositor(ComposableComponent):
         self.min_valid_observations = min_valid_observations
         self.fill_nodata = fill_nodata
         self.use_scipy_fill_gaps = use_scipy_fill_gaps
-        
+
         # scipy is now a required dependency, so no need to check
 
         self._config.update(
@@ -302,20 +302,22 @@ class TemporalCompositor(ComposableComponent):
 
         return composite
 
-    def _fill_gaps_scipy(self, composite: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
+    def _fill_gaps_scipy(
+        self, composite: np.ndarray, valid_mask: np.ndarray
+    ) -> np.ndarray:
         """Fill gaps in composite using scipy's nearest neighbor interpolation.
-        
+
         Uses scipy's Euclidean distance transform to find the nearest valid pixel
         for each gap. This produces high-quality results that preserve spatial
         patterns and avoid artifacts.
-        
+
         Args:
             composite: The composite array with gaps (2D or multi-band)
             valid_mask: Boolean mask indicating valid pixels
-            
+
         Returns:
             Composite array with gaps filled using nearest neighbor interpolation
-            
+
         Note:
             This method requires scipy to be installed and use_scipy_fill_gaps=True
         """
@@ -336,11 +338,12 @@ class TemporalCompositor(ComposableComponent):
                 # Extract the nearest neighbor coordinates for invalid pixels
                 row_coords = invalid_indices[0]
                 col_coords = invalid_indices[1]
-                nearest_rows = indices[0, row_coords, col_coords]
-                nearest_cols = indices[1, row_coords, col_coords]
-                composite[row_coords, col_coords] = composite[
-                    nearest_rows, nearest_cols
-                ]
+                if indices is not None:
+                    nearest_rows = indices[0][row_coords, col_coords]
+                    nearest_cols = indices[1][row_coords, col_coords]
+                    composite[row_coords, col_coords] = composite[
+                        nearest_rows, nearest_cols
+                    ]
         else:
             # Multi-band case - fill each band separately
             for b in range(composite.shape[0]):
@@ -354,22 +357,23 @@ class TemporalCompositor(ComposableComponent):
                     )
                     row_coords = invalid_indices[0]
                     col_coords = invalid_indices[1]
-                    nearest_rows = indices[0, row_coords, col_coords]
-                    nearest_cols = indices[1, row_coords, col_coords]
-                    composite[b, row_coords, col_coords] = composite[
-                        b, nearest_rows, nearest_cols
-                    ]
+                    if indices is not None:
+                        nearest_rows = indices[0][row_coords, col_coords]
+                        nearest_cols = indices[1][row_coords, col_coords]
+                        composite[b, row_coords, col_coords] = composite[
+                            b, nearest_rows, nearest_cols
+                        ]
 
         return composite
 
     def _calculate_coverage(
-        self, valid_mask: np.ndarray, dates: List[datetime]
-    ) -> Dict[str, Any]:
+        self, valid_mask: np.ndarray, dates: list[datetime]
+    ) -> dict[str, Any]:
         """Calculate temporal coverage statistics."""
         coverage = {
             "temporal_range_days": 0,
-            "observation_frequency": 0,
-            "coverage_percentage": 0,
+            "observation_frequency": 0.0,
+            "coverage_percentage": 0.0,
         }
 
         if dates and len(dates) == valid_mask.shape[0]:
@@ -379,8 +383,8 @@ class TemporalCompositor(ComposableComponent):
 
             # Calculate observation frequency
             if coverage["temporal_range_days"] > 0:
-                coverage["observation_frequency"] = (
-                    len(dates) / coverage["temporal_range_days"]
+                coverage["observation_frequency"] = float(len(dates)) / float(
+                    coverage["temporal_range_days"]
                 )
 
             # Calculate overall coverage percentage
@@ -403,7 +407,7 @@ class SceneMerger(ComposableComponent):
         name: str = "scene_merger",
         blend_method: str = "feather",
         feather_distance: int = 10,
-        priority_order: Optional[List[int]] = None,
+        priority_order: list[int] | None = None,
     ):
         """Initialize scene merger.
 
@@ -413,7 +417,7 @@ class SceneMerger(ComposableComponent):
                 - "feather": Smooth transitions using distance-based weighting.
                   Produces professional seamless mosaics.
                 - "max": Take maximum value at each pixel
-                - "min": Take minimum value at each pixel  
+                - "min": Take minimum value at each pixel
                 - "mean": Average overlapping pixels
             feather_distance: Distance for feathering in pixels. Only used when
                 blend_method="feather". Larger values create smoother but slower
@@ -425,7 +429,7 @@ class SceneMerger(ComposableComponent):
         self.blend_method = blend_method
         self.feather_distance = feather_distance
         self.priority_order = priority_order
-        
+
         # scipy is now a required dependency, so no need to check
 
         self._config.update(
@@ -444,11 +448,11 @@ class SceneMerger(ComposableComponent):
 
     def merge_scenes(
         self,
-        scenes: List[np.ndarray],
-        transforms: List[Any],
-        bounds: List[Tuple[float, float, float, float]],
-        nodata: Optional[float] = None,
-    ) -> Tuple[np.ndarray, Any, Tuple[float, float, float, float]]:
+        scenes: list[np.ndarray],
+        transforms: list[Any],
+        bounds: list[tuple[float, float, float, float]],
+        nodata: float | None = None,
+    ) -> tuple[np.ndarray, Any, tuple[float, float, float, float]]:
         """Merge multiple scenes into a mosaic.
 
         Args:
@@ -530,24 +534,24 @@ class SceneMerger(ComposableComponent):
     def _feather_blend(
         self,
         output: np.ndarray,
-        scenes: List[np.ndarray],
-        transforms: List[Any],
+        scenes: list[np.ndarray],
+        transforms: list[Any],
         out_transform: Any,
-        order: List[int],
-        nodata: Optional[float],
+        order: list[int],
+        nodata: float | None,
     ) -> np.ndarray:
         """Blend scenes using feathering for smooth seamless transitions.
-        
+
         Uses scipy's Euclidean distance transform to calculate weights based on
         distance from edges. This creates smooth transitions between overlapping
         scenes, eliminating visible seams.
-        
+
         The algorithm:
         1. For each scene, calculate distance from valid pixel edges
         2. Normalize distances to create blend weights (0-1)
         3. In overlap regions, blend pixels based on distance weights
         4. Scenes are processed in priority order
-        
+
         Args:
             output: Output array to fill
             scenes: List of scene arrays to merge
@@ -555,10 +559,10 @@ class SceneMerger(ComposableComponent):
             out_transform: Output affine transform
             order: Processing order for scenes (priority)
             nodata: Value representing no data
-            
+
         Returns:
             Blended output array with smooth transitions
-            
+
         Note:
             Requires scipy to be installed and blend_method="feather"
         """
@@ -584,9 +588,13 @@ class SceneMerger(ComposableComponent):
 
             # Calculate distance from edges for feathering
             distance = distance_transform_edt(valid_mask)
-            distance = (
-                np.minimum(distance, self.feather_distance) / self.feather_distance
-            )
+            # Ensure feather_distance is float for division and handle potential None
+            feather_dist = float(self.feather_distance)
+            if distance is not None:
+                distance = np.minimum(distance, feather_dist) / feather_dist
+            else:
+                # Fallback if distance transform fails
+                distance = np.ones_like(valid_mask, dtype=float)
 
             # Apply feathered blend
             if scene.ndim == 2:
@@ -642,11 +650,11 @@ class SceneMerger(ComposableComponent):
     def _max_merge(
         self,
         output: np.ndarray,
-        scenes: List[np.ndarray],
-        transforms: List[Any],
+        scenes: list[np.ndarray],
+        transforms: list[Any],
         out_transform: Any,
-        order: List[int],
-        nodata: Optional[float],
+        order: list[int],
+        nodata: float | None,
     ) -> np.ndarray:
         """Merge using maximum values."""
         for idx in order:
@@ -688,11 +696,11 @@ class SceneMerger(ComposableComponent):
     def _min_merge(
         self,
         output: np.ndarray,
-        scenes: List[np.ndarray],
-        transforms: List[Any],
+        scenes: list[np.ndarray],
+        transforms: list[Any],
         out_transform: Any,
-        order: List[int],
-        nodata: Optional[float],
+        order: list[int],
+        nodata: float | None,
     ) -> np.ndarray:
         """Merge using minimum values."""
         # Similar to max but using minimum
@@ -731,11 +739,11 @@ class SceneMerger(ComposableComponent):
     def _mean_merge(
         self,
         output: np.ndarray,
-        scenes: List[np.ndarray],
-        transforms: List[Any],
+        scenes: list[np.ndarray],
+        transforms: list[Any],
         out_transform: Any,
-        order: List[int],
-        nodata: Optional[float],
+        order: list[int],
+        nodata: float | None,
     ) -> np.ndarray:
         """Merge using mean values."""
         # Initialize sum and count arrays
@@ -816,13 +824,13 @@ class DateRangeSelector(ComposableComponent):
     def __init__(
         self,
         name: str = "date_range_selector",
-        target_date: Optional[datetime] = None,
-        date_range: Optional[Tuple[datetime, datetime]] = None,
-        max_days_from_target: Optional[int] = None,
-        season_filter: Optional[List[str]] = None,
-        cloud_threshold: Optional[float] = None,
+        target_date: datetime | None = None,
+        date_range: tuple[datetime, datetime] | None = None,
+        max_days_from_target: int | None = None,
+        season_filter: list[str] | None = None,
+        cloud_threshold: float | None = None,
         min_scenes: int = 1,
-        max_scenes: Optional[int] = None,
+        max_scenes: int | None = None,
     ):
         """Initialize date range selector.
 
@@ -869,10 +877,10 @@ class DateRangeSelector(ComposableComponent):
 
     def select_scenes(
         self,
-        scene_dates: List[datetime],
-        scene_metadata: Optional[List[Dict[str, Any]]] = None,
-        quality_scores: Optional[List[float]] = None,
-    ) -> List[int]:
+        scene_dates: list[datetime],
+        scene_metadata: list[dict[str, Any]] | None = None,
+        quality_scores: list[float] | None = None,
+    ) -> list[int]:
         """Select scene indices based on date criteria.
 
         Args:
@@ -940,7 +948,11 @@ class DateRangeSelector(ComposableComponent):
             candidates.sort(key=lambda i: quality_scores[i], reverse=True)
         elif self.target_date:
             # Sort by distance from target date
-            candidates.sort(key=lambda i: abs((scene_dates[i] - self.target_date).days))
+            candidates.sort(
+                key=lambda i: abs((scene_dates[i] - self.target_date).days)
+                if self.target_date
+                else 0
+            )
 
         # Apply maximum scenes limit
         if self.max_scenes and len(candidates) > self.max_scenes:

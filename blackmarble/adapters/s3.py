@@ -1,13 +1,13 @@
 """S3 storage adapter implementation."""
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Any
 from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 from botocore.config import Config
 
-from .base import StorageAdapter, StorageError
+from .base import StorageError
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class S3Adapter:
             )
 
     def download(
-        self, bucket: str, key: str, local_path: Optional[Path] = None
+        self, bucket: str, key: str, local_path: Path | None = None
     ) -> bytes:
         """Download object from S3.
 
@@ -154,7 +154,7 @@ class S3Adapter:
         except Exception:
             return False
 
-    def list_objects(self, bucket: str, prefix: str = "") -> List[str]:
+    def list_objects(self, bucket: str, prefix: str = "") -> list[str]:
         """List objects in S3 bucket with given prefix.
 
         Args:
@@ -228,7 +228,7 @@ class S3Adapter:
         except Exception as e:
             raise StorageError(f"Unexpected error uploading to S3: {e}")
 
-    def get_object_info(self, bucket: str, key: str) -> Dict[str, Any]:
+    def get_object_info(self, bucket: str, key: str) -> dict[str, Any]:
         """Get object metadata without downloading.
 
         Args:

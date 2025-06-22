@@ -4,7 +4,7 @@ This module defines the interfaces and data structures used by all
 quality control components in the Black Marble pipeline.
 """
 
-from typing import Protocol, Optional, Dict, Any, Tuple, List
+from typing import Protocol, Any, cast
 from dataclasses import dataclass
 import numpy as np
 
@@ -20,8 +20,8 @@ class MaskResult:
     """
 
     mask: np.ndarray
-    statistics: Dict[str, Any]
-    metadata: Optional[Dict[str, Any]] = None
+    statistics: dict[str, Any]
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass
@@ -40,11 +40,11 @@ class QualityStatistics:
     valid_pixels: int
     invalid_pixels: int
     valid_percentage: float
-    categories: Optional[Dict[str, int]] = None
+    categories: dict[str, int] | None = None
 
     @classmethod
     def from_mask(
-        cls, mask: np.ndarray, categories: Optional[Dict[str, int]] = None
+        cls, mask: np.ndarray, categories: dict[str, int] | None = None
     ) -> "QualityStatistics":
         """Create statistics from a mask array.
 
@@ -68,6 +68,16 @@ class QualityStatistics:
             categories=categories,
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert statistics to dictionary."""
+        return {
+            "total_pixels": self.total_pixels,
+            "valid_pixels": self.valid_pixels,
+            "invalid_pixels": self.invalid_pixels,
+            "valid_percentage": self.valid_percentage,
+            "categories": self.categories,
+        }
+
 
 class QualityComponent(Protocol):
     """Protocol for quality control components.
@@ -88,7 +98,7 @@ class QualityComponent(Protocol):
         """
         ...
 
-    def get_config(self) -> Dict[str, Any]:
+    def get_config(self) -> dict[str, Any]:
         """Get the current configuration of the component.
 
         Returns:
@@ -107,9 +117,9 @@ class ComposableComponent(QualityComponent):
             name: Name of the component for identification
         """
         self.name = name
-        self._config: Dict[str, Any] = {}
+        self._config: dict[str, Any] = {}
 
-    def get_config(self) -> Dict[str, Any]:
+    def get_config(self) -> dict[str, Any]:
         """Get the current configuration."""
         return self._config.copy()
 
@@ -118,7 +128,7 @@ class ComposableComponent(QualityComponent):
         return f"{self.__class__.__name__}(name='{self.name}')"
 
 
-def combine_masks(masks: List[np.ndarray], method: str = "and") -> np.ndarray:
+def combine_masks(masks: list[np.ndarray], method: str = "and") -> np.ndarray:
     """Combine multiple masks using the specified method.
 
     Args:
@@ -200,7 +210,7 @@ def dilate_mask(mask: np.ndarray, radius: int = 1) -> np.ndarray:
     return result
 
 
-def mask_to_indices(mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def mask_to_indices(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Convert a boolean mask to array indices.
 
     Args:
@@ -209,7 +219,8 @@ def mask_to_indices(mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     Returns:
         Tuple of (row_indices, col_indices) for True values
     """
-    return np.where(mask > 0)
+    indices = np.where(mask > 0)
+    return cast(tuple[np.ndarray, np.ndarray], indices)
 
 
 def apply_mask(

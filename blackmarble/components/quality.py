@@ -4,7 +4,7 @@ This module provides modular components for quality assessment and masking,
 extracted from the main pipeline for better testability and reusability.
 """
 
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import Any
 from dataclasses import dataclass
 import numpy as np
 
@@ -31,7 +31,7 @@ class CloudMasker(ComposableComponent):
         name: str = "cloud_masker",
         strategy: str = "conservative",
         dilate_radius: int = 0,
-        config: Optional[LandsatConfig] = None,
+        config: LandsatConfig | None = None,
     ):
         """Initialize CloudMasker.
 
@@ -122,7 +122,7 @@ class AerosolMasker(ComposableComponent):
         self,
         name: str = "aerosol_masker",
         threshold: str = "standard",
-        config: Optional[LandsatConfig] = None,
+        config: LandsatConfig | None = None,
     ):
         """Initialize AerosolMasker.
 
@@ -197,7 +197,7 @@ class RadianceSaturationMasker(ComposableComponent):
         self._config = {}
 
     def process(
-        self, data: np.ndarray, band: Optional[int] = None, **kwargs
+        self, data: np.ndarray, band: int | None = None, **kwargs
     ) -> MaskResult:
         """Process QA_RADSAT band to create saturation masks.
 
@@ -280,7 +280,7 @@ class VIIRSQualityMasker(ComposableComponent):
     """Component for masking VIIRS nighttime lights based on quality flags."""
 
     def __init__(
-        self, name: str = "viirs_quality_masker", config: Optional[VIIRSConfig] = None
+        self, name: str = "viirs_quality_masker", config: VIIRSConfig | None = None
     ):
         """Initialize VIIRSQualityMasker.
 
@@ -335,7 +335,7 @@ class QualityCompositor(ComposableComponent):
     def __init__(
         self,
         name: str = "quality_compositor",
-        components: Optional[List[ComposableComponent]] = None,
+        components: list[ComposableComponent] | None = None,
         combination_method: str = "and",
     ):
         """Initialize QualityCompositor.
@@ -363,7 +363,7 @@ class QualityCompositor(ComposableComponent):
         self.components.append(component)
         self._config["components"].append(component.name)
 
-    def process(self, data: Dict[str, np.ndarray], **kwargs) -> MaskResult:
+    def process(self, data: dict[str, np.ndarray], **kwargs) -> MaskResult:  # type: ignore[override]
         """Process multiple QA bands through their respective components.
 
         Args:
@@ -418,7 +418,7 @@ class MaskStatistics(ComposableComponent):
             name: Component name
         """
         super().__init__(name)
-        self.history: List[Dict[str, Any]] = []
+        self.history: list[dict[str, Any]] = []
         self._config = {}
 
     def process(
@@ -448,7 +448,7 @@ class MaskStatistics(ComposableComponent):
 
         return MaskResult(mask=data, statistics=stats.__dict__, metadata=metadata)
 
-    def get_summary(self) -> Dict[str, Any]:
+    def get_summary(self) -> dict[str, Any]:
         """Get summary of all tracked masks.
 
         Returns:
@@ -480,7 +480,7 @@ class MaskStatistics(ComposableComponent):
 def create_landsat_qa_pipeline(
     strategy: str = "conservative",
     dilate_clouds: int = 0,
-    config: Optional[LandsatConfig] = None,
+    config: LandsatConfig | None = None,
 ) -> QualityCompositor:
     """Create a standard Landsat quality assessment pipeline.
 

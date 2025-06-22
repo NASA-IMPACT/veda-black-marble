@@ -1,6 +1,6 @@
 """Base data source interface."""
 
-from typing import Protocol, Dict, Any, Tuple, List, Optional
+from typing import Protocol, Any
 from datetime import datetime
 import numpy as np
 from pathlib import Path
@@ -15,11 +15,11 @@ class DataSource(Protocol):
 
     def fetch(
         self,
-        bbox: Tuple[float, float, float, float],
+        bbox: tuple[float, float, float, float],
         start_date: datetime,
         end_date: datetime,
         **kwargs,
-    ) -> Dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """Fetch data for given spatial and temporal bounds.
 
         Args:
@@ -36,7 +36,7 @@ class DataSource(Protocol):
         """
         ...
 
-    def get_metadata(self) -> Dict[str, Any]:
+    def get_metadata(self) -> dict[str, Any]:
         """Get metadata about the data source.
 
         Returns:
@@ -51,7 +51,7 @@ class DataSource(Protocol):
 
     def validate_request(
         self,
-        bbox: Tuple[float, float, float, float],
+        bbox: tuple[float, float, float, float],
         start_date: datetime,
         end_date: datetime,
     ) -> None:

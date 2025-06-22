@@ -6,7 +6,7 @@ replace the existing projection, resampling, and compositing logic.
 
 import numpy as np
 from pathlib import Path
-from typing import List, Tuple, Dict, Any
+from typing import Any
 from datetime import datetime
 from rasterio.transform import Affine
 
@@ -23,13 +23,13 @@ from blackmarble.adapters.raster_io import GDALRasterAdapter
 
 
 def process_landsat_with_components(
-    band_files: List[str],
-    qa_files: List[str],
-    target_bounds: Tuple[float, float, float, float],
+    band_files: list[str],
+    qa_files: list[str],
+    target_bounds: tuple[float, float, float, float],
     target_crs: str = "EPSG:4326",
     target_resolution: float = 0.0001,
     composite_method: str = "median",
-) -> Tuple[np.ndarray, Dict[str, Any]]:
+) -> tuple[np.ndarray, dict[str, Any]]:
     """Process Landsat data using modular components.
 
     This replaces the existing pipeline logic with component-based approach.
@@ -130,10 +130,10 @@ def process_landsat_with_components(
 
 
 def merge_landsat_scenes_with_components(
-    scene_files: List[List[str]],  # List of [B3, B4, B5] for each scene
-    scene_bounds: List[Tuple[float, float, float, float]],
-    output_bounds: Tuple[float, float, float, float],
-) -> Dict[str, np.ndarray]:
+    scene_files: list[list[str]],  # List of [B3, B4, B5] for each scene
+    scene_bounds: list[tuple[float, float, float, float]],
+    output_bounds: tuple[float, float, float, float],
+) -> dict[str, np.ndarray]:
     """Merge multiple Landsat scenes using SceneMerger component.
 
     Args:

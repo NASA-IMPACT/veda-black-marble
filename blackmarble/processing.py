@@ -6,7 +6,6 @@ enables better testing, profiling, and parallelization.
 """
 
 import numpy as np
-from typing import Dict, Tuple, Optional, List
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import warnings
 
@@ -68,8 +67,8 @@ def extract_water_mask(qa_pixel: np.ndarray) -> np.ndarray:
 
 
 def process_landsat_bands(
-    bands: Dict[str, np.ndarray], config: Optional[LandsatConfig] = None
-) -> Dict[str, np.ndarray]:
+    bands: dict[str, np.ndarray], config: LandsatConfig | None = None
+) -> dict[str, np.ndarray]:
     """Process Landsat bands to calculate indices and masks.
 
     Args:
@@ -114,7 +113,7 @@ def process_viirs_ntl(
     ntl: np.ndarray,
     lunar: np.ndarray,
     quality: np.ndarray,
-    config: Optional[VIIRSConfig] = None,
+    config: VIIRSConfig | None = None,
 ) -> np.ndarray:
     """Process VIIRS nighttime lights with lunar correction.
 
@@ -135,7 +134,7 @@ def compute_ndui_enhanced(
     ndvi: np.ndarray,
     ndwi: np.ndarray,
     roads: np.ndarray,
-    config: Optional[NDUIConfig] = None,
+    config: NDUIConfig | None = None,
 ) -> np.ndarray:
     """Compute NDUI with all enhancements.
 
@@ -153,7 +152,7 @@ def compute_ndui_enhanced(
 
 
 def create_quality_composite(
-    masks: Dict[str, np.ndarray], combination: str = "and"
+    masks: dict[str, np.ndarray], combination: str = "and"
 ) -> np.ndarray:
     """Combine multiple quality masks.
 
@@ -182,11 +181,11 @@ def create_quality_composite(
 
 
 def process_scene_data(
-    landsat_bands: Dict[str, np.ndarray],
-    viirs_data: Dict[str, np.ndarray],
+    landsat_bands: dict[str, np.ndarray],
+    viirs_data: dict[str, np.ndarray],
     roads: np.ndarray,
-    config: Optional[ProcessingConfig] = None,
-) -> Dict[str, np.ndarray]:
+    config: ProcessingConfig | None = None,
+) -> dict[str, np.ndarray]:
     """Process complete scene data through the pipeline.
 
     This is the main processing function that combines all components.
@@ -259,7 +258,7 @@ def process_tiles_parallel(
     process_func,
     tile_size: int = 256,
     overlap: int = 0,
-    n_workers: Optional[int] = None,
+    n_workers: int | None = None,
     **kwargs,
 ) -> np.ndarray:
     """Process large array in parallel tiles.
@@ -334,10 +333,10 @@ def process_tiles_parallel(
 
 
 def process_temporal_stack(
-    temporal_data: List[Dict[str, np.ndarray]],
+    temporal_data: list[dict[str, np.ndarray]],
     method: str = "median",
     min_valid: int = 3,
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """Process temporal stack of scenes.
 
     Args:

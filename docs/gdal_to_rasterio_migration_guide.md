@@ -41,7 +41,7 @@ This guide documents the migration from GDAL to rasterio in the Black Marble pip
 
 ```
 blackmarble/
-├── io.py                    # Original GDAL implementation
+├── io.py                   # Original GDAL implementation
 ├── io_rasterio.py          # Rasterio implementation
 ├── io_compat.py            # Compatibility layer
 ├── reproj.py               # Original GDAL reprojection

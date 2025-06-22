@@ -1,10 +1,9 @@
 """Mock adapters for testing."""
 
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any
 from pathlib import Path
 import numpy as np
-from datetime import datetime
 
 from .base import (
     StorageAdapter,
@@ -31,7 +30,7 @@ class MockS3Adapter(StorageAdapter):
         self.fail_on_next_call = False  # For testing error handling
 
     def download(
-        self, bucket: str, key: str, local_path: Optional[Path] = None
+        self, bucket: str, key: str, local_path: Path | None = None
     ) -> bytes:
         """Mock download from S3."""
         self.calls.append(("download", bucket, key, local_path))
@@ -70,7 +69,7 @@ class MockS3Adapter(StorageAdapter):
         self.calls.append(("exists", bucket, key))
         return bucket in self.storage and key in self.storage.get(bucket, {})
 
-    def list_objects(self, bucket: str, prefix: str = "") -> List[str]:
+    def list_objects(self, bucket: str, prefix: str = "") -> list[str]:
         """List mock objects with prefix."""
         self.calls.append(("list_objects", bucket, prefix))
 
@@ -107,7 +106,7 @@ class MockNASAAPIAdapter(APIAdapter):
         self.authenticated = False
         self.fail_on_next_call = False
 
-    def search(self, **params) -> List[Dict[str, Any]]:
+    def search(self, **params) -> list[dict[str, Any]]:
         """Mock granule search."""
         self.calls.append(("search", params))
 
@@ -127,7 +126,7 @@ class MockNASAAPIAdapter(APIAdapter):
 
         return results
 
-    def download(self, resource_id: str, output_path: Optional[Path] = None) -> bytes:
+    def download(self, resource_id: str, output_path: Path | None = None) -> bytes:
         """Mock resource download."""
         self.calls.append(("download", resource_id, output_path))
 
@@ -147,7 +146,7 @@ class MockNASAAPIAdapter(APIAdapter):
 
         return data
 
-    def authenticate(self, credentials: Dict[str, str]) -> None:
+    def authenticate(self, credentials: dict[str, str]) -> None:
         """Mock authentication."""
         self.calls.append(("authenticate", credentials))
 
@@ -156,7 +155,7 @@ class MockNASAAPIAdapter(APIAdapter):
         else:
             raise APIError("Invalid credentials")
 
-    def add_mock_granule(self, granule: Dict[str, Any]) -> None:
+    def add_mock_granule(self, granule: dict[str, Any]) -> None:
         """Add granule to mock results."""
         self.mock_granules.append(granule)
 
@@ -178,8 +177,8 @@ class MockRasterAdapter(RasterAdapter):
         self.fail_on_next_call = False
 
     def read(
-        self, path: Path, band: Optional[int] = None
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        self, path: Path, band: int | None = None
+    ) -> tuple[np.ndarray, dict[str, Any]]:
         """Mock raster read."""
         self.calls.append(("read", str(path), band))
 
@@ -206,7 +205,7 @@ class MockRasterAdapter(RasterAdapter):
         self,
         path: Path,
         data: np.ndarray,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         compress: bool = True,
     ) -> None:
         """Mock raster write."""
@@ -218,7 +217,7 @@ class MockRasterAdapter(RasterAdapter):
 
         self.mock_files[str(path)] = (data.copy(), metadata.copy())
 
-    def get_info(self, path: Path) -> Dict[str, Any]:
+    def get_info(self, path: Path) -> dict[str, Any]:
         """Get mock raster info."""
         self.calls.append(("get_info", str(path)))
 
@@ -238,9 +237,9 @@ class MockRasterAdapter(RasterAdapter):
         self,
         source_path: Path,
         target_crs: str,
-        output_path: Optional[Path] = None,
-        resolution: Optional[Tuple[float, float]] = None,
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        output_path: Path | None = None,
+        resolution: tuple[float, float] | None = None,
+    ) -> tuple[np.ndarray, dict[str, Any]]:
         """Mock reprojection."""
         self.calls.append(
             ("reproject", str(source_path), target_crs, output_path, resolution)
@@ -264,7 +263,7 @@ class MockRasterAdapter(RasterAdapter):
         return data.copy(), new_metadata
 
     def add_mock_file(
-        self, path: str, data: np.ndarray, metadata: Dict[str, Any]
+        self, path: str, data: np.ndarray, metadata: dict[str, Any]
     ) -> None:
         """Add file to mock storage."""
         self.mock_files[path] = (data.copy(), metadata.copy())

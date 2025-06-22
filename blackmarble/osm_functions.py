@@ -1,7 +1,7 @@
 """Pure functions for OSM road data processing - testable components."""
 
 import numpy as np
-from typing import List, Tuple, Dict, Any, Optional
+from typing import Any
 import osmnx as ox
 import networkx as nx
 import shapely.geometry
@@ -14,7 +14,7 @@ def download_osm_roads(
     south: float,
     east: float,
     west: float,
-    road_filter: Optional[str] = None,
+    road_filter: str | None = None,
 ) -> nx.MultiDiGraph:
     """
     Download OSM road network for a bounding box.
@@ -55,7 +55,7 @@ def download_osm_roads(
 
 def graph_to_shapes(
     G: nx.MultiDiGraph, buffer_distance: float = 0.00005
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Convert NetworkX road graph to buffered polygon shapes.
 
@@ -83,7 +83,7 @@ def graph_to_shapes(
 
 
 def rasterize_shapes(
-    shapes: List[Dict[str, Any]],
+    shapes: list[dict[str, Any]],
     height: int,
     width: int,
     transform: Affine,
@@ -133,7 +133,7 @@ def create_multi_type_road_raster(
     width: int,
     transform: Affine,
     buffer_distance: float = 0.00005,
-    road_filters: Optional[List[Tuple[str, int]]] = None,
+    road_filters: list[tuple[str, int]] | None = None,
 ) -> np.ndarray:
     """
     Create a raster with different road types having different values.

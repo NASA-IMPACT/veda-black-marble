@@ -6,7 +6,6 @@ numpy arrays and return new arrays without modifying inputs.
 """
 
 import numpy as np
-from typing import Optional
 
 from .config import NDUIConfig, VIIRSConfig, LandsatConfig
 
@@ -78,7 +77,7 @@ def calculate_ndui(
     ndvi: np.ndarray,
     ndwi: np.ndarray,
     roads: np.ndarray,
-    config: Optional[NDUIConfig] = None,
+    config: NDUIConfig | None = None,
 ) -> np.ndarray:
     """Calculate Normalized Difference Urban Index (NDUI).
 
@@ -145,7 +144,7 @@ def apply_lunar_correction(
     ntl: np.ndarray,
     lunar_irradiance: np.ndarray,
     quality_flags: np.ndarray,
-    config: Optional[VIIRSConfig] = None,
+    config: VIIRSConfig | None = None,
 ) -> np.ndarray:
     """Apply lunar irradiance correction to nighttime lights.
 
@@ -202,8 +201,8 @@ def apply_lunar_correction(
 
 def scale_landsat_to_reflectance(
     band_data: np.ndarray,
-    config: Optional[LandsatConfig] = None,
-    nodata_value: Optional[float] = None,
+    config: LandsatConfig | None = None,
+    nodata_value: float | None = None,
 ) -> np.ndarray:
     """Scale Landsat Collection 2 DN values to surface reflectance.
 
@@ -318,8 +317,8 @@ def normalize_to_range(
     data: np.ndarray,
     output_min: float = 0.0,
     output_max: float = 1.0,
-    input_min: Optional[float] = None,
-    input_max: Optional[float] = None,
+    input_min: float | None = None,
+    input_max: float | None = None,
 ) -> np.ndarray:
     """Normalize array values to specified range.
 
@@ -343,9 +342,9 @@ def normalize_to_range(
         array([0. , 0.5, 1. ])
     """
     if input_min is None:
-        input_min = np.nanmin(data)
+        input_min = float(np.nanmin(data))
     if input_max is None:
-        input_max = np.nanmax(data)
+        input_max = float(np.nanmax(data))
 
     # Handle case where all values are the same
     if input_max == input_min:

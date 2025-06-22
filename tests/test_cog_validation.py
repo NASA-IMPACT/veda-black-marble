@@ -11,6 +11,7 @@ This module tests that generated COGs meet all requirements for cloud optimizati
 import tempfile
 import numpy as np
 import rasterio
+import rasterio.windows
 from rasterio.transform import Affine
 from pathlib import Path
 import pytest
@@ -32,7 +33,7 @@ class TestCOGValidation:
             transform=Affine(0.1, 0, -180, 0, -0.1, 90),
             bounds=(-180, 38.8, -128.8, 90),
             shape=(512, 512),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -71,7 +72,7 @@ class TestCOGValidation:
             transform=Affine(0.01, 0, -180, 0, -0.01, 90),
             bounds=(-180, 79.76, -169.76, 90),
             shape=(1024, 1024),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -114,7 +115,7 @@ class TestCOGValidation:
             transform=Affine(0.1, 0, -180, 0, -0.1, 90),
             bounds=(-180, 64.4, -154.4, 90),
             shape=(256, 256),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         for profile_name in profiles:
@@ -167,7 +168,7 @@ class TestCOGValidation:
             transform=Affine(100, 0, -20037508, 0, -100, 20037508),
             bounds=(-20037508, 20037508 - 51200, -20037508 + 51200, 20037508),
             shape=(512, 512),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -208,7 +209,7 @@ class TestCOGValidation:
             transform=Affine(0.1, 0, -180, 0, -0.1, 90),
             bounds=(-180, 64.4, -154.4, 90),
             shape=(256, 256),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
             nodata=-999.0,
         )
 
@@ -249,7 +250,7 @@ class TestCOGValidation:
             transform=Affine(0.1, 0, -180, 0, -0.1, 90),
             bounds=(-180, 38.8, -128.8, 90),
             shape=(512, 512),
-            dtype=np.uint16,
+            dtype=np.dtype(np.uint16),
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -286,7 +287,7 @@ class TestCOGValidation:
             transform=Affine(10, 0, -20037508, 0, -10, 20037508),
             bounds=(-20037508, 20037508 - 10240, -20037508 + 10240, 20037508),
             shape=(1024, 1024),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -296,7 +297,7 @@ class TestCOGValidation:
             with rasterio.open(result_path) as src:
                 # Test partial read capability (important for COG)
                 # Read a small window without loading entire file
-                window = rasterio.windows.Window(100, 100, 50, 50)
+                window = rasterio.windows.Window.from_slices((100, 150), (100, 150))
                 subset = src.read(1, window=window)
 
                 assert subset.shape == (50, 50), "Should be able to read partial window"
@@ -323,7 +324,7 @@ class TestCOGValidation:
             transform=Affine(0.1, 0, -180, 0, -0.1, 90),
             bounds=(-180, 38.8, -128.8, 90),
             shape=(512, 512),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -355,7 +356,7 @@ class TestCOGValidation:
                 transform=Affine(1, 0, 0, 0, -1, 0),
                 bounds=(0, 0, 10, 10),
                 shape=(10, 10),
-                dtype=np.float32,
+                dtype=np.dtype(np.float32),
             )
             with tempfile.TemporaryDirectory() as tmpdir:
                 output_path = Path(tmpdir) / "test_error.tif"
@@ -379,7 +380,7 @@ class TestCOGValidation:
             transform=Affine(0.1, 0, -180, 0, -0.1, 90),
             bounds=(-180, 64.4, -154.4, 90),
             shape=(256, 256),
-            dtype=np.uint8,
+            dtype=np.dtype(np.uint8),
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -4,7 +4,7 @@ This module provides components for coordinate system transformations,
 resampling, cropping, and spatial alignment of raster data.
 """
 
-from typing import Dict, Any, Tuple, Optional, List, Union
+from typing import Any
 from dataclasses import dataclass
 import numpy as np
 from osgeo import gdal, osr
@@ -31,8 +31,8 @@ class SpatialResult:
     data: np.ndarray
     transform: Affine
     crs: str
-    bounds: Tuple[float, float, float, float]
-    metadata: Optional[Dict[str, Any]] = None
+    bounds: tuple[float, float, float, float]
+    metadata: dict[str, Any] | None = None
 
 
 class ProjectionHandler(ComposableComponent):
@@ -45,7 +45,7 @@ class ProjectionHandler(ComposableComponent):
     def __init__(
         self,
         name: str = "projection_handler",
-        target_crs: Optional[str] = None,
+        target_crs: str | None = None,
         resampling: str = "bilinear",
     ):
         """Initialize projection handler.
@@ -103,9 +103,13 @@ class ProjectionHandler(ComposableComponent):
             bounds = (west, south, east, north)
 
         # Calculate transform for target CRS
-        dst_transform, dst_width, dst_height = calculate_default_transform(
+        result = calculate_default_transform(
             source_crs, self.target_crs, width, height, *bounds
         )
+        dst_transform = result[0]
+        assert result[1] is not None and result[2] is not None
+        dst_width = int(result[1])
+        dst_height = int(result[2])
 
         # Create output array
         if data.ndim == 2:
@@ -183,7 +187,7 @@ class ResolutionResampler(ComposableComponent):
     def __init__(
         self,
         name: str = "resolution_resampler",
-        target_resolution: Optional[Tuple[float, float]] = None,
+        target_resolution: tuple[float, float] | None = None,
         method: str = "bilinear",
     ):
         """Initialize resolution resampler.
@@ -306,34 +310,41 @@ class ResolutionResampler(ComposableComponent):
         data: np.ndarray,
         new_width: int,
         new_height: int,
-        transform: Affine = None,
-        nodata: Optional[float] = None,
-        method: Optional[str] = None,
+        transform: Affine | None = None,
+        nodata: float | None = None,
+        method: str | None = None,
     ) -> np.ndarray:
         """Resample a 2D array using scipy/rasterio."""
         # Import here to allow gradual migration
         try:
             from .preprocessing_rasterio import resample_array
+
             use_method = method or self.method
-            return resample_array(
-                data, new_width, new_height, 
-                transform, nodata, use_method
-            )
+            if transform is not None:
+                return resample_array(
+                    data, new_width, new_height, transform, nodata, use_method
+                )
+            else:
+                # Use identity transform if none provided
+                from rasterio.transform import Affine as RioAffine
+                identity = RioAffine.identity()
+                return resample_array(
+                    data, new_width, new_height, identity, nodata, use_method
+                )
         except ImportError:
             # Fall back to GDAL implementation
             return self._resample_array_gdal(
-                data, new_width, new_height, 
-                transform, nodata, method
+                data, new_width, new_height, transform, nodata, method
             )
-    
+
     def _resample_array_gdal(
         self,
         data: np.ndarray,
         new_width: int,
         new_height: int,
-        transform: Affine = None,
-        nodata: Optional[float] = None,
-        method: Optional[str] = None,
+        transform: Affine | None = None,
+        nodata: float | None = None,
+        method: str | None = None,
     ) -> np.ndarray:
         """Original GDAL implementation kept as fallback."""
         # Create in-memory dataset
@@ -414,7 +425,7 @@ class BoundsCropper(ComposableComponent):
     def __init__(
         self,
         name: str = "bounds_cropper",
-        bounds: Optional[Tuple[float, float, float, float]] = None,
+        bounds: tuple[float, float, float, float] | None = None,
         buffer: float = 0.0,
         buffer_units: str = "crs",
     ):
@@ -575,10 +586,10 @@ class SpatialAligner(ComposableComponent):
 
     def align_rasters(
         self,
-        rasters: List[np.ndarray],
-        transforms: List[Affine],
-        crs_list: Optional[List[str]] = None,
-    ) -> List[SpatialResult]:
+        rasters: list[np.ndarray],
+        transforms: list[Affine],
+        crs_list: list[str] | None = None,
+    ) -> list[SpatialResult]:
         """Align multiple rasters to common grid.
 
         Args:
@@ -652,10 +663,10 @@ class SpatialAligner(ComposableComponent):
         self,
         data: np.ndarray,
         src_transform: Affine,
-        ref_shape: Tuple[int, int],
+        ref_shape: tuple[int, int],
         ref_transform: Affine,
-        src_crs: Optional[str],
-        ref_crs: Optional[str],
+        src_crs: str | None,
+        ref_crs: str | None,
     ) -> np.ndarray:
         """Align a single raster to reference grid."""
         # Map resampling methods

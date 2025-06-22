@@ -5,7 +5,7 @@ to replace the masking logic in the main pipeline.
 """
 
 import numpy as np
-from typing import List, Tuple, Dict
+from typing import Any
 
 from .quality import (
     CloudMasker,
@@ -22,7 +22,7 @@ from ..config import ProcessingConfig
 
 def process_landsat_qa_traditional(
     qa_pixel: np.ndarray, qa_aerosol: np.ndarray, qa_radsat: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray, Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+) -> tuple[np.ndarray, np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """Traditional approach using the old mask functions.
 
     This shows what the current pipeline does.
@@ -44,8 +44,8 @@ def process_landsat_qa_components(
     qa_pixel: np.ndarray,
     qa_aerosol: np.ndarray,
     qa_radsat: np.ndarray,
-    config: ProcessingConfig = None,
-) -> Dict[str, any]:
+    config: ProcessingConfig | None = None,
+) -> dict[str, Any]:
     """New approach using quality control components.
 
     This demonstrates the cleaner, more modular approach.
@@ -97,10 +97,10 @@ def process_landsat_qa_components(
 
 
 def apply_masks_to_bands(
-    bands: List[np.ndarray],
-    qa_masks: Dict[str, np.ndarray],
-    config: ProcessingConfig = None,
-) -> List[np.ndarray]:
+    bands: list[np.ndarray],
+    qa_masks: dict[str, np.ndarray],
+    config: ProcessingConfig | None = None,
+) -> list[np.ndarray]:
     """Apply quality masks to Landsat bands.
 
     This replaces the masking logic in the pipeline.
@@ -121,8 +121,8 @@ def apply_masks_to_bands(
 
 
 def process_viirs_quality(
-    quality_flags: np.ndarray, config: ProcessingConfig = None
-) -> Dict[str, any]:
+    quality_flags: np.ndarray, config: ProcessingConfig | None = None
+) -> dict[str, Any]:
     """Process VIIRS quality flags using components.
 
     This demonstrates quality control for nighttime lights.
@@ -143,7 +143,9 @@ def process_viirs_quality(
     }
 
 
-def create_quality_report(qa_results: Dict[str, any], output_path: str = None) -> str:
+def create_quality_report(
+    qa_results: dict[str, Any], output_path: str | None = None
+) -> str:
     """Generate a quality control report.
 
     This demonstrates the reporting capabilities of the components.
@@ -216,8 +218,8 @@ def create_landsat_mask(
     qa_pixel: np.ndarray,
     qa_aerosol: np.ndarray,
     qa_radsat: np.ndarray,
-    config: ProcessingConfig = None,
-) -> Tuple[np.ndarray, Dict[str, any]]:
+    config: ProcessingConfig | None = None,
+) -> tuple[np.ndarray, dict[str, Any]]:
     """Drop-in replacement for the masking logic in pipeline.py.
 
     This function can replace the mark_cloud, mark_aerosol, and mark_radsat
@@ -249,7 +251,9 @@ def create_landsat_mask(
     statistics = {
         "combined": combined_result.statistics,
         "radsat": radsat_result.statistics,
-        "component_stats": combined_result.metadata["component_statistics"],
+        "component_stats": combined_result.metadata.get("component_statistics", {})
+        if combined_result.metadata
+        else {},
     }
 
     return combined_result.mask, statistics

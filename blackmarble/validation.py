@@ -5,14 +5,14 @@ and ensure processing requirements are met throughout the pipeline.
 """
 
 import numpy as np
-from typing import Tuple, Dict, List, Optional
+from typing import Any
 
 
 def validate_reflectance_range(
     data: np.ndarray,
     band_name: str = "band",
-    valid_range: Tuple[float, float] = (0.0, 1.0),
-) -> Dict[str, float]:
+    valid_range: tuple[float, float] = (0.0, 1.0),
+) -> dict[str, str | int | float]:
     """Validate that reflectance values are in expected range.
 
     Surface reflectance should typically be between 0 and 1, though
@@ -51,21 +51,21 @@ def validate_reflectance_range(
 
     return {
         "band": band_name,
-        "total_pixels": data.size,
-        "valid_pixels": valid_mask.sum(),
-        "valid_percentage": 100.0 * valid_mask.sum() / data.size,
-        "min_value": np.min(valid_data) if valid_data.size > 0 else np.nan,
-        "max_value": np.max(valid_data) if valid_data.size > 0 else np.nan,
-        "mean_value": np.mean(valid_data) if valid_data.size > 0 else np.nan,
-        "out_of_range": out_of_range,
+        "total_pixels": int(data.size),
+        "valid_pixels": int(valid_mask.sum()),
+        "valid_percentage": float(100.0 * valid_mask.sum() / data.size),
+        "min_value": float(np.min(valid_data)) if valid_data.size > 0 else np.nan,
+        "max_value": float(np.max(valid_data)) if valid_data.size > 0 else np.nan,
+        "mean_value": float(np.mean(valid_data)) if valid_data.size > 0 else np.nan,
+        "out_of_range": int(out_of_range),
     }
 
 
 def check_data_coverage(
     data: np.ndarray,
     min_valid_percentage: float = 10.0,
-    mask: Optional[np.ndarray] = None,
-) -> Tuple[bool, float]:
+    mask: np.ndarray | None = None,
+) -> tuple[bool, float]:
     """Check if data has sufficient valid pixel coverage.
 
     This is used to ensure there's enough valid data to proceed
@@ -102,7 +102,7 @@ def validate_index_range(
     index_name: str,
     expected_min: float = -1.0,
     expected_max: float = 1.0,
-) -> Dict[str, any]:
+) -> dict[str, Any]:
     """Validate that spectral index values are within expected range.
 
     Most normalized difference indices (NDVI, NDWI) should be in [-1, 1]
@@ -155,7 +155,7 @@ def validate_index_range(
 
 def validate_nighttime_lights(
     ntl_data: np.ndarray, expected_max: float = 1.0, zero_threshold: float = 0.1
-) -> Dict[str, float]:
+) -> dict[str, int | float]:
     """Validate nighttime lights data quality.
 
     Checks for common issues with NTL data:
@@ -183,7 +183,7 @@ def validate_nighttime_lights(
 
     if valid_data.size == 0:
         return {
-            "total_pixels": ntl_data.size,
+            "total_pixels": int(ntl_data.size),
             "valid_pixels": 0,
             "dark_pixels": 0,
             "dark_percentage": 0.0,
@@ -201,13 +201,13 @@ def validate_nighttime_lights(
     mean_brightness = np.mean(non_dark_data) if non_dark_data.size > 0 else 0.0
 
     return {
-        "total_pixels": ntl_data.size,
-        "valid_pixels": valid_mask.sum(),
-        "dark_pixels": dark_pixels,
-        "dark_percentage": 100.0 * dark_pixels / valid_data.size,
-        "bright_pixels": bright_pixels,
-        "max_value": np.max(valid_data),
-        "mean_brightness": mean_brightness,
+        "total_pixels": int(ntl_data.size),
+        "valid_pixels": int(valid_mask.sum()),
+        "dark_pixels": int(dark_pixels),
+        "dark_percentage": float(100.0 * dark_pixels / valid_data.size),
+        "bright_pixels": int(bright_pixels),
+        "max_value": float(np.max(valid_data)),
+        "mean_brightness": float(mean_brightness),
     }
 
 
@@ -215,7 +215,7 @@ def validate_road_coverage(
     road_data: np.ndarray,
     min_road_percentage: float = 0.1,
     max_road_percentage: float = 50.0,
-) -> Dict[str, any]:
+) -> dict[str, Any]:
     """Validate road network coverage.
 
     Checks that road coverage is reasonable for the area.
@@ -259,10 +259,10 @@ def validate_road_coverage(
 
 
 def validate_processing_inputs(
-    bands: Dict[str, np.ndarray],
-    required_bands: List[str] = ["B3", "B4", "B5"],
+    bands: dict[str, np.ndarray],
+    required_bands: list[str] = ["B3", "B4", "B5"],
     min_coverage: float = 10.0,
-) -> Tuple[bool, List[str]]:
+) -> tuple[bool, list[str]]:
     """Validate that all required inputs are present and valid.
 
     Comprehensive check before processing to ensure all required
@@ -309,8 +309,8 @@ def validate_processing_inputs(
 
 
 def generate_quality_report(
-    data_dict: Dict[str, np.ndarray], config: Optional[dict] = None
-) -> Dict[str, any]:
+    data_dict: dict[str, np.ndarray], config: dict | None = None
+) -> dict[str, Any]:
     """Generate comprehensive quality report for processed data.
 
     Creates a summary of data quality metrics for all inputs and outputs,

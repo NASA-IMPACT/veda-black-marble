@@ -38,6 +38,7 @@ class TestTemporalCompositor:
         )
 
         result = compositor.process(data)
+        assert result.metadata is not None
         composite = result.metadata["composite"]
 
         # 75th percentile of [1,2,3,4] is 3.25
@@ -59,6 +60,7 @@ class TestTemporalCompositor:
         weights = np.array([0.2, 0.6, 0.2])
 
         result = compositor.process(data, weights=weights)
+        assert result.metadata is not None
         composite = result.metadata["composite"]
 
         # Weighted average
@@ -82,6 +84,7 @@ class TestTemporalCompositor:
         )
 
         result = compositor.process(data)
+        assert result.metadata is not None
         composite = result.metadata["composite"]
 
         # Should ignore NaN in median calculation
@@ -114,6 +117,7 @@ class TestTemporalCompositor:
         )
 
         result = compositor.process(data, quality_masks=quality_masks)
+        assert result.metadata is not None
         composite = result.metadata["composite"]
 
         # Should only use good quality data
@@ -156,6 +160,7 @@ class TestTemporalCompositor:
         )
 
         result = compositor.process(data)
+        assert result.metadata is not None
         composite = result.metadata["composite"]
 
         assert composite.shape == (2, 2, 2)  # 2 bands, 2x2
@@ -178,6 +183,7 @@ class TestTemporalCompositor:
         ]
 
         result = compositor.process(data, dates=dates)
+        assert result.metadata is not None
         coverage = result.metadata["coverage"]
 
         assert coverage["temporal_range_days"] == 9
@@ -200,6 +206,7 @@ class TestTemporalCompositor:
         )
 
         result = compositor.process(data)
+        assert result.metadata is not None
         composite = result.metadata["composite"]
 
         # Check that gaps are filled

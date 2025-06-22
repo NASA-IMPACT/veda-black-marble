@@ -141,7 +141,7 @@ class TestParallelIO:
                 transform=(0.1, 0.0, -180.0, 0.0, -0.1, 90.0),
                 bounds=(-180, 64.4, -154.4, 90),
                 shape=shape,
-                dtype=np.float32,
+                dtype=np.dtype(np.float32),
                 tags={"scene_id": str(i)},
             )
             output_path = tmp_path / f"output_{i}.tif"

@@ -2,14 +2,14 @@
 
 import logging
 import time
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any
 from pathlib import Path
 from datetime import datetime
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from .base import APIAdapter, APIError, AuthenticationError
+from .base import APIError, AuthenticationError
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class NASAEarthdataAdapter:
 
     def __init__(
         self,
-        earthdata_token: Optional[str] = None,
+        earthdata_token: str | None = None,
         timeout: int = 30,
         max_retries: int = 3,
         backoff_factor: float = 0.3,
@@ -58,7 +58,7 @@ class NASAEarthdataAdapter:
         if earthdata_token:
             self.session.headers.update({"Authorization": f"Bearer {earthdata_token}"})
 
-    def search(self, **params) -> List[Dict[str, Any]]:
+    def search(self, **params) -> list[dict[str, Any]]:
         """Search for granules using CMR API.
 
         Args:
@@ -103,7 +103,7 @@ class NASAEarthdataAdapter:
         except Exception as e:
             raise APIError(f"Unexpected error during search: {e}")
 
-    def download(self, resource_id: str, output_path: Optional[Path] = None) -> bytes:
+    def download(self, resource_id: str, output_path: Path | None = None) -> bytes:
         """Download granule data.
 
         Args:
@@ -150,7 +150,7 @@ class NASAEarthdataAdapter:
         except Exception as e:
             raise APIError(f"Unexpected error during download: {e}")
 
-    def authenticate(self, credentials: Dict[str, str]) -> None:
+    def authenticate(self, credentials: dict[str, str]) -> None:
         """Update authentication credentials.
 
         Args:
@@ -180,11 +180,11 @@ class NASAEarthdataAdapter:
         self,
         collection: str,
         version: str,
-        bbox: Tuple[float, float, float, float],
+        bbox: tuple[float, float, float, float],
         start_date: datetime,
         end_date: datetime,
-        max_results: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        max_results: int | None = None,
+    ) -> list[dict[str, Any]]:
         """Search for granules with specific parameters.
 
         Args:
@@ -235,7 +235,7 @@ class NASAEarthdataAdapter:
 
         return all_granules
 
-    def get_download_urls(self, granule: Dict[str, Any]) -> List[str]:
+    def get_download_urls(self, granule: dict[str, Any]) -> list[str]:
         """Extract download URLs from granule metadata.
 
         Args:

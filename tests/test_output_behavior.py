@@ -35,7 +35,7 @@ class TestCOGGenerator:
             transform=Affine(0.1, 0, -180, 0, -0.1, 90),
             bounds=(-180, 64.4, -154.4, 90),
             shape=(256, 256),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
             nodata=-999,
         )
 
@@ -109,14 +109,15 @@ class TestCOGGenerator:
         east = -20037508.34 + (256 * 156543.03)  # ~zoom level 0 resolution
         north = 0 + (256 * 156543.03)
 
-        transform = rasterio.transform.from_bounds(west, south, east, north, 256, 256)
+        from rasterio import transform as rio_transform
+        transform = rio_transform.from_bounds(west, south, east, north, 256, 256)
 
         metadata = OutputMetadata(
             crs="EPSG:3857",
             transform=transform,
             bounds=(west, south, east, north),
             shape=(256, 256),
-            dtype=np.uint8,
+            dtype=np.dtype(np.uint8),
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -167,7 +168,7 @@ class TestCOGGenerator:
             transform=Affine(0.1, 0, 0, 0, -0.1, 50),
             bounds=(0, 0, 51.2, 51.2),
             shape=(512, 512),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -189,7 +190,7 @@ class TestCOGGenerator:
             transform=Affine(1.0, 0, 0, 0, -1.0, 10),
             bounds=(0, 0, 10, 10),
             shape=(10, 10),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
             tags={"PROCESSING_DATE": "2023-01-15", "SENSOR": "VIIRS", "VERSION": "1.0"},
         )
 
@@ -215,7 +216,7 @@ class TestCOGGenerator:
             transform=Affine(0.01, 0, 0, 0, -0.01, 20),
             bounds=(0, 0, 20.48, 20.48),
             shape=(2048, 2048),
-            dtype=np.uint8,
+            dtype=np.dtype(np.uint8),
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -252,7 +253,7 @@ class TestMetadataGenerator:
             transform=Affine(1.0, 0, 0, 0, -1.0, 2),
             bounds=(0, 0, 3, 2),
             shape=(2, 3),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
             nodata=-999,
         )
 
@@ -281,7 +282,7 @@ class TestMetadataGenerator:
             transform=Affine(1.0, 0, 0, 0, -1.0, 3),
             bounds=(0, 0, 4, 3),
             shape=(3, 4),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         result = generator.generate(data, metadata)
@@ -304,7 +305,7 @@ class TestMetadataGenerator:
             transform=Affine(1.0, 0, 0, 0, -1.0, 2),
             bounds=(0, 0, 2, 2),
             shape=(2, 2),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         result = generator.generate(data, metadata)
@@ -327,7 +328,7 @@ class TestMetadataGenerator:
             transform=Affine(0.1, 0, -180, 0, -0.1, 90),
             bounds=(-180, 89.5, -179.5, 90),
             shape=(5, 5),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         result = generator.generate(data, metadata)
@@ -353,7 +354,7 @@ class TestMetadataGenerator:
             transform=Affine(1.0, 0, 0, 0, -1.0, 10),
             bounds=(0, 0, 10, 10),
             shape=(10, 10),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         processing_info = {
@@ -378,7 +379,7 @@ class TestMetadataGenerator:
             transform=Affine(1.0, 0, 0, 0, -1.0, 10),
             bounds=(0, 0, 10, 10),
             shape=(10, 10),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         result = generator.generate(
@@ -413,7 +414,7 @@ class TestOutputValidator:
             transform=Affine(1.0, 0, 0, 0, -1.0, 3),
             bounds=(0, 0, 3, 3),
             shape=(3, 3),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         result = validator.validate(data, metadata, expected_range=(0.0, 1.0))
@@ -434,7 +435,7 @@ class TestOutputValidator:
                 [5, 6, np.nan, np.nan],
                 [7, 8, np.nan, np.nan],
             ],
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         metadata = OutputMetadata(
@@ -442,7 +443,7 @@ class TestOutputValidator:
             transform=Affine(1.0, 0, 0, 0, -1.0, 4),
             bounds=(0, 0, 4, 4),
             shape=(4, 4),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         with pytest.raises(ValueError, match="Valid pixel percentage"):
@@ -458,7 +459,7 @@ class TestOutputValidator:
             transform=Affine(1.0, 0, 0, 0, -1.0, 3),
             bounds=(0, 0, 3, 3),
             shape=(3, 3),  # Mismatch!
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         with pytest.raises(ValueError, match="shape"):
@@ -474,7 +475,7 @@ class TestOutputValidator:
                 [1.5, 2.0, 2.5],  # Outside expected range
                 [0.2, 0.6, 0.9],
             ],
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         metadata = OutputMetadata(
@@ -482,7 +483,7 @@ class TestOutputValidator:
             transform=Affine(1.0, 0, 0, 0, -1.0, 3),
             bounds=(0, 0, 3, 3),
             shape=(3, 3),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         result = validator.validate(data, metadata, expected_range=(0.0, 1.0))
@@ -505,7 +506,7 @@ class TestOutputValidator:
             transform=Affine(1.0, 0, 0, 0, -1.0, 3),
             bounds=(0, 0, 3, 3),
             shape=(3, 3),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
             nodata=-999,
         )
 
@@ -530,7 +531,7 @@ class TestOutputValidator:
             transform=Affine(1.0, 0, 0, 0, -1.0, 2),
             bounds=(0, 0, 2, 2),
             shape=(2, 2),
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         # Should fail because band 2 has only 50% valid
@@ -617,7 +618,7 @@ class TestVisualizationEnhancer:
 
         data = np.array(
             [[1.0, np.nan, 3.0], [np.nan, 5.0, np.nan], [7.0, 8.0, 9.0]],
-            dtype=np.float32,
+            dtype=np.dtype(np.float32),
         )
 
         enhanced = enhancer.enhance(data, display_min=0.0, display_max=10.0)

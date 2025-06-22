@@ -70,7 +70,7 @@ class OSMUtil:
                 with fiona.open(shp) as feats:
                     for feat in feats:
                         geom: dict[str, Any] = feat["geometry"]
-                        poly: shapely.geometry.Polygon = shapely.geometry.shape(
+                        poly = shapely.geometry.shape(
                             geom
                         ).buffer(path_thickness)
                         road_shapes.append(shapely.geometry.mapping(poly))
@@ -166,7 +166,7 @@ class OSMUtil:
                 with fiona.open(shp) as feats:
                     for feat in feats:
                         geom: dict[str, Any] = feat["geometry"]
-                        poly: shapely.geometry.Polygon = shapely.geometry.shape(
+                        poly = shapely.geometry.shape(
                             geom
                         ).buffer(path_thickness)
                         shapes.append(shapely.geometry.mapping(poly))

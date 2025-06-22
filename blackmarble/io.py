@@ -11,7 +11,6 @@ Raster I/O utilities:
 import os
 from osgeo import gdal
 import numpy as np
-from typing import Union
 
 
 def get_geo(filepath: str, band: int) -> tuple[np.ndarray, tuple[float, ...], str]:
@@ -202,7 +201,7 @@ def save_geotiff_single(
 
 
 def scale_image(
-    input_array: np.ndarray, min_value: Union[int, float], max_value: Union[int, float]
+    input_array: np.ndarray, min_value: int | float, max_value: int | float
 ) -> np.ndarray:
     """
     Clamps the values of a NumPy array to a specified range [min_value, max_value]
@@ -254,13 +253,13 @@ try:
     from .io_rasterio import save_image as _rio_save_image
     from .io_rasterio import save_geotiff_single as _rio_save_geotiff_single
     from .io_rasterio import save_geotiff_rgb as _rio_save_geotiff_rgb
-    
+
     # Replace GDAL implementations with rasterio ones
     get_geo = _rio_get_geo
     save_image = _rio_save_image
     save_geotiff_single = _rio_save_geotiff_single
     save_geotiff_rgb = _rio_save_geotiff_rgb
-    
+
     print("INFO: Successfully loaded rasterio I/O implementations")
 except ImportError as e:
     print(f"WARNING: Could not import rasterio implementations: {e}")
