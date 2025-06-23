@@ -5,7 +5,15 @@ analytical utility of processed imagery through contrast adjustments.
 """
 
 from typing import Any, Literal
+import numpy as np
 import numpy.typing as npt
+
+# Import existing implementations
+from blackmarble.ported_functionality import (
+    enhance_contrast as _enhance_contrast,
+    chain_enhancements as _chain_enhancements,
+)
+from blackmarble.processing import normalize_data as _normalize_data
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -35,8 +43,16 @@ def enhance_contrast(
     Returns:
         Enhanced array with improved contrast
     """
-    # Currently in ported_functionality.py
-    ...
+    # Delegate to existing implementation in ported_functionality.py
+    return _enhance_contrast(
+        data=data,
+        method=method,
+        percentiles=percentiles,
+        output_range=output_range,
+        mask=mask,
+        target_mean=target_mean,
+        target_std=target_std
+    )
 
 
 def normalize_data(
@@ -58,8 +74,14 @@ def normalize_data(
     Returns:
         Normalized data array
     """
-    # Currently in processing.py
-    ...
+    # Delegate to existing implementation in processing.py
+    return _normalize_data(
+        data=data,
+        output_min=output_min,
+        output_max=output_max,
+        input_min=input_min,
+        input_max=input_max
+    )
 
 
 def adaptive_histogram_equalization(
@@ -77,8 +99,42 @@ def adaptive_histogram_equalization(
     Returns:
         Enhanced array with locally equalized contrast
     """
-    # Advanced contrast enhancement
-    ...
+    # Simple implementation using percentile stretching per tile
+    # For full CLAHE, would need cv2 or skimage
+    h, w = data.shape[-2:]
+    tile_h, tile_w = tile_size
+    
+    # Create output array
+    output = np.zeros_like(data)
+    
+    # Process each tile
+    for i in range(0, h, tile_h):
+        for j in range(0, w, tile_w):
+            # Extract tile
+            tile_end_h = min(i + tile_h, h)
+            tile_end_w = min(j + tile_w, w)
+            
+            if data.ndim == 2:
+                tile = data[i:tile_end_h, j:tile_end_w]
+                # Apply local enhancement
+                enhanced_tile = _enhance_contrast(
+                    tile, method="percentile", 
+                    percentiles=(2, 98),
+                    output_range=(0, 1)
+                )
+                output[i:tile_end_h, j:tile_end_w] = enhanced_tile
+            else:
+                # Handle multi-band data
+                for b in range(data.shape[0]):
+                    tile = data[b, i:tile_end_h, j:tile_end_w]
+                    enhanced_tile = _enhance_contrast(
+                        tile, method="percentile",
+                        percentiles=(2, 98),
+                        output_range=(0, 1)
+                    )
+                    output[b, i:tile_end_h, j:tile_end_w] = enhanced_tile
+    
+    return output
 
 
 def gamma_correction(
@@ -96,8 +152,12 @@ def gamma_correction(
     Returns:
         Gamma-corrected array
     """
-    # For visualization enhancement
-    ...
+    # Simple gamma correction implementation
+    # Ensure data is in [0, 1] range
+    data_normalized = np.clip(data, 0, 1)
+    
+    # Apply gamma correction with epsilon to avoid issues
+    return np.power(data_normalized + epsilon, gamma)
 
 
 def multi_scale_retinex(
@@ -115,8 +175,34 @@ def multi_scale_retinex(
     Returns:
         Enhanced array with improved local contrast
     """
-    # Advanced enhancement for nighttime imagery
-    ...
+    # Simple implementation using multiple contrast enhancements
+    # For full MSR, would need scipy.ndimage for Gaussian filtering
+    if weights is None:
+        weights = [1.0 / len(scales)] * len(scales)
+    
+    # Ensure weights sum to 1
+    weights_array = np.array(weights)
+    weights_array = weights_array / weights_array.sum()
+    
+    # Apply multiple scales of enhancement
+    result = np.zeros_like(data, dtype=np.float32)
+    
+    for scale, weight in zip(scales, weights_array):
+        # Simulate different scales with different percentile ranges
+        # Smaller scale = tighter percentiles (more local contrast)
+        # Larger scale = wider percentiles (more global contrast)
+        p_low = max(0.5, 5.0 - scale / 50.0)
+        p_high = min(99.5, 95.0 + scale / 50.0)
+        
+        enhanced = _enhance_contrast(
+            data,
+            method="percentile",
+            percentiles=(p_low, p_high),
+            output_range=(0, 1)
+        )
+        result += weight * enhanced
+    
+    return np.clip(result, 0, 1)
 
 
 def histogram_matching(
@@ -134,8 +220,42 @@ def histogram_matching(
     Returns:
         Source data with matched histogram
     """
-    # For consistent visualization across scenes
-    ...
+    # Simple histogram matching implementation
+    # Get valid data
+    if mask is not None:
+        source_valid = source[mask > 0]
+        reference_valid = reference[mask > 0]
+    else:
+        source_valid = source[~np.isnan(source)]
+        reference_valid = reference[~np.isnan(reference)]
+    
+    if len(source_valid) == 0 or len(reference_valid) == 0:
+        return source
+    
+    # Compute CDFs
+    source_values, source_indices = np.unique(source_valid, return_inverse=True)
+    reference_values, reference_counts = np.unique(reference_valid, return_counts=True)
+    
+    source_cdf = np.cumsum(np.bincount(source_indices))
+    source_cdf = source_cdf / source_cdf[-1]
+    
+    reference_cdf = np.cumsum(reference_counts)
+    reference_cdf = reference_cdf / reference_cdf[-1]
+    
+    # Create mapping
+    mapping = np.interp(source_cdf, reference_cdf, reference_values)
+    
+    # Apply mapping
+    result = source.copy()
+    if mask is not None:
+        result[mask > 0] = mapping[source_indices]
+    else:
+        valid_mask = ~np.isnan(source)
+        flat_source = source[valid_mask]
+        mapped_values = np.interp(flat_source, source_values, mapping)
+        result[valid_mask] = mapped_values
+    
+    return result
 
 
 def chain_enhancements(
@@ -151,8 +271,8 @@ def chain_enhancements(
     Returns:
         Final enhanced data after all operations
     """
-    # Currently in ported_functionality.py
-    ...
+    # Delegate to existing implementation in ported_functionality.py
+    return _chain_enhancements(data=data, operations=operations)
 
 
 def compute_enhancement_statistics(
@@ -170,5 +290,43 @@ def compute_enhancement_statistics(
     Returns:
         Dictionary with comparison statistics
     """
-    # For quality assessment
-    ...
+    # Compute comparison statistics
+    if mask is not None:
+        orig_valid = original[mask > 0]
+        enh_valid = enhanced[mask > 0]
+    else:
+        orig_valid = original[~np.isnan(original)]
+        enh_valid = enhanced[~np.isnan(enhanced)]
+    
+    if len(orig_valid) == 0 or len(enh_valid) == 0:
+        return {
+            "original_mean": np.nan,
+            "original_std": np.nan,
+            "enhanced_mean": np.nan,
+            "enhanced_std": np.nan,
+            "mean_change": np.nan,
+            "std_change": np.nan,
+            "dynamic_range_improvement": np.nan,
+            "contrast_improvement_ratio": np.nan
+        }
+    
+    # Basic statistics
+    orig_mean = np.mean(orig_valid)
+    orig_std = np.std(orig_valid)
+    enh_mean = np.mean(enh_valid)
+    enh_std = np.std(enh_valid)
+    
+    # Dynamic range
+    orig_range = np.ptp(orig_valid)  # peak to peak
+    enh_range = np.ptp(enh_valid)
+    
+    return {
+        "original_mean": float(orig_mean),
+        "original_std": float(orig_std),
+        "enhanced_mean": float(enh_mean),
+        "enhanced_std": float(enh_std),
+        "mean_change": float(enh_mean - orig_mean),
+        "std_change": float(enh_std - orig_std),
+        "dynamic_range_improvement": float(enh_range / orig_range) if orig_range > 0 else np.nan,
+        "contrast_improvement_ratio": float(enh_std / orig_std) if orig_std > 0 else np.nan
+    }

@@ -28,8 +28,14 @@ def scale_landsat_bands(
     Returns:
         Scaled surface reflectance values
     """
-    # Currently in bm_algorithms.py
-    ...
+    # Implementation from bm_algorithms.py:187
+    from ..bm_algorithms import scale_landsat_bands as _scale_landsat_bands
+    return _scale_landsat_bands(
+        band_data,
+        scale_factor=scale_factor,
+        add_offset=add_offset,
+        valid_range=valid_range
+    )
 
 
 def detect_if_already_scaled(
@@ -45,8 +51,15 @@ def detect_if_already_scaled(
     Returns:
         True if data appears to be already scaled
     """
-    # Currently in calculations.py is_already_reflectance()
-    ...
+    # Based on logic from calculations.py:248
+    # Check if data is already reflectance (values between -0.5 and threshold)
+    import numpy as np
+    data_min = np.nanmin(band_data)
+    data_max = np.nanmax(band_data)
+    
+    # Data is likely already reflectance if max is below threshold
+    # and min is above typical negative reflectance values
+    return data_max <= reflectance_threshold and data_min >= -0.5
 
 
 def apply_lunar_correction(
@@ -64,8 +77,13 @@ def apply_lunar_correction(
     Returns:
         Lunar-corrected radiance values
     """
-    # Currently in bm_algorithms.py
-    ...
+    # Implementation from bm_algorithms.py:224
+    from ..bm_algorithms import apply_lunar_correction as _apply_lunar_correction
+    return _apply_lunar_correction(
+        vnp_data,
+        lunar_irradiance,
+        moon_illumination_fraction=moon_illumination_fraction
+    )
 
 
 def calculate_ntli(
@@ -85,8 +103,14 @@ def calculate_ntli(
     Returns:
         Lunar-corrected nighttime light radiance
     """
-    # Currently in bm_algorithms.py
-    ...
+    # Implementation from bm_algorithms.py:143
+    from ..bm_algorithms import calculate_ntli as _calculate_ntli
+    return _calculate_ntli(
+        vnp_radiance,
+        lunar_irradiance,
+        quality_flag,
+        valid_flags=valid_flags
+    )
 
 
 def apply_viirs_floor_ceiling(
@@ -104,8 +128,16 @@ def apply_viirs_floor_ceiling(
     Returns:
         Thresholded NTL data
     """
-    # Logic from bm.py NDUI calculation
-    ...
+    # Based on logic from bm_algorithms.py:119 (NDUI calculation)
+    import numpy as np
+    
+    # Apply ceiling first (clip values above ceiling)
+    ntl_processed = np.where(ntl_data > ceiling_value, ceiling_value, ntl_data)
+    
+    # Apply floor (set values below floor to 0)
+    ntl_processed = np.where(ntl_processed < floor_value, 0.0, ntl_processed)
+    
+    return ntl_processed
 
 
 def normalize_to_range(
@@ -127,8 +159,16 @@ def normalize_to_range(
     Returns:
         Normalized data
     """
-    # Currently in calculations.py
-    ...
+    # Implementation from calculations.py:316
+    # WATCHPOINT: Parameter names differ - output_min/max vs out_min/max
+    from ..calculations import normalize_to_range as _normalize_to_range
+    return _normalize_to_range(
+        data,
+        output_min=out_min,
+        output_max=out_max,
+        input_min=in_min,
+        input_max=in_max
+    )
 
 
 def scale_to_byte(
@@ -146,5 +186,12 @@ def scale_to_byte(
     Returns:
         Scaled uint8 array
     """
-    # Currently in processing.py
-    ...
+    # Implementation from processing.py:806
+    # WATCHPOINT: Parameter names differ - min_value/max_value vs in_min/in_max
+    from ..processing import scale_to_byte as _scale_to_byte
+    return _scale_to_byte(
+        data,
+        min_value=in_min,
+        max_value=in_max,
+        nodata_value=0  # Default nodata value
+    )

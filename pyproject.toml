@@ -45,6 +45,7 @@ dev = [
   "pre-commit>=4.2.0",
   "pytest>=8.3.5",
   "pyright>=1.1.402",
+  "psutil>=7.0.0",
 ]
 
 [tool.pytest.ini_options]

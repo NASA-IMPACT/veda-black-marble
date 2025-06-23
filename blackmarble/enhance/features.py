@@ -5,7 +5,15 @@ urban areas, and other infrastructure in the processed imagery.
 """
 
 from typing import Any, Literal
+import numpy as np
 import numpy.typing as npt
+from scipy.ndimage import distance_transform_edt, binary_dilation, label
+
+# Import existing implementations
+from blackmarble.processing import (
+    enhance_roads as _enhance_roads,
+    enhance_urban_features as _enhance_urban_features,
+)
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -30,8 +38,14 @@ def enhance_roads(
     Returns:
         Enhanced data array with boosted road values
     """
-    # Currently in processing.py
-    ...
+    # Delegate to existing implementation in processing.py
+    return _enhance_roads(
+        data=data,
+        roads=road_mask,  # Note: parameter name difference
+        major_factor=major_factor,
+        minor_factor=minor_factor,
+        custom_factors=custom_factors
+    )
 
 
 def enhance_urban_features(
@@ -46,7 +60,7 @@ def enhance_urban_features(
     
     Args:
         ntl_data: Nighttime lights data
-        urban_mask: Urban area mask
+        urban_mask: Urban area mask  
         road_mask: Optional road mask for additional enhancement
         enhancement_factor: Factor for urban area enhancement
         road_factor: Additional factor for roads in urban areas
@@ -55,8 +69,36 @@ def enhance_urban_features(
     Returns:
         Enhanced nighttime lights emphasizing urban features
     """
-    # Currently in processing.py
-    ...
+    # The existing function takes ndui, roads, ntl, enhancement_strength
+    # We need to adapt the parameters
+    enhancement_strength = (enhancement_factor - 1.0) / 0.3  # Convert factor to strength
+    
+    # If urban_mask is provided as NDUI data, use it directly
+    # Otherwise, treat it as a binary mask and use ntl_data as NDUI
+    if urban_mask.dtype == bool or (np.min(urban_mask) >= 0 and np.max(urban_mask) <= 1):
+        # Binary mask case - use ntl_data as the base
+        ndui = ntl_data * urban_mask
+    else:
+        # urban_mask is already NDUI data
+        ndui = urban_mask
+    
+    enhanced = _enhance_urban_features(
+        ndui=ndui,
+        roads=road_mask if road_mask is not None else np.zeros_like(ndui),
+        ntl=ntl_data if ntl_data is not urban_mask else None,
+        enhancement_strength=enhancement_strength
+    )
+    
+    if preserve_range:
+        # Scale back to original range
+        orig_min, orig_max = np.nanmin(ntl_data), np.nanmax(ntl_data)
+        if orig_max > orig_min:
+            enh_min, enh_max = np.nanmin(enhanced), np.nanmax(enhanced)
+            if enh_max > enh_min:
+                enhanced = (enhanced - enh_min) / (enh_max - enh_min)
+                enhanced = enhanced * (orig_max - orig_min) + orig_min
+    
+    return enhanced
 
 
 def detect_urban_corridors(
@@ -77,7 +119,27 @@ def detect_urban_corridors(
         Urban corridor mask
     """
     # Identify lit transportation corridors
-    ...
+    # Combine roads with nighttime lights above threshold
+    lit_areas = ntl_data > threshold
+    road_areas = road_mask > 0
+    
+    # Find intersection of lit areas and roads
+    corridors = lit_areas & road_areas
+    
+    # Label connected components
+    labeled_array, num_features = label(corridors)
+    num_features = int(num_features)  # Ensure it's an int
+    
+    # Filter by minimum length
+    corridor_mask = np.zeros_like(corridors, dtype=bool)
+    for i in range(1, num_features + 1):
+        component = labeled_array == i
+        # Approximate length as sqrt of area
+        component_area = np.sum(component)
+        if np.sqrt(float(component_area)) >= min_length:
+            corridor_mask |= component
+    
+    return corridor_mask.astype(np.float32)
 
 
 def enhance_urban_boundaries(
@@ -97,8 +159,31 @@ def enhance_urban_boundaries(
     Returns:
         Enhanced urban mask with clearer boundaries
     """
-    # Sharpen urban area edges
-    ...
+    # Convert to binary if needed
+    binary_mask = urban_mask > 0.5
+    
+    if method == "gradient":
+        # Use distance transform to create gradient
+        dist_inside = distance_transform_edt(binary_mask)
+        dist_outside = distance_transform_edt(~binary_mask)
+        
+        # Create boundary region
+        boundary_region = (dist_inside <= width) | (dist_outside <= width)
+        
+        # Enhance using NTL data in boundary region
+        enhanced = urban_mask.copy()
+        enhanced[boundary_region] = ntl_data[boundary_region]
+        
+    else:  # morphological
+        # Dilate then subtract original to get boundary
+        dilated = binary_dilation(binary_mask, iterations=width)
+        boundary = dilated & ~binary_mask
+        
+        # Enhance boundary pixels based on NTL
+        enhanced = urban_mask.copy()
+        enhanced[boundary] = np.maximum(enhanced[boundary], ntl_data[boundary] * 0.5)
+    
+    return enhanced
 
 
 def suppress_blooming(
@@ -116,8 +201,24 @@ def suppress_blooming(
     Returns:
         NTL data with reduced blooming artifacts
     """
-    # Reduce overexposure artifacts
-    ...
+    # Identify potential blooming areas (very bright pixels)
+    bloom_mask = ntl_data > threshold
+    
+    # Create distance map from bloom centers
+    dist = distance_transform_edt(~bloom_mask)
+    
+    # Apply suppression based on distance
+    suppression_factor = np.ones_like(ntl_data)
+    affected_region = dist < kernel_size
+    
+    # Gradual suppression based on distance
+    suppression_factor[affected_region] = 0.5 + 0.5 * (dist[affected_region] / kernel_size)
+    
+    # Apply suppression to bright areas only
+    result = ntl_data.copy()
+    result[bloom_mask] = ntl_data[bloom_mask] * suppression_factor[bloom_mask]
+    
+    return result
 
 
 def enhance_infrastructure(
@@ -135,8 +236,16 @@ def enhance_infrastructure(
     Returns:
         Data with enhanced infrastructure features
     """
-    # General infrastructure enhancement
-    ...
+    # Apply enhancement for each infrastructure type
+    enhanced = data.copy()
+    
+    for infra_type, mask in infrastructure_types.items():
+        if infra_type in enhancement_factors:
+            factor = enhancement_factors[infra_type]
+            # Apply enhancement where infrastructure exists
+            enhanced = np.where(mask > 0, enhanced * factor, enhanced)
+    
+    return enhanced
 
 
 def create_urban_gradient(
@@ -154,8 +263,22 @@ def create_urban_gradient(
     Returns:
         Urban gradient array
     """
-    # For smooth urban transitions
-    ...
+    # Convert to binary
+    binary_mask = urban_mask > 0.5
+    
+    # Calculate distance from urban areas
+    distance = distance_transform_edt(~binary_mask)
+    
+    # Clip to maximum distance
+    distance = np.minimum(distance, float(max_distance))
+    
+    # Apply exponential decay
+    gradient = np.exp(-distance_decay * distance)
+    
+    # Ensure urban areas are 1.0
+    gradient[binary_mask] = 1.0
+    
+    return gradient
 
 
 def enhance_small_settlements(
@@ -173,5 +296,24 @@ def enhance_small_settlements(
     Returns:
         Enhanced data with boosted small settlements
     """
-    # Boost visibility of small urban areas
-    ...
+    # Threshold to find lit areas
+    threshold = np.percentile(ntl_data[ntl_data > 0], 25)
+    lit_areas = ntl_data > threshold
+    
+    # Label connected components  
+    labeled_array, num_features = label(lit_areas)
+    num_features = int(num_features)  # Ensure it's an int
+    
+    # Enhance small settlements
+    enhanced = ntl_data.copy()
+    
+    for i in range(1, num_features + 1):
+        component = labeled_array == i
+        size = np.sum(component)
+        
+        # Enhance if it's a small settlement
+        component_size = int(size)
+        if min_size <= component_size <= min_size * 10:
+            enhanced[component] *= enhancement_factor
+    
+    return enhanced

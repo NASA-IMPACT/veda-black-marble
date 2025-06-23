@@ -8,6 +8,14 @@ from typing import Any
 from datetime import datetime
 import numpy.typing as npt
 
+# Import existing implementations
+from blackmarble.landsat import download_tiles_for_band as _download_tiles_for_band
+from blackmarble.landsat import download_tiles_for_band_with_composites as _download_tiles_for_band_with_composites
+
+# For class methods, we need to handle the Fiona/OGR split
+# Import the module to access the actual class being used
+import blackmarble.landsat as landsat_module
+
 # Type aliases
 BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
 ArrayLike = npt.NDArray[Any]
@@ -23,8 +31,9 @@ def get_wrs_path_row(lat: float, lon: float) -> list[dict[str, int]]:
     Returns:
         List of dicts with 'path' and 'row' keys (can be multiple for overlap areas)
     """
-    # Currently in landsat.py LandsatUtil.get_wrs()
-    ...
+    # Delegate to whichever LandsatUtil implementation is loaded
+    util = landsat_module.LandsatUtil()
+    return util.get_wrs(lat, lon)
 
 
 def filter_landsat_scenes(
@@ -48,8 +57,66 @@ def filter_landsat_scenes(
     Returns:
         S3 prefix for scene directory or None if not found
     """
-    # Currently in landsat.py LandsatUtil.filter_landsat_data_dir()
-    ...
+    # This method is only available in the original OGR-based class
+    # We need to create an instance of the original class directly
+    # Import the base class definition
+    import collections
+    import boto3
+    from osgeo import ogr
+    import shapely.geometry
+    from datetime import datetime as dt
+    
+    class _LandsatUtilOriginal:
+        """Minimal implementation of filter_landsat_data_dir method."""
+        dir_cache: collections.OrderedDict[str, list[dict[str, str]]] = (
+            collections.OrderedDict()
+        )
+        MAX_CACHE_SIZE = 100
+        
+        def filter_landsat_data_dir(
+            self, year: int, month: int, day: int, path: str, row: str
+        ) -> str | None:
+            yr: str = str(year)
+            mo: str = str(month).zfill(2)
+            da: str = str(day).zfill(2)
+            prefix: str = f"collection02/level-2/standard/oli-tirs/{yr}/{path}/{row}/"
+            directories: list[dict[str, str]]
+            if prefix in self.dir_cache:
+                directories = self.dir_cache[prefix]
+            else:
+                session = boto3.Session()
+                s3 = session.client("s3")
+                resp = s3.list_objects_v2(
+                    Bucket="usgs-landsat",
+                    Prefix=prefix,
+                    RequestPayer="requester",
+                    Delimiter="/",
+                )
+                directories = []
+                common_prefixes = resp.get("CommonPrefixes", [])
+                for prefix_entry in common_prefixes:
+                    if isinstance(prefix_entry, dict) and "Prefix" in prefix_entry:
+                        directories.append({"Prefix": prefix_entry["Prefix"]})
+                if len(self.dir_cache) >= self.MAX_CACHE_SIZE:
+                    self.dir_cache.popitem(last=False)
+                self.dir_cache[prefix] = directories
+            target: dt = dt.strptime(yr + mo + da, "%Y%m%d")
+            selected: str | None = None
+            for entry in directories:
+                dr: list[str] = entry["Prefix"].split("/")[-2].split("_")[3:5]
+                start: dt = dt.strptime(dr[0], "%Y%m%d")
+                end: dt = dt.strptime(dr[1], "%Y%m%d")
+                if start <= target <= end:
+                    selected = entry["Prefix"]
+                    break
+            return selected
+    
+    util = _LandsatUtilOriginal()
+    return util.filter_landsat_data_dir(
+        year, month, day, 
+        str(path).zfill(3),  # Convert to 3-digit string format
+        str(row).zfill(3)    # Convert to 3-digit string format
+    )
 
 
 def download_landsat_band(
@@ -69,8 +136,37 @@ def download_landsat_band(
     Returns:
         Path to downloaded file
     """
-    # Currently in landsat.py LandsatUtil.download_landsat_band()
-    ...
+    # This method is also only in the original class
+    # We'll use a minimal implementation
+    import os
+    import boto3
+    from boto3.session import Session
+    
+    scene: str = scene_dir.split("/")[-2]
+    key: str
+    if band in ("QA_PIXEL", "QA_RADSAT", "QA_AEROSOL"):
+        suffix_map: dict[str, str] = {
+            "QA_PIXEL": "_QA_PIXEL.TIF",
+            "QA_RADSAT": "_QA_RADSAT.TIF",
+            "QA_AEROSOL": "_SR_QA_AEROSOL.TIF",
+        }
+        suffix = suffix_map[str(band)]
+        key = scene_dir + scene + suffix
+    else:
+        key = f"{scene_dir}{scene}_SR_B{band}.TIF"
+    
+    # Use provided AWS keys or default credential chain
+    session: Session = boto3.Session()
+    s3 = session.client("s3")
+    
+    # Ensure the directory for the output file exists
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    s3.download_file(
+        "usgs-landsat", key, output_path, ExtraArgs={"RequestPayer": "requester"}
+    )
+    
+    return output_path
 
 
 def download_tiles_for_band(
@@ -94,8 +190,22 @@ def download_tiles_for_band(
     Returns:
         Tuple of (band_files, qa_pixel_files, qa_radsat_files, qa_aerosol_files)
     """
-    # Currently in bm.py download_tiles_for_band()
-    ...
+    # Extract bbox components and create a temp directory
+    import tempfile
+    min_lon, min_lat, max_lon, max_lat = bbox
+    
+    # Create a temporary directory for downloads
+    temp_dir = tempfile.mkdtemp(prefix="landsat_")
+    
+    # Delegate to existing implementation
+    # Note: existing function expects lat1, lon1, lat2, lon2 format
+    return _download_tiles_for_band(
+        band, year, month, day,
+        min_lat, min_lon,  # lat1, lon1
+        max_lat, max_lon,  # lat2, lon2
+        temp_dir,
+        ignore_missing
+    )
 
 
 def download_tiles_with_composites(
@@ -119,8 +229,21 @@ def download_tiles_with_composites(
     Returns:
         List of tuples, each containing (band_files, qa_pixel, qa_radsat, qa_aerosol)
     """
-    # Currently in bm.py download_tiles_for_band_with_composites()
-    ...
+    # Extract bbox components and create a temp directory
+    import tempfile
+    min_lon, min_lat, max_lon, max_lat = bbox
+    
+    # Create a temporary directory for downloads
+    temp_dir = tempfile.mkdtemp(prefix="landsat_composite_")
+    
+    # Delegate to existing implementation
+    return _download_tiles_for_band_with_composites(
+        band, year, month, day,
+        min_lat, min_lon,  # lat1, lon1
+        max_lat, max_lon,  # lat2, lon2
+        temp_dir,
+        composite_history_months
+    )
 
 
 def get_landsat_metadata(scene_path: str) -> dict[str, Any]:
@@ -132,5 +255,49 @@ def get_landsat_metadata(scene_path: str) -> dict[str, Any]:
     Returns:
         Dictionary containing scale factors, offsets, acquisition date, etc.
     """
-    # New function - metadata extraction for scaling
-    ...
+    # Extract metadata using GDAL
+    from osgeo import gdal
+    import os
+    
+    # Open the dataset
+    ds = gdal.Open(scene_path)
+    if not ds:
+        raise ValueError(f"Could not open scene file: {scene_path}")
+    
+    # Extract basic metadata
+    metadata = {
+        "width": ds.RasterXSize,
+        "height": ds.RasterYSize,
+        "bands": ds.RasterCount,
+        "projection": ds.GetProjection(),
+        "geotransform": ds.GetGeoTransform(),
+    }
+    
+    # Try to extract Landsat-specific metadata
+    # These are standard for Landsat Collection 2 Level-2 products
+    landsat_metadata = ds.GetMetadata()
+    
+    # Common Landsat scaling factors for Collection 2
+    metadata.update({
+        "scale_factor": 0.0000275,  # Standard for surface reflectance
+        "add_offset": -0.2,         # Standard for surface reflectance
+        "valid_range": [7273, 43636],  # After scaling: ~0.0 to 1.0
+        "fill_value": 0,
+    })
+    
+    # Extract acquisition date from filename if possible
+    basename = os.path.basename(scene_path)
+    if "_" in basename and len(basename) > 20:
+        # Landsat naming convention: LC08_L2SP_PPPRRR_YYYYMMDD_...
+        parts = basename.split("_")
+        if len(parts) >= 4:
+            date_str = parts[3]
+            if len(date_str) == 8:
+                metadata["acquisition_date"] = date_str
+    
+    # Add any additional metadata from GDAL
+    if landsat_metadata:
+        metadata["gdal_metadata"] = landsat_metadata
+    
+    ds = None  # Close dataset
+    return metadata

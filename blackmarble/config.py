@@ -5,7 +5,12 @@ parameters, supporting both default values and environment variable overrides.
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Literal
 import os
+
+# Type aliases  
+BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
 
 
 @dataclass

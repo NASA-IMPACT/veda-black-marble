@@ -6,6 +6,17 @@ and converting it to raster format for integration with satellite imagery.
 
 from typing import Any
 import numpy.typing as npt
+import numpy as np
+import os
+
+# Import existing implementations
+from blackmarble.osm import OSMUtil
+from blackmarble.osm_functions import (
+    download_osm_roads,
+    graph_to_shapes,
+    rasterize_shapes,
+    create_multi_type_road_raster
+)
 
 # Type aliases
 BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
@@ -28,8 +39,19 @@ def fetch_road_network(
     Returns:
         NetworkX graph of road network
     """
-    # Currently in osm.py using ox.graph_from_bbox()
-    ...
+    # Extract bbox components
+    min_lon, min_lat, max_lon, max_lat = bbox
+    
+    # Calculate north, south, east, west
+    north = max_lat
+    south = min_lat
+    east = max_lon
+    west = min_lon
+    
+    # Delegate to existing implementation
+    # Note: download_osm_roads doesn't use network_type parameter,
+    # it always uses 'all' internally
+    return download_osm_roads(north, south, east, west, custom_filter)
 
 
 def create_road_raster(
@@ -51,8 +73,21 @@ def create_road_raster(
     Returns:
         Path to created road raster
     """
-    # Currently in osm.py OSMUtil.create_road_raster()
-    ...
+    # Extract bbox components
+    min_lon, min_lat, max_lon, max_lat = bbox
+    
+    # Delegate to existing OSMUtil implementation
+    util = OSMUtil()
+    util.create_road_raster(
+        min_lat, min_lon,  # lat1, lon1
+        max_lat, max_lon,  # lat2, lon2
+        reference_raster,
+        output_path,
+        output_dir=os.path.dirname(output_path),
+        path_thickness=buffer_distance
+    )
+    
+    return output_path
 
 
 def create_simple_road_mask(
@@ -74,8 +109,26 @@ def create_simple_road_mask(
     Returns:
         Path to created road mask
     """
-    # Currently in osm.py OSMUtil.create_road_raster_flattened()
-    ...
+    # Extract bbox components
+    min_lon, min_lat, max_lon, max_lat = bbox
+    
+    # Import os for path operations
+    import os
+    
+    # Delegate to existing OSMUtil implementation
+    # Note: The flattened version uses a fixed value of 5 internally,
+    # but we can't control that from here
+    util = OSMUtil()
+    util.create_road_raster_flattened(
+        min_lat, min_lon,  # lat1, lon1
+        max_lat, max_lon,  # lat2, lon2
+        reference_raster,
+        output_path,
+        output_dir=os.path.dirname(output_path),
+        path_thickness=buffer_distance
+    )
+    
+    return output_path
 
 
 def get_hierarchical_road_filters() -> dict[int, str]:
@@ -90,8 +143,14 @@ def get_hierarchical_road_filters() -> dict[int, str]:
         5: Residential roads
         6: Service roads
     """
-    # Default filters from osm.py
-    ...
+    # Return the default filters used in OSMUtil.create_road_raster()
+    return {
+        1: '["highway"~"primary_link|primary|secondary|secondary_link|tertiary|tertiary_link"]',
+        2: '["highway"~"motorway|motorway_link"]',
+        3: '["highway"~"residential"]',
+        4: '["highway"~"trunk|trunk_link"]',
+        5: '["highway"~"service|unclassified|road|busway"]',
+    }
 
 
 def roads_graph_to_shapes(
@@ -107,8 +166,8 @@ def roads_graph_to_shapes(
     Returns:
         List of shapely geometry dictionaries ready for rasterization
     """
-    # Extract from osm.py road rasterization logic
-    ...
+    # Delegate to existing implementation
+    return graph_to_shapes(graph, buffer_distance)
 
 
 def rasterize_road_shapes(
@@ -128,5 +187,16 @@ def rasterize_road_shapes(
     Returns:
         Rasterized road array
     """
-    # Using rasterio.features.rasterize()
-    ...
+    # Extract height and width from shape tuple
+    height, width = shape
+    
+    # Delegate to existing implementation
+    # Default value is 1 if not specified in shapes
+    return rasterize_shapes(
+        shapes,
+        height,
+        width,
+        reference_transform,
+        value=1,  # Default value
+        all_touched=all_touched
+    )

@@ -11,8 +11,12 @@ Each phase builds on the previous one in a clear, readable flow.
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, cast
+import numpy as np
 import numpy.typing as npt
+
+from .target_config import PipelineConfig
+from . import acquire, prepare, analyze, enhance, export
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -23,7 +27,7 @@ def black_marble_pipeline(
     bbox: BBox,
     date: datetime,
     output_path: str,
-    config: dict[str, Any] | None = None
+    config: PipelineConfig | None = None
 ) -> dict[str, Any]:
     """Main Black Marble processing pipeline.
     
@@ -41,258 +45,454 @@ def black_marble_pipeline(
     # Get all the data we need from various sources
     
     # 1. Acquire Landsat data for the area and date
-    # landsat_scenes = acquire.landsat.download_tiles_for_band(
-    #     band=5,  # NIR band for NDVI
-    #     year=date.year,
-    #     month=date.month,
-    #     day=date.day,
-    #     bbox=bbox
-    # )
+    # Download NIR band for NDVI calculation
+    nir_files, nir_files_georef, _, _ = acquire.download_tiles_for_band(
+        band=5,  # NIR band
+        year=date.year,
+        month=date.month,
+        day=date.day,
+        bbox=bbox
+    )
     
-    # Also get RGB bands for visualization
-    # landsat_rgb = acquire.landsat.download_tiles_for_band(
-    #     band=[2, 3, 4],  # Blue, Green, Red
-    #     year=date.year,
-    #     month=date.month,
-    #     day=date.day,
-    #     bbox=bbox
-    # )
+    # Download RGB bands for visualization
+    red_files, red_files_georef, _, _ = acquire.download_tiles_for_band(
+        band=4,  # Red band
+        year=date.year,
+        month=date.month,
+        day=date.day,
+        bbox=bbox
+    )
+    
+    green_files, green_files_georef, _, _ = acquire.download_tiles_for_band(
+        band=3,  # Green band
+        year=date.year,
+        month=date.month,
+        day=date.day,
+        bbox=bbox
+    )
+    
+    blue_files, blue_files_georef, _, _ = acquire.download_tiles_for_band(
+        band=2,  # Blue band
+        year=date.year,
+        month=date.month,
+        day=date.day,
+        bbox=bbox
+    )
+    
+    # Download quality bands
+    qa_files, qa_files_georef, _, _ = acquire.download_tiles_for_band(
+        band="QA_PIXEL",
+        year=date.year,
+        month=date.month,
+        day=date.day,
+        bbox=bbox
+    )
     
     # 2. Acquire VIIRS nighttime lights data
-    # viirs_tiles = acquire.viirs.download_vnp46a2_tiles(
-    #     date=date,
-    #     bbox=bbox,
-    #     product="DNB_At_Sensor_Radiance"
-    # )
-    
-    # Get lunar illumination data for corrections
-    # lunar_data = acquire.viirs.get_lunar_illumination(
-    #     date=date,
-    #     tiles=viirs_tiles
-    # )
+    viirs_data = acquire.download_vnp46a2_tiles(
+        date=date,
+        bbox=bbox,
+        output_dir="./data/viirs",
+        skip_existing=True
+    )
     
     # 3. Acquire OpenStreetMap road network
-    # road_network = acquire.osm.fetch_road_network(
-    #     bbox=bbox,
-    #     road_types=["motorway", "trunk", "primary", "secondary"]
-    # )
+    # Note: fetch_road_network uses custom_filter for road types
+    road_types = config.acquisition.road_types if config else ["motorway", "trunk", "primary", "secondary"]
+    custom_filter = f'["highway"~"{"_link|".join(road_types)}"]' if road_types else None
+    
+    road_network = acquire.fetch_road_network(
+        bbox=bbox,
+        network_type="all",
+        custom_filter=custom_filter
+    )
     
     
     # ==================== PREPARE PHASE ====================
     # Process raw data into analysis-ready format
     
-    # 1. Scale Landsat data to reflectance
-    # landsat_scaled = prepare.scaling.scale_landsat_bands(
-    #     landsat_scenes,
-    #     scale_factor=0.0000275,
-    #     add_offset=-0.2
-    # )
+    # 1. Load and scale Landsat data to reflectance
+    # First, we need to load the downloaded Landsat files
+    landsat_bands = {}
+    for band_name, files, georef_files in [
+        ("B2", blue_files, blue_files_georef),
+        ("B3", green_files, green_files_georef),
+        ("B4", red_files, red_files_georef),
+        ("B5", nir_files, nir_files_georef),
+    ]:
+        if files:
+            # Load with rasterio for proper handling
+            data, profile = prepare.load_with_rasterio(files[0])
+            # Scale to reflectance
+            scaled_data = prepare.scale_landsat_bands(
+                data,
+                scale_factor=config.preparation.landsat_scale_factor if config else 0.0000275,
+                add_offset=config.preparation.landsat_add_offset if config else -0.2
+            )
+            landsat_bands[band_name] = (scaled_data, profile)
+    
+    # Load QA band
+    qa_data = None
+    if qa_files:
+        qa_data, qa_profile = prepare.load_with_rasterio(qa_files[0])
     
     # 2. Apply quality masks to remove clouds/shadows
-    # landsat_masked = prepare.quality.apply_landsat_qa(
-    #     data=landsat_scaled,
-    #     qa_pixel=landsat_scenes["qa_pixel"],
-    #     mask_clouds=True,
-    #     mask_shadows=True,
-    #     mask_snow=True
-    # )
+    cloud_mask = None
+    if qa_data is not None:
+        cloud_mask = prepare.create_cloud_mask(
+            qa_pixel=qa_data,
+            conservative=True,  # Use conservative cloud masking
+            dilate_pixels=config.preparation.qa_dilation_radius if config else 3
+        )
     
-    # 3. Scale and correct VIIRS nighttime lights
-    # viirs_scaled = prepare.scaling.scale_viirs_radiance(
-    #     viirs_tiles["radiance"],
-    #     scale_factor=viirs_tiles["scale_factor"]
-    # )
+    # Apply masks to all bands
+    if cloud_mask is not None:
+        for band_name in landsat_bands:
+            data, profile = landsat_bands[band_name]
+            landsat_bands[band_name] = (data * cloud_mask, profile)  # cloud_mask is True for clear pixels
     
-    # Apply lunar correction
-    # viirs_corrected = prepare.scaling.apply_lunar_correction(
-    #     radiance=viirs_scaled,
-    #     lunar_illumination=lunar_data,
-    #     correct_threshold=0.0005
-    # )
+    # 3. Process VIIRS nighttime lights
+    # Load VIIRS radiance data
+    viirs_corrected = None
+    viirs_profile = None
+    if viirs_data and viirs_data['radiance']:
+        viirs_radiance, viirs_profile = prepare.load_with_rasterio(viirs_data['radiance'][0])
+        
+        # Apply VIIRS floor and ceiling
+        viirs_clipped = prepare.apply_viirs_floor_ceiling(
+            ntl_data=viirs_radiance,
+            floor_value=config.analysis.ntl_floor if config else 0.1,
+            ceiling_value=config.analysis.ntl_ceiling if config else 10.0
+        )
+        
+        # Apply lunar correction if available
+        if viirs_data['lunar']:
+            lunar_irradiance, _ = prepare.load_with_rasterio(viirs_data['lunar'][0])
+            viirs_corrected = prepare.apply_lunar_correction(
+                vnp_data=viirs_clipped,
+                lunar_irradiance=lunar_irradiance,
+                moon_illumination_fraction=None  # Let function use default
+            )
+        else:
+            viirs_corrected = viirs_clipped
     
     # 4. Reproject everything to common grid
-    # target_crs = "EPSG:3857"  # Web Mercator for this example
-    # target_resolution = 30  # meters
+    target_crs = config.preparation.target_crs if config else "EPSG:3857"
+    target_resolution = config.preparation.target_resolution if config else 30.0
     
-    # landsat_reprojected = prepare.spatial.reproject_raster(
-    #     landsat_masked,
-    #     target_crs=target_crs,
-    #     target_resolution=target_resolution
-    # )
+    # Reproject Landsat bands
+    landsat_reprojected = {}
+    reference_transform = None
+    reference_shape = None
+    reference_bbox = None
     
-    # viirs_reprojected = prepare.spatial.reproject_and_resample(
-    #     viirs_corrected,
-    #     target_transform=landsat_reprojected["transform"],
-    #     target_shape=landsat_reprojected["shape"]
-    # )
+    for band_name, (data, profile) in landsat_bands.items():
+        reprojected, new_transform, new_bbox = prepare.reproject_image(
+            data=data,
+            src_transform=profile['transform'],
+            src_crs=profile['crs'],
+            dst_crs=target_crs
+        )
+        landsat_reprojected[band_name] = reprojected
+        
+        # Store reference transform and shape from first band
+        if reference_transform is None:
+            reference_transform = new_transform
+            reference_shape = reprojected.shape
+            reference_bbox = new_bbox
     
-    # roads_rasterized = prepare.spatial.rasterize_roads(
-    #     road_network,
-    #     target_transform=landsat_reprojected["transform"],
-    #     target_shape=landsat_reprojected["shape"]
-    # )
+    # Reproject VIIRS to match Landsat grid
+    viirs_reprojected = None
+    if viirs_corrected is not None and viirs_profile is not None:
+        viirs_reprojected, _, _ = prepare.reproject_image(
+            data=viirs_corrected,
+            src_transform=viirs_profile['transform'],
+            src_crs=viirs_profile['crs'],
+            dst_crs=target_crs,
+            dst_transform=reference_transform,
+            dst_shape=(reference_shape[0], reference_shape[1]) if reference_shape is not None else None
+        )
+    
+    # Rasterize roads to match grid
+    roads_rasterized = None
+    if road_network is not None and reference_shape is not None and reference_transform is not None:
+        # Convert road network graph to shapes for rasterization
+        road_shapes = acquire.roads_graph_to_shapes(
+            graph=road_network,
+            buffer_distance=config.acquisition.osm_buffer if config else 0.00005
+        )
+        
+        # Rasterize the road shapes to match the Landsat grid
+        if road_shapes:
+            roads_rasterized = acquire.rasterize_road_shapes(
+                shapes=road_shapes,
+                reference_transform=reference_transform,
+                shape=(reference_shape[0], reference_shape[1]),
+                all_touched=True  # Include all pixels touched by roads
+            )
+        else:
+            # No roads found in the area
+            roads_rasterized = np.zeros(reference_shape, dtype=np.uint8)
     
     
     # ==================== ANALYZE PHASE ====================
     # Calculate indices and create composites
     
     # 1. Calculate spectral indices
-    # ndvi = analyze.indices.calculate_ndvi(
-    #     nir=landsat_reprojected["band_5"],
-    #     red=landsat_reprojected["band_4"]
-    # )
+    ndvi = None
+    ndwi = None
     
-    # ndwi = analyze.indices.calculate_ndwi(
-    #     green=landsat_reprojected["band_3"],
-    #     nir=landsat_reprojected["band_5"]
-    # )
+    if "B5" in landsat_reprojected and "B4" in landsat_reprojected:
+        ndvi = analyze.calculate_ndvi(
+            nir=landsat_reprojected["B5"],
+            red=landsat_reprojected["B4"],
+            epsilon=config.analysis.ndvi_epsilon if config else 1e-6
+        )
     
-    # 2. Create temporal composite if multiple dates available
-    # if len(viirs_corrected) > 1:
-    #     ntl_composite = analyze.temporal.create_temporal_composite(
-    #         data_stack=viirs_corrected,
-    #         method="median",
-    #         min_valid_observations=3
-    #     )
-    # else:
-    #     ntl_composite = viirs_corrected[0]
+    if "B3" in landsat_reprojected and "B5" in landsat_reprojected:
+        ndwi = analyze.calculate_ndwi(
+            green=landsat_reprojected["B3"],
+            nir=landsat_reprojected["B5"],
+            epsilon=config.analysis.ndwi_epsilon if config else 1e-6
+        )
+    
+    # 2. For now, we only have single date VIIRS, so no temporal compositing
+    # In a full implementation, we'd download multiple dates and composite them
+    ntl_composite = viirs_reprojected if viirs_reprojected is not None else None
     
     # 3. Calculate urban index combining NTL and vegetation
-    # ndui = analyze.indices.calculate_ndui(
-    #     ntl=ntl_composite,
-    #     ndvi=ndvi,
-    #     ndwi=ndwi,
-    #     ntl_floor=0.1,
-    #     ntl_ceiling=10.0
-    # )
+    ndui = None
+    if ntl_composite is not None and ndvi is not None:
+        ndui = analyze.calculate_ndui(
+            ntl=ntl_composite,
+            ndvi=ndvi,
+            ndwi=ndwi,  # Optional, can be None
+            ntl_floor=config.analysis.ntl_floor if config else 0.1,
+            ntl_ceiling=config.analysis.ntl_ceiling if config else 10.0,
+            ndui_floor=config.analysis.ndui_floor if config else 0.02,
+            epsilon=config.analysis.ndui_epsilon if config else 1e-6
+        )
     
-    # 4. Identify urban areas based on indices
-    # urban_mask = analyze.indices.combine_indices_for_classification(
-    #     ndvi=ndvi,
-    #     ndwi=ndwi,
-    #     ndui=ndui,
-    #     weights={"ndvi": -0.3, "ndwi": -0.2, "ndui": 0.5}
-    # )
+    # 4. Create urban mask from indices
+    urban_mask = None
+    if ndvi is not None and ndui is not None:
+        # Use combine_indices_for_classification to create composite index
+        # Then threshold to create urban mask
+        composite_index = analyze.combine_indices_for_classification(
+            ndvi=ndvi,
+            ndwi=ndwi if ndwi is not None else np.zeros_like(ndvi),
+            ndui=ndui,
+            weights={
+                "ndvi": -0.3,  # Negative weight - urban areas have low NDVI
+                "ndwi": -0.2,  # Negative weight - urban areas have low NDWI
+                "ndui": 0.5    # Positive weight - urban areas have high NDUI
+            }
+        )
+        # Create binary urban mask by thresholding the composite index
+        urban_mask = composite_index > 0.3
     
     
     # ==================== ENHANCE PHASE ====================
     # Improve visual quality and highlight features
     
     # 1. Enhance contrast for better visualization
-    # ntl_enhanced = enhance.contrast.enhance_contrast(
-    #     data=ntl_composite,
-    #     method="percentile",
-    #     percentiles=(2, 98),
-    #     output_range=(0.3, 0.8)
-    # )
+    ntl_enhanced = None
+    if ntl_composite is not None:
+        # Map config contrast method to valid options
+        method_mapping: dict[str, Literal["percentile", "minmax", "histogram", "adaptive"]] = {
+            "linear": "minmax",
+            "percentile": "percentile", 
+            "adaptive": "adaptive",
+            "retinex": "histogram"  # Closest approximation
+        }
+        config_method = config.enhancement.contrast_method if config else "linear"
+        method: Literal["percentile", "minmax", "histogram", "adaptive"] = method_mapping.get(config_method, "percentile")
+        
+        ntl_enhanced = enhance.enhance_contrast(
+            data=ntl_composite,
+            method=method,
+            percentiles=config.enhancement.contrast_percentiles if config else (2.0, 98.0),
+            output_range=config.enhancement.contrast_output_range if config else (0.0, 1.0)
+        )
     
     # 2. Enhance road networks in the NTL data
-    # ntl_roads_enhanced = enhance.features.enhance_roads(
-    #     data=ntl_enhanced,
-    #     road_mask=roads_rasterized,
-    #     major_factor=1.3,
-    #     minor_factor=1.1
-    # )
+    ntl_roads_enhanced = None
+    if ntl_enhanced is not None and roads_rasterized is not None:
+        ntl_roads_enhanced = enhance.enhance_roads(
+            data=ntl_enhanced,
+            road_mask=roads_rasterized,
+            major_factor=config.enhancement.road_major_factor if config else 1.3,
+            minor_factor=config.enhancement.road_minor_factor if config else 1.1,
+            custom_factors=config.enhancement.custom_road_factors if config else None
+        )
+    else:
+        ntl_roads_enhanced = ntl_enhanced
     
     # 3. Enhance urban features
-    # ntl_urban_enhanced = enhance.features.enhance_urban_features(
-    #     ntl_data=ntl_roads_enhanced,
-    #     urban_mask=urban_mask,
-    #     road_mask=roads_rasterized,
-    #     enhancement_factor=1.2
-    # )
+    ntl_urban_enhanced = None
+    if ntl_roads_enhanced is not None and urban_mask is not None:
+        ntl_urban_enhanced = enhance.enhance_urban_features(
+            ntl_data=ntl_roads_enhanced,
+            urban_mask=urban_mask,
+            road_mask=roads_rasterized,
+            enhancement_factor=1.2,
+            road_factor=1.1
+        )
+    else:
+        ntl_urban_enhanced = ntl_roads_enhanced
     
     # 4. Apply color mapping for visualization
-    # ntl_colored = enhance.visualize.apply_inferno_colormap(
-    #     data=ntl_urban_enhanced,
-    #     scale_range=(0.3, 0.8),
-    #     zero_as_black=True
-    # )
+    ntl_colored = None
+    if ntl_urban_enhanced is not None:
+        # First apply inferno colormap specifically
+        ntl_colored = enhance.apply_inferno_colormap(
+            data=ntl_urban_enhanced,
+            scale_range=config.enhancement.colormap_range if config else (0.3, 0.8)
+        )
     
-    # 5. Create false color composite for context
-    # landsat_viz = enhance.visualize.create_false_color_composite(
-    #     red_channel=landsat_reprojected["band_5"],  # NIR
-    #     green_channel=landsat_reprojected["band_4"],  # Red
-    #     blue_channel=landsat_reprojected["band_3"],  # Green
-    #     contrast_enhance=True
-    # )
+    # 5. Create false color composite for context (optional)
+    landsat_viz = None
+    if "B5" in landsat_reprojected and "B4" in landsat_reprojected and "B3" in landsat_reprojected:
+        landsat_viz = enhance.create_false_color_composite(
+            red_channel=landsat_reprojected["B5"],   # NIR in red
+            green_channel=landsat_reprojected["B4"], # Red in green
+            blue_channel=landsat_reprojected["B3"],  # Green in blue
+            contrast_enhance=True,
+            gamma=None  # Use default gamma
+        )
     
     
     # ==================== EXPORT PHASE ====================
     # Generate final outputs in various formats
     
     # 1. Validate output before saving
-    # validation_results = export.validate.validate_for_cog(
-    #     data=ntl_colored,
-    #     transform=landsat_reprojected["transform"],
-    #     crs=target_crs
-    # )
-    
-    # if not validation_results["valid"]:
-    #     raise ValueError(f"Output validation failed: {validation_results['errors']}")
+    validation_results = {"valid": True, "errors": []}
+    if ntl_colored is not None and reference_transform is not None:
+        validation_results = export.validate_for_cog(
+            data=ntl_colored,
+            transform=reference_transform,
+            crs=target_crs,
+            check_tiling=True,
+            check_compression=True,
+            check_overviews=True
+        )
+        
+        if not validation_results["valid"]:
+            print(f"Warning: Output validation failed: {validation_results['errors']}")
     
     # 2. Generate metadata
-    # metadata = export.metadata.create_metadata(
-    #     data_sources={
-    #         "landsat": landsat_scenes["metadata"],
-    #         "viirs": viirs_tiles["metadata"],
-    #         "osm": road_network["metadata"]
-    #     },
-    #     processing_steps=[
-    #         "lunar_correction",
-    #         "cloud_masking",
-    #         "temporal_compositing",
-    #         "urban_enhancement"
-    #     ],
-    #     indices_calculated=["ndvi", "ndwi", "ndui"],
-    #     date_processed=datetime.now()
-    # )
+    metadata = export.create_metadata(
+        data_sources={
+            "landsat": {
+                "files": nir_files + red_files + green_files + blue_files,
+                "date_range": f"{date.strftime('%Y-%m-%d')}",
+                "sensor": "Landsat 8/9",
+                "processing_level": "L2SP"
+            },
+            "viirs": {
+                "files": viirs_data.get('radiance', []) if viirs_data else [],
+                "date_range": f"{date.strftime('%Y-%m-%d')}",
+                "sensor": "VIIRS",
+                "product": "VNP46A2"
+            },
+            "osm": {
+                "date_accessed": datetime.now().strftime('%Y-%m-%d'),
+                "road_types": config.acquisition.road_types if config else []
+            }
+        },
+        processing_steps=[
+            "lunar_correction",
+            "cloud_masking", 
+            "spatial_reprojection",
+            "index_calculation",
+            "urban_enhancement",
+            "road_enhancement",
+            "contrast_enhancement",
+            "colormap_application"
+        ],
+        indices_calculated=["ndvi", "ndwi", "ndui"] if ndui is not None else [],
+        date_processed=datetime.now(),
+        bbox=bbox,
+        crs=target_crs,
+        resolution=target_resolution
+    )
     
     # 3. Create Cloud-Optimized GeoTIFF
-    # export.cog.create_cog(
-    #     data=ntl_colored,
-    #     output_path=output_path,
-    #     transform=landsat_reprojected["transform"],
-    #     crs=target_crs,
-    #     metadata=metadata,
-    #     compress="deflate",
-    #     tiled=True,
-    #     overviews=[2, 4, 8, 16]
-    # )
+    if ntl_colored is not None and reference_transform is not None:
+        # Get compression setting with proper type casting
+        compress_setting = config.export.compress if config else "deflate"
+        valid_compressions: set[str] = {"deflate", "lzw", "jpeg", "webp", "zstd"}
+        if compress_setting not in valid_compressions:
+            compress_setting = "deflate"
+        
+        export.create_cog(
+            data=ntl_colored,
+            output_path=output_path,
+            transform=reference_transform,
+            crs=target_crs,
+            metadata=metadata,
+            compress=cast(Literal["deflate", "lzw", "jpeg", "webp", "zstd"], compress_setting),
+            tiled=config.export.tiled if config else True,
+            overviews=config.export.overview_levels if config else [2, 4, 8, 16]
+        )
     
-    # 4. Generate auxiliary outputs
-    # Export urban mask
-    # export.cog.export_single_band(
-    #     data=urban_mask,
-    #     output_path=output_path.replace(".tif", "_urban_mask.tif"),
-    #     transform=landsat_reprojected["transform"],
-    #     crs=target_crs,
-    #     dtype="uint8"
-    # )
+    # 4. Generate auxiliary outputs if requested
+    if config and config.export.generate_urban_mask and urban_mask is not None and reference_transform is not None:
+        # Export urban mask
+        compress_setting = config.export.compress if config else "deflate"
+        valid_single_compressions: set[str] = {"deflate", "lzw"}
+        if compress_setting not in valid_single_compressions:
+            compress_setting = "deflate"
+            
+        export.export_single_band(
+            data=urban_mask.astype(np.uint8),
+            output_path=output_path.replace(".tif", "_urban_mask.tif"),
+            transform=reference_transform,
+            crs=target_crs,
+            band_name="urban_mask",
+            compress=cast(Literal["deflate", "lzw"], compress_setting)
+        )
     
-    # Export indices
-    # export.cog.export_multi_band(
-    #     bands={"ndvi": ndvi, "ndwi": ndwi, "ndui": ndui},
-    #     output_path=output_path.replace(".tif", "_indices.tif"),
-    #     transform=landsat_reprojected["transform"],
-    #     crs=target_crs
-    # )
+    if config and config.export.generate_indices_file and reference_transform is not None:
+        # Export indices as multi-band file
+        indices_dict = {}
+        if ndvi is not None:
+            indices_dict["ndvi"] = ndvi
+        if ndwi is not None:
+            indices_dict["ndwi"] = ndwi
+        if ndui is not None:
+            indices_dict["ndui"] = ndui
+            
+        if indices_dict:
+            compress_setting = config.export.compress if config else "deflate"
+            valid_multi_compressions: set[str] = {"deflate", "lzw"}
+            if compress_setting not in valid_multi_compressions:
+                compress_setting = "deflate"
+                
+            export.export_multi_band(
+                bands=indices_dict,
+                output_path=output_path.replace(".tif", "_indices.tif"),
+                transform=reference_transform,
+                crs=target_crs,
+                compress=cast(Literal["deflate", "lzw"], compress_setting)
+            )
     
-    # 5. Create visualization products
-    # Add scale bar and north arrow
-    # final_viz = enhance.visualize.add_scale_bar(
-    #     image=ntl_colored,
-    #     pixel_size=target_resolution,
-    #     length_km=10.0
-    # )
-    # final_viz = enhance.visualize.add_north_arrow(final_viz)
+    # Calculate basic statistics for the results
+    statistics: dict[str, float | None] = {
+        "urban_area_km2": None,
+        "mean_radiance": None,
+        "road_length_km": None
+    }
     
-    # Save as web-ready image
-    # export.visualize.save_for_web(
-    #     data=final_viz,
-    #     output_path=output_path.replace(".tif", "_web.jpg"),
-    #     quality=85
-    # )
+    if urban_mask is not None and reference_transform is not None:
+        # Calculate urban area in km²
+        pixel_area_m2 = abs(reference_transform.a * reference_transform.e)  # pixel area in m²
+        urban_pixels = np.sum(urban_mask)
+        statistics["urban_area_km2"] = float((urban_pixels * pixel_area_m2) / 1e6)
+    
+    if ntl_composite is not None:
+        # Calculate mean radiance
+        statistics["mean_radiance"] = float(np.nanmean(ntl_composite))
     
     # Return results summary
     return {
@@ -301,25 +501,26 @@ def black_marble_pipeline(
         "date": date,
         "metadata": metadata,
         "validation": validation_results,
-        "statistics": {
-            "urban_area_km2": None,  # urban_mask.sum() * pixel_area
-            "mean_radiance": None,   # ntl_composite.mean()
-            "road_length_km": None   # road_network["total_length"]
-        }
+        "statistics": statistics
     }
 
 
 if __name__ == "__main__":
     # Example usage showing the complete flow
-    result = black_marble_pipeline(
+    from .target_config import PipelineConfig
+    
+    # Create config using for_bm_parity method
+    config = PipelineConfig.for_bm_parity(
         bbox=(-74.05, 40.69, -73.95, 40.79),  # Manhattan
         date=datetime(2023, 9, 15),
-        output_path="/tmp/manhattan_black_marble.tif",
-        config={
-            "cloud_cover_max": 20,
-            "composite_days": 16,
-            "enhance_roads": True
-        }
+        output_path="/tmp/manhattan_black_marble.tif"
+    )
+    
+    result = black_marble_pipeline(
+        bbox=config.bbox,
+        date=config.date,
+        output_path=config.output_path,
+        config=config
     )
     
     print(f"Processing complete: {result['output_path']}")
