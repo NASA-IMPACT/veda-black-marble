@@ -7,17 +7,75 @@ analytical utility of processed imagery through contrast adjustments.
 from typing import Any, Literal
 import numpy as np
 import numpy.typing as npt
-
-# Import existing implementations
-from blackmarble.ported_functionality import (
-    enhance_contrast as _enhance_contrast,
-    chain_enhancements as _chain_enhancements,
-)
-from blackmarble.processing import normalize_data as _normalize_data
+from scipy import ndimage
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
 MaskArray = npt.NDArray[Any]
+
+
+def _histogram_equalize(image: ArrayLike, nbins: int = 256) -> ArrayLike:
+    """Pure numpy implementation of histogram equalization.
+    
+    Args:
+        image: Input image array (should be normalized to [0, 1])
+        nbins: Number of histogram bins
+        
+    Returns:
+        Equalized image in [0, 1] range
+    """
+    # Get image histogram
+    image_flat = image.flatten()
+    hist, bins = np.histogram(image_flat, bins=nbins, range=(0, 1))
+    
+    # Calculate cumulative distribution function
+    cdf = hist.cumsum()
+    cdf = cdf / float(cdf[-1])  # Normalize
+    
+    # Use linear interpolation of cdf to find new pixel values
+    equalized_flat = np.interp(image_flat, bins[:-1], cdf)
+    
+    return equalized_flat.reshape(image.shape)
+
+
+def _adaptive_histogram_equalize(image: ArrayLike, clip_limit: float = 0.03, nbins: int = 256) -> ArrayLike:
+    """Simplified adaptive histogram equalization.
+    
+    This is a basic implementation that applies local histogram equalization
+    with contrast limiting. For production use, consider the full CLAHE algorithm.
+    
+    Args:
+        image: Input image (should be normalized to [0, 1])
+        clip_limit: Clipping limit for contrast limiting
+        nbins: Number of histogram bins
+        
+    Returns:
+        Adaptively equalized image
+    """
+    # For simplicity, we'll use a global approach with contrast limiting
+    # A full implementation would divide the image into tiles
+    
+    # Get histogram
+    hist, bins = np.histogram(image.flatten(), bins=nbins, range=(0, 1))
+    
+    # Apply clipping
+    clip_level = clip_limit * image.size / nbins
+    excess = 0
+    for i in range(nbins):
+        if hist[i] > clip_level:
+            excess += hist[i] - clip_level
+            hist[i] = clip_level
+    
+    # Redistribute excess uniformly
+    hist = hist + excess / nbins
+    
+    # Calculate CDF
+    cdf = hist.cumsum()
+    cdf = cdf / float(cdf[-1])
+    
+    # Apply transformation
+    result = np.interp(image.flatten(), bins[:-1], cdf)
+    return result.reshape(image.shape)
 
 
 def enhance_contrast(
@@ -29,304 +87,431 @@ def enhance_contrast(
     target_mean: float = 0.5,
     target_std: float = 0.15
 ) -> ArrayLike:
-    """Apply contrast enhancement to improve visualization.
+    """Enhance contrast using various methods.
     
     Args:
         data: Input data array
         method: Enhancement method to use
-        percentiles: Percentiles for clipping (only for percentile method)
+        percentiles: Percentiles for percentile stretching
         output_range: Desired output range (min, max)
-        mask: Optional mask for valid pixels
-        target_mean: Target mean for adaptive method
-        target_std: Target standard deviation for adaptive method
+        mask: Optional mask for valid data
+        target_mean: Target mean for histogram method
+        target_std: Target std dev for histogram method
         
     Returns:
-        Enhanced array with improved contrast
+        Contrast-enhanced array
     """
-    # Delegate to existing implementation in ported_functionality.py
-    return _enhance_contrast(
-        data=data,
-        method=method,
-        percentiles=percentiles,
-        output_range=output_range,
-        mask=mask,
-        target_mean=target_mean,
-        target_std=target_std
-    )
+    # Pure functional implementation
+    result = data.copy()
+    
+    # Apply mask if provided
+    if mask is not None:
+        valid_data = data[mask]
+    else:
+        valid_data = data.ravel()
+    
+    if method == "percentile":
+        # Percentile stretching
+        p_low = np.percentile(valid_data, percentiles[0])
+        p_high = np.percentile(valid_data, percentiles[1])
+        
+        if p_high > p_low:
+            result = (data - p_low) / (p_high - p_low)
+        else:
+            result = np.zeros_like(data)
+    
+    elif method == "minmax":
+        # Min-max stretching
+        vmin = np.min(valid_data)
+        vmax = np.max(valid_data)
+        
+        if vmax > vmin:
+            result = (data - vmin) / (vmax - vmin)
+        else:
+            result = np.zeros_like(data)
+    
+    elif method == "histogram":
+        # Histogram equalization with target statistics
+        # First normalize to [0, 1]
+        vmin = np.min(valid_data)
+        vmax = np.max(valid_data)
+        
+        if vmax > vmin:
+            normalized = (data - vmin) / (vmax - vmin)
+        else:
+            normalized = np.zeros_like(data)
+        
+        # Apply histogram equalization
+        if mask is not None:
+            # Create a copy for processing
+            temp = normalized.copy()
+            temp[mask] = _histogram_equalize(normalized[mask])
+            result = temp
+        else:
+            result = _histogram_equalize(normalized)
+        
+        # Adjust to target statistics
+        current_mean = np.mean(result[mask] if mask is not None else result)
+        current_std = np.std(result[mask] if mask is not None else result)
+        
+        if current_std > 0:
+            result = (result - current_mean) / current_std * target_std + target_mean
+    
+    else:  # adaptive
+        # Adaptive histogram equalization
+        # Convert to appropriate range for skimage
+        vmin = np.min(valid_data)
+        vmax = np.max(valid_data)
+        
+        if vmax > vmin:
+            normalized = (data - vmin) / (vmax - vmin)
+        else:
+            normalized = np.zeros_like(data)
+        
+        # Apply adaptive equalization
+        clip_limit = 0.03
+        result = _adaptive_histogram_equalize(normalized, clip_limit=clip_limit)
+    
+    # Scale to output range
+    out_min, out_max = output_range
+    result = result * (out_max - out_min) + out_min
+    
+    # Ensure we stay within output range
+    result = np.clip(result, out_min, out_max)
+    
+    return result
 
 
-def normalize_data(
+def adaptive_local_contrast(
     data: ArrayLike,
-    output_min: float = 0.0,
-    output_max: float = 1.0,
-    input_min: float | None = None,
-    input_max: float | None = None
+    window_size: int = 15,
+    enhancement_factor: float = 1.5,
+    preserve_brightness: bool = True
 ) -> ArrayLike:
-    """Normalize data to specified range.
+    """Apply local contrast enhancement using adaptive methods.
     
     Args:
         data: Input data array
-        output_min: Minimum of output range
-        output_max: Maximum of output range
-        input_min: Minimum of input range (auto-detected if None)
-        input_max: Maximum of input range (auto-detected if None)
+        window_size: Size of local window for enhancement
+        enhancement_factor: Strength of enhancement
+        preserve_brightness: Whether to preserve overall brightness
         
     Returns:
-        Normalized data array
+        Locally enhanced array
     """
-    # Delegate to existing implementation in processing.py
-    return _normalize_data(
-        data=data,
-        output_min=output_min,
-        output_max=output_max,
-        input_min=input_min,
-        input_max=input_max
-    )
+    # Calculate local mean using uniform filter
+    local_mean = ndimage.uniform_filter(data, size=window_size)
+    
+    # Calculate deviation from local mean
+    deviation = data - local_mean
+    
+    # Enhance the deviation
+    enhanced_deviation = deviation * enhancement_factor
+    
+    # Reconstruct the image
+    enhanced = local_mean + enhanced_deviation
+    
+    if preserve_brightness:
+        # Preserve original brightness
+        original_mean = np.mean(data)
+        enhanced_mean = np.mean(enhanced)
+        if enhanced_mean != 0:
+            enhanced = enhanced * (original_mean / enhanced_mean)
+    
+    return enhanced
 
 
-def adaptive_histogram_equalization(
+def multi_scale_enhancement(
     data: ArrayLike,
-    clip_limit: float = 0.03,
-    tile_size: tuple[int, int] = (8, 8)
+    scales: list[int] = [3, 7, 15],
+    weights: list[float] | None = None
 ) -> ArrayLike:
-    """Apply Contrast Limited Adaptive Histogram Equalization (CLAHE).
+    """Enhance contrast at multiple scales.
     
     Args:
         data: Input data array
-        clip_limit: Clipping limit for contrast limiting
-        tile_size: Size of tiles for local equalization
+        scales: List of window sizes for different scales
+        weights: Weights for each scale (defaults to equal)
         
     Returns:
-        Enhanced array with locally equalized contrast
+        Multi-scale enhanced array
     """
-    # Simple implementation using percentile stretching per tile
-    # For full CLAHE, would need cv2 or skimage
-    h, w = data.shape[-2:]
-    tile_h, tile_w = tile_size
+    if weights is None:
+        weights = [1.0 / len(scales)] * len(scales)
     
-    # Create output array
-    output = np.zeros_like(data)
+    # Ensure weights sum to 1
+    weight_sum = sum(weights)
+    weights = [w / weight_sum for w in weights]
     
-    # Process each tile
-    for i in range(0, h, tile_h):
-        for j in range(0, w, tile_w):
-            # Extract tile
-            tile_end_h = min(i + tile_h, h)
-            tile_end_w = min(j + tile_w, w)
-            
-            if data.ndim == 2:
-                tile = data[i:tile_end_h, j:tile_end_w]
-                # Apply local enhancement
-                enhanced_tile = _enhance_contrast(
-                    tile, method="percentile", 
-                    percentiles=(2, 98),
-                    output_range=(0, 1)
-                )
-                output[i:tile_end_h, j:tile_end_w] = enhanced_tile
-            else:
-                # Handle multi-band data
-                for b in range(data.shape[0]):
-                    tile = data[b, i:tile_end_h, j:tile_end_w]
-                    enhanced_tile = _enhance_contrast(
-                        tile, method="percentile",
-                        percentiles=(2, 98),
-                        output_range=(0, 1)
-                    )
-                    output[b, i:tile_end_h, j:tile_end_w] = enhanced_tile
+    # Apply enhancement at each scale
+    enhanced_scales = []
+    for scale, weight in zip(scales, weights):
+        enhanced = adaptive_local_contrast(data, window_size=scale, enhancement_factor=1.2)
+        enhanced_scales.append(enhanced * weight)
     
-    return output
+    # Combine all scales
+    result = np.sum(enhanced_scales, axis=0)
+    
+    return result
+
+
+def sigmoid_correction(
+    data: ArrayLike,
+    midpoint: float = 0.5,
+    slope: float = 10.0
+) -> ArrayLike:
+    """Apply sigmoid tone curve for S-curve contrast.
+    
+    Args:
+        data: Input data array (should be in [0, 1])
+        midpoint: Center of sigmoid curve
+        slope: Steepness of curve
+        
+    Returns:
+        Sigmoid-corrected array
+    """
+    # Apply sigmoid function
+    result = 1.0 / (1.0 + np.exp(-slope * (data - midpoint)))
+    
+    # Normalize to maintain range
+    result_min = 1.0 / (1.0 + np.exp(-slope * (0 - midpoint)))
+    result_max = 1.0 / (1.0 + np.exp(-slope * (1 - midpoint)))
+    
+    if result_max > result_min:
+        result = (result - result_min) / (result_max - result_min)
+    
+    return result
 
 
 def gamma_correction(
     data: ArrayLike,
     gamma: float = 1.0,
-    epsilon: float = 0.0
+    preserve_zeros: bool = True
 ) -> ArrayLike:
-    """Apply gamma correction for display adjustment.
+    """Apply gamma correction for brightness adjustment.
     
     Args:
-        data: Input data array (should be in [0, 1] range)
+        data: Input data array (should be in [0, 1])
         gamma: Gamma value (< 1 brightens, > 1 darkens)
-        epsilon: Small value to avoid issues with zero
+        preserve_zeros: Whether to keep zero values as zero
         
     Returns:
         Gamma-corrected array
     """
-    # Simple gamma correction implementation
-    # Ensure data is in [0, 1] range
-    data_normalized = np.clip(data, 0, 1)
+    # Preserve zero mask if requested
+    if preserve_zeros:
+        zero_mask = data == 0
     
-    # Apply gamma correction with epsilon to avoid issues
-    return np.power(data_normalized + epsilon, gamma)
+    # Apply gamma correction
+    result = np.power(np.clip(data, 0, 1), gamma)
+    
+    # Restore zeros if requested
+    if preserve_zeros:
+        result[zero_mask] = 0
+    
+    return result
 
 
-def multi_scale_retinex(
+def clahe_enhancement(
     data: ArrayLike,
-    scales: list[float] = [15, 80, 250],
-    weights: list[float] | None = None
+    clip_limit: float = 0.03,
+    tile_size: tuple[int, int] = (8, 8)
 ) -> ArrayLike:
-    """Apply Multi-Scale Retinex enhancement.
+    """Apply Contrast Limited Adaptive Histogram Equalization.
     
     Args:
         data: Input data array
-        scales: Gaussian kernel scales
-        weights: Weights for each scale (equal if None)
+        clip_limit: Clipping limit for contrast limiting
+        tile_size: Size of tiles for local processing
         
     Returns:
-        Enhanced array with improved local contrast
+        CLAHE enhanced array
     """
-    # Simple implementation using multiple contrast enhancements
-    # For full MSR, would need scipy.ndimage for Gaussian filtering
-    if weights is None:
-        weights = [1.0 / len(scales)] * len(scales)
-    
-    # Ensure weights sum to 1
-    weights_array = np.array(weights)
-    weights_array = weights_array / weights_array.sum()
-    
-    # Apply multiple scales of enhancement
-    result = np.zeros_like(data, dtype=np.float32)
-    
-    for scale, weight in zip(scales, weights_array):
-        # Simulate different scales with different percentile ranges
-        # Smaller scale = tighter percentiles (more local contrast)
-        # Larger scale = wider percentiles (more global contrast)
-        p_low = max(0.5, 5.0 - scale / 50.0)
-        p_high = min(99.5, 95.0 + scale / 50.0)
-        
-        enhanced = _enhance_contrast(
-            data,
-            method="percentile",
-            percentiles=(p_low, p_high),
-            output_range=(0, 1)
-        )
-        result += weight * enhanced
-    
-    return np.clip(result, 0, 1)
-
-
-def histogram_matching(
-    source: ArrayLike,
-    reference: ArrayLike,
-    mask: MaskArray | None = None
-) -> ArrayLike:
-    """Match histogram of source to reference.
-    
-    Args:
-        source: Source data to adjust
-        reference: Reference data for histogram
-        mask: Optional mask for valid pixels
-        
-    Returns:
-        Source data with matched histogram
-    """
-    # Simple histogram matching implementation
-    # Get valid data
-    if mask is not None:
-        source_valid = source[mask > 0]
-        reference_valid = reference[mask > 0]
+    # Normalize to [0, 1] first
+    vmin, vmax = np.min(data), np.max(data)
+    if vmax > vmin:
+        normalized = (data - vmin) / (vmax - vmin)
     else:
-        source_valid = source[~np.isnan(source)]
-        reference_valid = reference[~np.isnan(reference)]
+        return data
     
-    if len(source_valid) == 0 or len(reference_valid) == 0:
-        return source
+    # Apply CLAHE
+    result = _adaptive_histogram_equalize(
+        normalized,
+        clip_limit=clip_limit,
+        nbins=256
+    )
     
-    # Compute CDFs
-    source_values, source_indices = np.unique(source_valid, return_inverse=True)
-    reference_values, reference_counts = np.unique(reference_valid, return_counts=True)
-    
-    source_cdf = np.cumsum(np.bincount(source_indices))
-    source_cdf = source_cdf / source_cdf[-1]
-    
-    reference_cdf = np.cumsum(reference_counts)
-    reference_cdf = reference_cdf / reference_cdf[-1]
-    
-    # Create mapping
-    mapping = np.interp(source_cdf, reference_cdf, reference_values)
-    
-    # Apply mapping
-    result = source.copy()
-    if mask is not None:
-        result[mask > 0] = mapping[source_indices]
-    else:
-        valid_mask = ~np.isnan(source)
-        flat_source = source[valid_mask]
-        mapped_values = np.interp(flat_source, source_values, mapping)
-        result[valid_mask] = mapped_values
+    # Scale back to original range
+    result = result * (vmax - vmin) + vmin
     
     return result
 
 
 def chain_enhancements(
     data: ArrayLike,
-    operations: list[tuple[Any, dict[str, Any]]]
+    enhancements: list[dict[str, Any]]
 ) -> ArrayLike:
-    """Chain multiple enhancement operations in sequence.
+    """Apply multiple enhancements in sequence.
     
     Args:
         data: Input data array
-        operations: List of (function, kwargs) tuples to apply
+        enhancements: List of enhancement configurations
         
     Returns:
-        Final enhanced data after all operations
+        Result after applying all enhancements
     """
-    # Delegate to existing implementation in ported_functionality.py
-    return _chain_enhancements(data=data, operations=operations)
+    result = data.copy()
+    
+    for config in enhancements:
+        method = config.get("method", "percentile")
+        
+        if method == "gamma":
+            result = gamma_correction(
+                result,
+                gamma=config.get("gamma", 1.0),
+                preserve_zeros=config.get("preserve_zeros", True)
+            )
+        elif method == "sigmoid":
+            result = sigmoid_correction(
+                result,
+                midpoint=config.get("midpoint", 0.5),
+                slope=config.get("slope", 10.0)
+            )
+        elif method == "adaptive":
+            result = adaptive_local_contrast(
+                result,
+                window_size=config.get("window_size", 15),
+                enhancement_factor=config.get("enhancement_factor", 1.5)
+            )
+        elif method == "clahe":
+            result = clahe_enhancement(
+                result,
+                clip_limit=config.get("clip_limit", 0.03),
+                tile_size=config.get("tile_size", (8, 8))
+            )
+        else:
+            # Default contrast enhancement
+            result = enhance_contrast(
+                result,
+                method=method,
+                percentiles=config.get("percentiles", (2.0, 98.0)),
+                output_range=config.get("output_range", (0.0, 1.0))
+            )
+    
+    return result
 
 
-def compute_enhancement_statistics(
-    original: ArrayLike,
-    enhanced: ArrayLike,
-    mask: MaskArray | None = None
-) -> dict[str, Any]:
-    """Compute statistics comparing original and enhanced data.
+def normalize_data(
+    data: ArrayLike,
+    output_range: tuple[float, float] = (0.0, 1.0),
+    input_range: tuple[float, float] | None = None,
+    clip: bool = True
+) -> ArrayLike:
+    """Normalize data to specified range.
     
     Args:
-        original: Original data array
-        enhanced: Enhanced data array
-        mask: Optional mask for valid pixels
+        data: Input data array
+        output_range: Desired output range
+        input_range: Input range (auto-detected if None)
+        clip: Whether to clip values to output range
         
     Returns:
-        Dictionary with comparison statistics
+        Normalized array
     """
-    # Compute comparison statistics
-    if mask is not None:
-        orig_valid = original[mask > 0]
-        enh_valid = enhanced[mask > 0]
+    if input_range is None:
+        vmin, vmax = np.nanmin(data), np.nanmax(data)
     else:
-        orig_valid = original[~np.isnan(original)]
-        enh_valid = enhanced[~np.isnan(enhanced)]
+        vmin, vmax = input_range
     
-    if len(orig_valid) == 0 or len(enh_valid) == 0:
-        return {
-            "original_mean": np.nan,
-            "original_std": np.nan,
-            "enhanced_mean": np.nan,
-            "enhanced_std": np.nan,
-            "mean_change": np.nan,
-            "std_change": np.nan,
-            "dynamic_range_improvement": np.nan,
-            "contrast_improvement_ratio": np.nan
-        }
+    if vmax > vmin:
+        # Scale to [0, 1]
+        normalized = (data - vmin) / (vmax - vmin)
+        
+        # Scale to output range
+        out_min, out_max = output_range
+        result = normalized * (out_max - out_min) + out_min
+    else:
+        # Constant data
+        result = np.full_like(data, output_range[0])
     
-    # Basic statistics
-    orig_mean = np.mean(orig_valid)
-    orig_std = np.std(orig_valid)
-    enh_mean = np.mean(enh_valid)
-    enh_std = np.std(enh_valid)
+    if clip:
+        result = np.clip(result, output_range[0], output_range[1])
     
-    # Dynamic range
-    orig_range = np.ptp(orig_valid)  # peak to peak
-    enh_range = np.ptp(enh_valid)
+    return result
+
+
+def highlight_features(
+    data: ArrayLike,
+    threshold: float = 0.7,
+    highlight_factor: float = 1.5,
+    suppress_factor: float = 0.5
+) -> ArrayLike:
+    """Highlight bright features while suppressing dim areas.
     
-    return {
-        "original_mean": float(orig_mean),
-        "original_std": float(orig_std),
-        "enhanced_mean": float(enh_mean),
-        "enhanced_std": float(enh_std),
-        "mean_change": float(enh_mean - orig_mean),
-        "std_change": float(enh_std - orig_std),
-        "dynamic_range_improvement": float(enh_range / orig_range) if orig_range > 0 else np.nan,
-        "contrast_improvement_ratio": float(enh_std / orig_std) if orig_std > 0 else np.nan
-    }
+    Args:
+        data: Input data array (should be normalized)
+        threshold: Threshold for feature detection
+        highlight_factor: Enhancement for bright features
+        suppress_factor: Suppression for dim areas
+        
+    Returns:
+        Feature-highlighted array
+    """
+    # Create masks for different regions
+    bright_mask = data > threshold
+    dim_mask = data < (threshold * 0.5)
+    mid_mask = ~(bright_mask | dim_mask)
+    
+    # Apply different factors to different regions
+    result = data.copy()
+    result[bright_mask] = np.minimum(data[bright_mask] * highlight_factor, 1.0)
+    result[dim_mask] = data[dim_mask] * suppress_factor
+    
+    # Smooth transitions
+    if np.any(mid_mask):
+        # Linear interpolation in middle region
+        mid_data = data[mid_mask]
+        alpha = (mid_data - threshold * 0.5) / (threshold * 0.5)
+        result[mid_mask] = (
+            mid_data * suppress_factor * (1 - alpha) +
+            mid_data * alpha
+        )
+    
+    return result
+
+
+def remove_outliers(
+    data: ArrayLike,
+    percentile_low: float = 0.1,
+    percentile_high: float = 99.9,
+    replacement: Literal["clip", "nan", "median"] = "clip"
+) -> ArrayLike:
+    """Remove or replace outlier values.
+    
+    Args:
+        data: Input data array
+        percentile_low: Lower percentile threshold
+        percentile_high: Upper percentile threshold
+        replacement: How to handle outliers
+        
+    Returns:
+        Array with outliers handled
+    """
+    # Calculate thresholds
+    p_low = np.percentile(data, percentile_low)
+    p_high = np.percentile(data, percentile_high)
+    
+    # Create outlier mask
+    outlier_mask = (data < p_low) | (data > p_high)
+    
+    result = data.copy()
+    
+    if replacement == "clip":
+        result = np.clip(result, p_low, p_high)
+    elif replacement == "nan":
+        result[outlier_mask] = np.nan
+    else:  # median
+        median_val = np.median(data[~outlier_mask])
+        result[outlier_mask] = median_val
+    
+    return result

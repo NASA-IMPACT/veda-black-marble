@@ -188,3 +188,6 @@ profile.json
 __pycache__
 *.pyc
 cache/
+
+# transient data files
+data/

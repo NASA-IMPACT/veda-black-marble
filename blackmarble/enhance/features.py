@@ -9,12 +9,6 @@ import numpy as np
 import numpy.typing as npt
 from scipy.ndimage import distance_transform_edt, binary_dilation, label
 
-# Import existing implementations
-from blackmarble.processing import (
-    enhance_roads as _enhance_roads,
-    enhance_urban_features as _enhance_urban_features,
-)
-
 # Type aliases
 ArrayLike = npt.NDArray[Any]
 
@@ -38,14 +32,29 @@ def enhance_roads(
     Returns:
         Enhanced data array with boosted road values
     """
-    # Delegate to existing implementation in processing.py
-    return _enhance_roads(
-        data=data,
-        roads=road_mask,  # Note: parameter name difference
-        major_factor=major_factor,
-        minor_factor=minor_factor,
-        custom_factors=custom_factors
-    )
+    # Pure functional implementation
+    enhanced = data.copy()
+    
+    # Default road type factors if not custom provided
+    if custom_factors is None:
+        # Road types: 1=motorway, 2=primary, 3=secondary, 4=tertiary, 5=residential, 6=other
+        factors = {
+            1: major_factor,  # motorway
+            2: major_factor,  # primary
+            3: minor_factor,  # secondary
+            4: minor_factor,  # tertiary
+            5: minor_factor,  # residential
+            6: minor_factor,  # other
+        }
+    else:
+        factors = custom_factors
+    
+    # Apply enhancement for each road type
+    for road_type, factor in factors.items():
+        mask = road_mask == road_type
+        enhanced[mask] = data[mask] * factor
+    
+    return enhanced
 
 
 def enhance_urban_features(
@@ -69,25 +78,19 @@ def enhance_urban_features(
     Returns:
         Enhanced nighttime lights emphasizing urban features
     """
-    # The existing function takes ndui, roads, ntl, enhancement_strength
-    # We need to adapt the parameters
-    enhancement_strength = (enhancement_factor - 1.0) / 0.3  # Convert factor to strength
+    # Pure functional implementation
+    enhanced = ntl_data.copy()
     
-    # If urban_mask is provided as NDUI data, use it directly
-    # Otherwise, treat it as a binary mask and use ntl_data as NDUI
-    if urban_mask.dtype == bool or (np.min(urban_mask) >= 0 and np.max(urban_mask) <= 1):
-        # Binary mask case - use ntl_data as the base
-        ndui = ntl_data * urban_mask
-    else:
-        # urban_mask is already NDUI data
-        ndui = urban_mask
+    # Apply urban enhancement
+    urban_areas = urban_mask > 0.5 if urban_mask.dtype == bool else urban_mask > 0
+    enhanced[urban_areas] = ntl_data[urban_areas] * enhancement_factor
     
-    enhanced = _enhance_urban_features(
-        ndui=ndui,
-        roads=road_mask if road_mask is not None else np.zeros_like(ndui),
-        ntl=ntl_data if ntl_data is not urban_mask else None,
-        enhancement_strength=enhancement_strength
-    )
+    # Apply additional road enhancement if provided
+    if road_mask is not None:
+        road_areas = road_mask > 0
+        # Combine urban and road areas
+        urban_roads = urban_areas & road_areas
+        enhanced[urban_roads] = ntl_data[urban_roads] * enhancement_factor * road_factor
     
     if preserve_range:
         # Scale back to original range

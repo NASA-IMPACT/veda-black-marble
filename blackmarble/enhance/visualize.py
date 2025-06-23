@@ -4,14 +4,10 @@ This module provides functions for preparing data for display,
 including colormap application and visualization-specific enhancements.
 """
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 import numpy as np
 import numpy.typing as npt
 from pathlib import Path
-
-# Import existing implementations
-from blackmarble.ported_functionality import apply_colormap as _apply_colormap
-from blackmarble.io_rasterio import scale_image
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -36,14 +32,66 @@ def apply_colormap(
     Returns:
         RGB(A) array with shape (3 or 4, height, width) as uint8
     """
-    # Delegate to existing implementation in ported_functionality.py
-    return _apply_colormap(
-        data=data,
-        colormap=colormap,
-        colormap_data=colormap_data,
-        scale_range=scale_range,
-        alpha=alpha
-    )
+    # Pure implementation of colormap application
+    # First, normalize data to [0, 1]
+    if scale_range is not None:
+        vmin, vmax = scale_range
+    else:
+        vmin, vmax = np.nanmin(data), np.nanmax(data)
+    
+    if vmax > vmin:
+        normalized = (data - vmin) / (vmax - vmin)
+    else:
+        normalized = np.zeros_like(data)
+    
+    normalized = np.clip(normalized, 0, 1)
+    
+    # Apply colormap
+    if colormap_data is not None:
+        # Use custom colormap
+        indices = (normalized * (len(colormap_data['r']) - 1)).astype(int)
+        r = colormap_data['r'][indices]
+        g = colormap_data['g'][indices]
+        b = colormap_data['b'][indices]
+    else:
+        # Use built-in colormaps
+        if colormap == "grayscale":
+            r = g = b = normalized
+        elif colormap == "viridis":
+            # Approximate viridis colormap
+            r = 0.267004 + normalized * (0.003874 - 0.267004 + normalized * (0.329415 - 0.003874))
+            g = 0.004874 + normalized * (0.704719 - 0.004874 + normalized * (0.103806 - 0.704719))
+            b = 0.329415 + normalized * (0.868701 - 0.329415 + normalized * (0.111819 - 0.868701))
+        elif colormap == "inferno":
+            # Approximate inferno colormap
+            r = 0.001462 + normalized * (0.504167 - 0.001462 + normalized * (0.993248 - 0.504167))
+            g = 0.000466 + normalized * (0.01708 - 0.000466 + normalized * (0.763198 - 0.01708))
+            b = 0.013866 + normalized * (0.659245 - 0.013866 + normalized * (0.061889 - 0.659245))
+        elif colormap == "plasma":
+            # Approximate plasma colormap
+            r = 0.050383 + normalized * (0.701652 - 0.050383 + normalized * (0.940015 - 0.701652))
+            g = 0.029803 + normalized * (0.016352 - 0.029803 + normalized * (0.975158 - 0.016352))
+            b = 0.527975 + normalized * (0.840827 - 0.527975 + normalized * (0.154483 - 0.840827))
+        else:  # turbo
+            # Approximate turbo colormap
+            r = 0.18995 + normalized * (0.86541 - 0.18995 + normalized * (0.47985 - 0.86541))
+            g = 0.07176 + normalized * (0.46451 - 0.07176 + normalized * (0.02731 - 0.46451))
+            b = 0.23217 + normalized * (0.48146 - 0.23217 + normalized * (0.37133 - 0.48146))
+    
+    # Convert to uint8
+    r = (np.clip(r, 0, 1) * 255).astype(np.uint8)
+    g = (np.clip(g, 0, 1) * 255).astype(np.uint8)
+    b = (np.clip(b, 0, 1) * 255).astype(np.uint8)
+    
+    # Stack into RGB array
+    if alpha is not None:
+        if np.isscalar(alpha):
+            a = np.full_like(r, int(alpha * 255), dtype=np.uint8)
+        else:
+            a = (np.clip(alpha, 0, 1) * 255).astype(np.uint8)
+        return np.stack([r, g, b, a], axis=0)
+    else:
+        return np.stack([r, g, b], axis=0)
 
 
 def create_false_color_composite(
@@ -65,21 +113,20 @@ def create_false_color_composite(
     Returns:
         RGB array with shape (3, height, width)
     """
-    # Import contrast enhancement
-    from blackmarble.ported_functionality import enhance_contrast as _enhance_contrast
-    
     channels = [red_channel, green_channel, blue_channel]
     result_channels = []
     
     for i, channel in enumerate(channels):
         # Apply contrast enhancement if requested
         if contrast_enhance:
-            enhanced = _enhance_contrast(
-                channel,
-                method="percentile",
-                percentiles=(2, 98),
-                output_range=(0, 1)
-            )
+            # Use percentile stretching
+            p2 = np.percentile(channel, 2)
+            p98 = np.percentile(channel, 98)
+            if p98 > p2:
+                enhanced = (channel - p2) / (p98 - p2)
+            else:
+                enhanced = channel
+            enhanced = np.clip(enhanced, 0, 1)
         else:
             enhanced = channel
         
@@ -88,7 +135,7 @@ def create_false_color_composite(
             enhanced = np.power(np.clip(enhanced, 0, 1), gamma[i])
         
         # Scale to byte
-        scaled = scale_image(enhanced, 0, 1)
+        scaled = (enhanced * 255).astype(np.uint8)
         result_channels.append(scaled)
     
     # Stack into RGB array
@@ -110,7 +157,7 @@ def apply_inferno_colormap(
     Returns:
         RGB array with inferno colormap applied
     """
-    # Load exact inferno colormap from data files
+    # Load exact inferno colormap from data files if available
     data_dir = Path(__file__).parent.parent / "data"
     
     try:
@@ -125,11 +172,11 @@ def apply_inferno_colormap(
             "b": inferno_b
         }
     except FileNotFoundError:
-        # Fallback to approximate inferno
+        # Fallback to built-in inferno approximation
         colormap_data = None
     
     # Apply colormap with specified scale range
-    result = _apply_colormap(
+    result = apply_colormap(
         data=data,
         colormap="inferno" if colormap_data is None else "grayscale",
         colormap_data=colormap_data,
@@ -276,11 +323,10 @@ def generate_colorbar(
     # Apply colormap
     if isinstance(colormap, str):
         # Cast to proper literal type
-        from typing import cast
         colormap_literal = cast(Literal["grayscale", "viridis", "plasma", "inferno", "turbo"], colormap)
-        colorbar = _apply_colormap(gradient, colormap=colormap_literal)
+        colorbar = apply_colormap(gradient, colormap=colormap_literal)
     else:
-        colorbar = _apply_colormap(gradient, colormap_data=colormap)
+        colorbar = apply_colormap(gradient, colormap_data=colormap)
     
     # Note: Label rendering would require PIL or matplotlib
     # This returns just the colorbar image

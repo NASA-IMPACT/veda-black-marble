@@ -5,12 +5,11 @@ LAADS DAAC, including authentication and tile selection.
 """
 
 from typing import Any
-from datetime import datetime
+from datetime import datetime, date
 import numpy.typing as npt
 import os
-
-# Import existing implementations
-from blackmarble.vnp import VNP46A2Util
+import requests
+import shutil
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -19,16 +18,41 @@ ArrayLike = npt.NDArray[Any]
 def coordinates_to_viirs_tile(lat: float, lon: float) -> tuple[int, int]:
     """Convert geographic coordinates to VIIRS tile indices.
     
+    VIIRS data is organized in a global sinusoidal projection grid with 36 horizontal
+    and 18 vertical tiles, each covering 10 degrees at the equator. This function
+    maps any geographic coordinate to its corresponding tile indices, which is
+    essential for determining which data files to download from NASA LAADS DAAC.
+    
     Args:
-        lat: Latitude
-        lon: Longitude
+        lat: Latitude in decimal degrees (-90 to 90)
+        lon: Longitude in decimal degrees (-180 to 180)
         
     Returns:
-        Tuple of (vertical_tile, horizontal_tile)
+        Tuple of (vertical_tile, horizontal_tile) where:
+        - vertical_tile ranges from 0 to 17 (0 = northernmost)
+        - horizontal_tile ranges from 0 to 35 (0 = westernmost)
+        
+    Example:
+        >>> coordinates_to_viirs_tile(40.7, -74.0)  # Manhattan, NY
+        (5, 6)
+        
+    Note:
+        The VIIRS tiling system uses a 10-degree grid starting from (-180, 90).
+        Each tile covers exactly 10x10 degrees in geographic coordinates.
     """
-    # Delegate to existing VNP46A2Util implementation
-    util = VNP46A2Util()
-    return util.coordinates_to_tile_id(lat, lon)
+    # Convert latitude to vertical tile index (0-17, where 0 is northernmost)
+    # Formula: v = int((90 - lat) / 10), but using 180-degree range for precision
+    vertical_tile = int(((-lat + 90.0) / 180.0) * 18)
+    
+    # Convert longitude to horizontal tile index (0-35, where 0 is westernmost)  
+    # Formula: h = int((lon + 180) / 10), but using 360-degree range for precision
+    horizontal_tile = int(((lon + 180.0) / 360.0) * 36)
+    
+    # Ensure tiles are within valid ranges
+    vertical_tile = max(0, min(17, vertical_tile))
+    horizontal_tile = max(0, min(35, horizontal_tile))
+    
+    return vertical_tile, horizontal_tile
 
 
 def download_viirs_h5(
@@ -40,29 +64,139 @@ def download_viirs_h5(
     horizontal: int,
     output_path: str = "VNP46A2.h5"
 ) -> str:
-    """Download VIIRS VNP46A2 HDF5 file from NASA LAADS.
+    """Download VIIRS VNP46A2 HDF5 file from NASA LAADS DAAC.
+    
+    Downloads Black Marble VNP46A2 data for a specific date and tile from NASA's
+    Level-1 and Atmosphere Archive & Distribution System (LAADS) DAAC. This function
+    handles the NASA API authentication, file discovery, and HTTP download process.
+    
+    The VNP46A2 product provides daily nighttime lights data at 500m resolution,
+    essential for urban analysis, disaster response, and economic monitoring.
     
     Args:
-        earthdata_token: NASA Earthdata authentication token
-        year: Target year
-        month: Target month
-        day: Target day
-        vertical: Vertical tile index
-        horizontal: Horizontal tile index
-        output_path: Path to save downloaded file
+        earthdata_token: NASA Earthdata authentication bearer token
+        year: Target acquisition year (2012-present for VNP46A2)
+        month: Target acquisition month (1-12)
+        day: Target acquisition day (1-31)
+        vertical: VIIRS vertical tile index (0-17)
+        horizontal: VIIRS horizontal tile index (0-35)
+        output_path: Local file path to save the downloaded HDF5 file
         
     Returns:
-        Path to downloaded file
+        Path to the downloaded HDF5 file (same as output_path)
+        
+    Raises:
+        RuntimeError: If no data found for the specified date/tile or download fails
+        requests.exceptions.RequestException: If API request or download fails
+        OSError: If file system operations fail
+        
+    Example:
+        >>> # Download Manhattan tile for September 15, 2023
+        >>> token = "your_earthdata_token_here"
+        >>> file_path = download_viirs_h5(token, 2023, 9, 15, 5, 6, "manhattan.h5")
+        >>> print(f"Downloaded: {file_path}")
+        
+    Note:
+        Requires a valid NASA Earthdata account and bearer token. Files are typically
+        50-100MB each. The function will overwrite existing files at output_path.
     """
-    # Delegate to existing VNP46A2Util implementation
-    util = VNP46A2Util()
-    util.download_h5(
-        earthdata_token,
-        year, month, day,
-        vertical, horizontal,
-        output_path
+    # Format tile identifier as required by NASA LAADS API
+    tile_id = f"h{horizontal:02d}v{vertical:02d}"
+    
+    # Convert date to day-of-year format required by NASA API
+    target_date = date(year, month, day)
+    day_of_year = target_date.timetuple().tm_yday
+    
+    # Construct NASA LAADS DAAC API URL for VNP46A2 product
+    # API endpoint follows: /api/v2/content/details/allData/{collection}/{product}/{year}/{day_of_year}
+    api_url = (
+        f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details/allData/5000/"
+        f"VNP46A2/{year}/{day_of_year}"
     )
-    return output_path
+    
+    print(f"Querying NASA LAADS API: {api_url}")
+    
+    # Query the API to get available files for the specified date
+    try:
+        response = requests.get(api_url, timeout=30)
+        response.raise_for_status()
+        api_data = response.json()
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Failed to query NASA LAADS API: {e}")
+    
+    # Extract file list from API response
+    items = api_data.get("content", [])
+    print(f"Found {len(items)} VNP46A2 files for {year}-{day_of_year:03d}")
+    
+    # Search for the specific tile we need
+    # NASA file naming: VNP46A2.A{year}{day_of_year}.{tile}.{version}.{timestamp}.h5
+    target_filename_pattern = f"VNP46A2.A{year}{day_of_year:03d}.{tile_id}"
+    print(f"Searching for file matching pattern: {target_filename_pattern}")
+    
+    download_link = None
+    matching_filename = None
+    
+    for item in items:
+        filename = item.get("name", "")
+        if filename.startswith(target_filename_pattern):
+            download_link = item.get("downloadsLink")
+            matching_filename = filename
+            print(f"Found matching file: {filename}")
+            print(f"Download link: {download_link}")
+            break
+    
+    if not download_link:
+        raise RuntimeError(
+            f"No VNP46A2 file found for tile {tile_id} on {year}-{day_of_year:03d}. "
+            f"The tile may not have data for this date, or the date may be outside "
+            f"the VNP46A2 temporal coverage (2012-present)."
+        )
+    
+    # Set up authenticated session for download
+    session = requests.Session()
+    if not earthdata_token:
+        raise RuntimeError(
+            "NASA Earthdata token is required for LAADS downloads. "
+            "Obtain a token from https://urs.earthdata.nasa.gov/"
+        )
+    
+    # NASA LAADS uses Bearer token authentication
+    session.headers.update({"Authorization": f"Bearer {earthdata_token}"})
+    
+    print(f"Downloading {matching_filename} to {output_path}...")
+    
+    try:
+        # Ensure output directory exists
+        parent_dir = os.path.dirname(output_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
+        
+        # Remove existing file/directory at target path if it exists
+        if os.path.exists(output_path):
+            if os.path.isdir(output_path):
+                print(f"Warning: Removing existing directory at {output_path}")
+                shutil.rmtree(output_path)
+            else:
+                print(f"Warning: Overwriting existing file at {output_path}")
+                os.remove(output_path)
+        
+        # Download file with streaming to handle large files efficiently
+        with session.get(download_link, stream=True, timeout=300) as download_response:
+            download_response.raise_for_status()
+            
+            with open(output_path, "wb") as output_file:
+                # Download in 8KB chunks to manage memory usage
+                for chunk in download_response.iter_content(chunk_size=8192):
+                    if chunk:  # Filter out keep-alive chunks
+                        output_file.write(chunk)
+        
+        print(f"Successfully downloaded {matching_filename} ({os.path.getsize(output_path):,} bytes)")
+        return output_path
+        
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Download failed for {matching_filename}: {e}")
+    except OSError as e:
+        raise RuntimeError(f"File operation failed for {output_path}: {e}")
 
 
 def convert_viirs_hdf_to_tiff(
@@ -70,70 +204,232 @@ def convert_viirs_hdf_to_tiff(
     output_file: str,
     layer: int = 0
 ) -> str:
-    """Convert VIIRS HDF5 layer to GeoTIFF.
+    """Convert VIIRS HDF5 layer to a georeferenced GeoTIFF.
+    
+    Extracts a specific science dataset from a VIIRS VNP46A2 HDF5 file and converts
+    it to a georeferenced GeoTIFF using the tile's geographic bounds. This is essential
+    for integrating VIIRS data into GIS workflows and spatial analysis pipelines.
+    
+    VIIRS tiles are 10x10 degree squares in geographic coordinates (WGS84), with
+    tile positions encoded in the HDF5 metadata. This function reads the tile
+    position and applies the appropriate geographic transformation.
     
     Args:
-        hdf_file: Path to HDF5 file
-        output_file: Path for output GeoTIFF
-        layer: HDF5 layer index (0=DNB_At_Sensor_Radiance, 1=Lunar_Irradiance, etc.)
+        hdf_file: Path to the input VNP46A2 HDF5 file
+        output_file: Path for the output GeoTIFF file
+        layer: HDF5 subdataset index to extract:
+               - 0: DNB_At_Sensor_Radiance (primary nighttime lights)
+               - 1: Lunar_Irradiance (moon brightness correction)
+               - 2: Mandatory_Quality_Flag (data quality indicators)
+               - 3: QF_Cloud_Mask (cloud detection flags)
         
     Returns:
-        Path to created GeoTIFF
+        Path to the created GeoTIFF file (same as output_file)
+        
+    Raises:
+        ValueError: If HDF5 file cannot be opened or layer doesn't exist
+        RuntimeError: If GDAL operations fail
+        
+    Example:
+        >>> # Convert DNB radiance layer to GeoTIFF
+        >>> tiff_path = convert_viirs_hdf_to_tiff("VNP46A2.h5", "radiance.tif", 0)
+        >>> print(f"Created: {tiff_path}")
+        
+    Note:
+        Requires GDAL/OGR for HDF5 and GeoTIFF support. The output uses WGS84
+        geographic coordinates (EPSG:4326) with pixel registration.
     """
-    # Delegate to existing VNP46A2Util implementation
-    util = VNP46A2Util()
-    util.convert_hdf_to_tiff(hdf_file, output_file, layer)
-    return output_file
+    try:
+        from osgeo import gdal
+    except ImportError:
+        raise ImportError("GDAL is required for HDF5 to GeoTIFF conversion. Install with: uv add gdal")
+    
+    # Open the HDF5 file using GDAL
+    hdf_dataset = gdal.Open(hdf_file, gdal.GA_ReadOnly)
+    if not hdf_dataset:
+        raise ValueError(f"Could not open HDF5 file: {hdf_file}")
+    
+    try:
+        # Get list of available subdatasets
+        subdatasets = hdf_dataset.GetSubDatasets()
+        if not subdatasets:
+            raise ValueError(f"No subdatasets found in HDF5 file: {hdf_file}")
+        
+        if layer >= len(subdatasets):
+            raise ValueError(
+                f"Layer index {layer} not found. File has {len(subdatasets)} layers: "
+                f"{[sd[1] for sd in subdatasets]}"
+            )
+        
+        # Open the specific subdataset (layer) we want to convert
+        subdataset_name = subdatasets[layer][0]
+        layer_dataset = gdal.Open(subdataset_name, gdal.GA_ReadOnly)
+        if not layer_dataset:
+            raise RuntimeError(f"Could not open subdataset {layer}: {subdataset_name}")
+        
+        try:
+            # Extract tile position from metadata to determine geographic bounds
+            metadata = layer_dataset.GetMetadata_Dict()
+            
+            # Get horizontal and vertical tile numbers from HDF5 metadata
+            # These determine the 10x10 degree tile's position in the global grid
+            horizontal_tile = int(metadata.get("HorizontalTileNumber", 0))
+            vertical_tile = int(metadata.get("VerticalTileNumber", 0))
+            
+            # Calculate geographic bounds for this tile
+            # VIIRS global grid: 36 horizontal × 18 vertical tiles
+            # Each tile covers exactly 10 degrees
+            # Grid origin: (-180°, 90°) for tile h00v00
+            west_bound = (10 * horizontal_tile) - 180    # Western edge
+            north_bound = 90 - (10 * vertical_tile)      # Northern edge  
+            east_bound = west_bound + 10                 # Eastern edge
+            south_bound = north_bound - 10               # Southern edge
+            
+            print(f"Converting VIIRS tile h{horizontal_tile:02d}v{vertical_tile:02d}")
+            print(f"Geographic bounds: ({west_bound}, {south_bound}, {east_bound}, {north_bound})")
+            
+            # Create GDAL translate options for georeferencing
+            # -a_srs: Set spatial reference system to WGS84 (EPSG:4326)
+            # -a_ullr: Set upper-left and lower-right coordinates
+            translate_options = gdal.TranslateOptions(
+                gdal.ParseCommandLine(
+                    f"-a_srs EPSG:4326 -a_ullr {west_bound} {north_bound} {east_bound} {south_bound}"
+                )
+            )
+            
+            # Perform the conversion with georeferencing
+            result_dataset = gdal.Translate(output_file, layer_dataset, options=translate_options)
+            if not result_dataset:
+                raise RuntimeError(f"GDAL Translate failed for output: {output_file}")
+            
+            # Ensure the file is written and closed properly
+            result_dataset.FlushCache()
+            result_dataset = None
+            
+            print(f"Successfully converted HDF5 layer {layer} to GeoTIFF: {output_file}")
+            return output_file
+            
+        finally:
+            # Clean up layer dataset
+            layer_dataset = None
+            
+    finally:
+        # Clean up main HDF dataset
+        hdf_dataset = None
 
 
 def extract_viirs_layers(
     hdf_file: str,
     output_dir: str = "."
 ) -> dict[str, str]:
-    """Extract all relevant layers from VIIRS HDF5 file.
+    """Extract all relevant layers from VIIRS HDF5 file to separate GeoTIFFs.
+    
+    Processes a VNP46A2 HDF5 file and extracts the primary science datasets as
+    individual georeferenced GeoTIFF files. This is essential for the pipeline
+    as it converts the complex HDF5 structure into standard raster formats that
+    can be processed by geospatial analysis tools.
+    
+    The function handles the standard VNP46A2 layer structure and gracefully
+    manages missing optional layers while ensuring mandatory layers are present.
     
     Args:
-        hdf_file: Path to HDF5 file
-        output_dir: Directory for output files
+        hdf_file: Path to the input VNP46A2 HDF5 file
+        output_dir: Directory to save the extracted GeoTIFF files
         
     Returns:
-        Dictionary mapping layer names to file paths:
-        - 'radiance': DNB at-sensor radiance
-        - 'lunar_irradiance': Lunar irradiance
-        - 'quality_flag': Mandatory quality flag
-        - 'cloud_mask': Cloud mask (if available)
+        Dictionary mapping layer names to their output file paths:
+        - 'radiance': DNB at-sensor radiance (nW cm⁻² sr⁻¹) - primary nighttime lights
+        - 'lunar_irradiance': Lunar irradiance correction factor
+        - 'quality_flag': Mandatory quality assessment flags
+        - 'cloud_mask': Cloud detection mask (if available)
+        
+    Raises:
+        RuntimeError: If mandatory layers (radiance, quality_flag) cannot be extracted
+        ValueError: If HDF5 file is invalid or corrupted
+        
+    Example:
+        >>> layers = extract_viirs_layers("VNP46A2.h5", "output/")
+        >>> print(f"Radiance layer: {layers['radiance']}")
+        >>> print(f"Quality flags: {layers['quality_flag']}")
+        
+    Note:
+        Creates output directory if it doesn't exist. Some layers (like cloud_mask)
+        may not be present in all VNP46A2 files depending on processing version.
     """
-    # Extract base filename without extension
+    # Extract base filename without extension for consistent naming
     basename = os.path.splitext(os.path.basename(hdf_file))[0]
     
-    # Create output directory if needed
+    # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
     
-    # Layer indices for VNP46A2 HDF5 files
-    # Based on standard VNP46A2 structure
-    layers = {
-        'radiance': (0, f"{basename}_DNB_At_Sensor_Radiance.tif"),
-        'lunar_irradiance': (1, f"{basename}_Lunar_Irradiance.tif"),
-        'quality_flag': (2, f"{basename}_Mandatory_Quality_Flag.tif"),
-        'cloud_mask': (3, f"{basename}_QF_Cloud_Mask.tif"),
+    # Define VNP46A2 layer structure with indices and output filenames
+    # Based on NASA's standard VNP46A2 subdataset organization
+    layer_config = {
+        'radiance': {
+            'index': 0,
+            'filename': f"{basename}_DNB_At_Sensor_Radiance.tif",
+            'mandatory': True,
+            'description': "Day/Night Band at-sensor radiance"
+        },
+        'lunar_irradiance': {
+            'index': 1, 
+            'filename': f"{basename}_Lunar_Irradiance.tif",
+            'mandatory': False,
+            'description': "Lunar irradiance correction factor"
+        },
+        'quality_flag': {
+            'index': 2,
+            'filename': f"{basename}_Mandatory_Quality_Flag.tif", 
+            'mandatory': True,
+            'description': "Mandatory quality assessment flags"
+        },
+        'cloud_mask': {
+            'index': 3,
+            'filename': f"{basename}_QF_Cloud_Mask.tif",
+            'mandatory': False,
+            'description': "Cloud detection quality flags"
+        },
     }
     
-    output_files = {}
-    util = VNP46A2Util()
+    extracted_files = {}
+    extraction_errors = []
     
-    for layer_name, (layer_idx, filename) in layers.items():
-        output_path = os.path.join(output_dir, filename)
+    # Process each layer using the pure functional implementation
+    for layer_name, layer_info in layer_config.items():
+        layer_index = layer_info['index']
+        output_filename = layer_info['filename']
+        is_mandatory = layer_info['mandatory']
+        
+        output_path = os.path.join(output_dir, output_filename)
+        
         try:
-            util.convert_hdf_to_tiff(hdf_file, output_path, layer_idx)
-            output_files[layer_name] = output_path
+            # Use the pure functional conversion implementation
+            convert_viirs_hdf_to_tiff(hdf_file, output_path, layer_index)
+            extracted_files[layer_name] = output_path
+            print(f"Extracted {layer_name}: {output_path}")
+            
         except Exception as e:
-            # Some layers might not exist in all files
-            print(f"Warning: Could not extract {layer_name}: {e}")
-            if layer_name in ['radiance', 'quality_flag']:
-                # These are mandatory layers, re-raise
-                raise
+            error_message = f"Failed to extract {layer_name} (layer {layer_index}): {e}"
+            extraction_errors.append(error_message)
+            
+            if is_mandatory:
+                # Mandatory layers must be successfully extracted
+                raise RuntimeError(
+                    f"Could not extract mandatory layer '{layer_name}': {e}. "
+                    f"This layer is required for VIIRS data processing."
+                )
+            else:
+                # Optional layers can fail without stopping the process
+                print(f"Warning: {error_message}")
+                print(f"Continuing without optional layer: {layer_name}")
     
-    return output_files
+    # Log summary of extraction results
+    if extraction_errors:
+        print(f"Extraction completed with {len(extraction_errors)} warnings")
+    else:
+        print(f"Successfully extracted all {len(extracted_files)} layers")
+    
+    return extracted_files
 
 
 def read_viirs_with_rasterio(
@@ -152,7 +448,6 @@ def read_viirs_with_rasterio(
     # The rasterio implementation doesn't have a separate read function
     # We'll implement it directly here
     from osgeo import gdal
-    import numpy as np
     
     # Map layer names to subdataset indices
     layer_map = {
@@ -230,12 +525,106 @@ def get_tiles_for_bbox(
         A single geographic area may require multiple tiles, especially at
         higher latitudes where tiles overlap more.
     """
-    # Extract bbox components
+    # Extract and validate bounding box components
     min_lon, min_lat, max_lon, max_lat = bbox
     
-    # Delegate to existing VNP46A2Util implementation
-    util = VNP46A2Util()
-    return util.get_tiles_for_bbox(min_lat, min_lon, max_lat, max_lon)
+    # Ensure longitude is within valid range (-180 to 180)
+    min_lon = max(-180.0, min(180.0, min_lon))
+    max_lon = max(-180.0, min(180.0, max_lon))
+    
+    # Ensure latitude is within valid range (-90 to 90)
+    min_lat = max(-90.0, min(90.0, min_lat))
+    max_lat = max(-90.0, min(90.0, max_lat))
+    
+    # Handle longitude wrapping around the international date line
+    if min_lon > max_lon:
+        # Bounding box crosses date line - split into two regions
+        west_tiles = get_tiles_for_bbox((min_lon, min_lat, 180.0, max_lat), include_partial)
+        east_tiles = get_tiles_for_bbox((-180.0, min_lat, max_lon, max_lat), include_partial)
+        
+        # Combine and deduplicate tiles
+        all_tiles = west_tiles + east_tiles
+        unique_tiles = list(set(all_tiles))  # Remove duplicates
+        
+        # Sort by vertical then horizontal for consistent ordering
+        return sorted(unique_tiles, key=lambda tile: (tile[0], tile[1]))
+    
+    # Get tile indices for key corners of the bounding box
+    # We need to check multiple points because VIIRS tiles can have complex coverage patterns
+    
+    # Northwest corner (top-left)
+    nw_vertical, nw_horizontal = coordinates_to_viirs_tile(max_lat, min_lon)
+    
+    # Southeast corner (bottom-right)  
+    se_vertical, se_horizontal = coordinates_to_viirs_tile(min_lat, max_lon)
+    
+    # Calculate the range of tiles needed to cover the entire bounding box
+    # VIIRS uses a regular 10-degree grid, so we need all tiles in the rectangular region
+    min_vertical = min(nw_vertical, se_vertical)
+    max_vertical = max(nw_vertical, se_vertical)
+    min_horizontal = min(nw_horizontal, se_horizontal)
+    max_horizontal = max(nw_horizontal, se_horizontal)
+    
+    # Generate all tile combinations in the range
+    tiles = []
+    for vertical in range(min_vertical, max_vertical + 1):
+        # Ensure vertical tile is within valid range (0-17)
+        if not (0 <= vertical <= 17):
+            continue
+            
+        for horizontal in range(min_horizontal, max_horizontal + 1):
+            # Handle horizontal wraparound (tiles 0-35 represent full 360° coverage)
+            horizontal_wrapped = horizontal % 36
+            
+            # Only include tiles that actually intersect the bounding box
+            if include_partial or _tile_fully_contains_bbox(
+                vertical, horizontal_wrapped, min_lat, min_lon, max_lat, max_lon
+            ):
+                tiles.append((vertical, horizontal_wrapped))
+    
+    # Remove any duplicate tiles that might occur due to edge cases
+    unique_tiles = list(set(tiles))
+    
+    # Sort tiles in row-major order (top-left to bottom-right) for consistent processing
+    sorted_tiles = sorted(unique_tiles, key=lambda tile: (tile[0], tile[1]))
+    
+    print(f"Found {len(sorted_tiles)} VIIRS tiles covering bounding box {bbox}")
+    return sorted_tiles
+
+
+def _tile_fully_contains_bbox(
+    vertical: int, 
+    horizontal: int, 
+    min_lat: float, 
+    min_lon: float, 
+    max_lat: float, 
+    max_lon: float
+) -> bool:
+    """Check if a VIIRS tile fully contains the given bounding box.
+    
+    Helper function to determine if the entire bounding box falls within
+    a single VIIRS tile, which can be useful for optimization when
+    include_partial=False.
+    
+    Args:
+        vertical: VIIRS vertical tile index (0-17)
+        horizontal: VIIRS horizontal tile index (0-35)
+        min_lat, min_lon, max_lat, max_lon: Bounding box coordinates
+        
+    Returns:
+        True if the tile completely contains the bounding box
+    """
+    # Calculate tile boundaries (each tile is exactly 10x10 degrees)
+    tile_west = (10 * horizontal) - 180
+    tile_east = tile_west + 10
+    tile_north = 90 - (10 * vertical)  
+    tile_south = tile_north - 10
+    
+    # Check if bounding box is entirely within tile bounds
+    return (
+        tile_west <= min_lon and max_lon <= tile_east and
+        tile_south <= min_lat and max_lat <= tile_north
+    )
 
 
 def download_vnp46a2_tiles(

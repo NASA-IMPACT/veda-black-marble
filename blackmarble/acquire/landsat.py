@@ -1,20 +1,25 @@
 """Landsat data acquisition and tile selection.
 
-This module handles downloading Landsat data from AWS, selecting appropriate
-tiles based on geographic bounds, and managing the acquisition workflow.
+This module provides a pure functional API for Landsat data acquisition,
+handling WRS-2 tile selection, S3 downloads, and metadata extraction.
+All functions are stateless and testable, replacing the legacy LandsatUtil class.
 """
 
+import os
+import tempfile
 from typing import Any
-from datetime import datetime
 import numpy.typing as npt
+from datetime import datetime, timedelta
 
-# Import existing implementations
-from blackmarble.landsat import download_tiles_for_band as _download_tiles_for_band
-from blackmarble.landsat import download_tiles_for_band_with_composites as _download_tiles_for_band_with_composites
-
-# For class methods, we need to handle the Fiona/OGR split
-# Import the module to access the actual class being used
-import blackmarble.landsat as landsat_module
+# Import pure functional implementations
+from blackmarble.landsat_functions import (
+    get_wrs_path_row as _get_wrs_path_row,
+    get_wrs_tiles_for_bbox,
+    find_landsat_scene_directory,
+    download_landsat_file,
+    get_landsat_band_metadata,
+    calculate_landsat_cloud_cover
+)
 
 # Type aliases
 BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
@@ -24,16 +29,23 @@ ArrayLike = npt.NDArray[Any]
 def get_wrs_path_row(lat: float, lon: float) -> list[dict[str, int]]:
     """Get Landsat WRS-2 path and row for given coordinates.
     
+    Determines which Landsat WRS-2 tiles contain the specified geographic point.
+    This is essential for identifying the correct Landsat data granules to acquire
+    for any given location. Multiple tiles may be returned for overlap areas.
+    
     Args:
-        lat: Latitude
-        lon: Longitude
+        lat: Latitude in decimal degrees (-90 to 90)
+        lon: Longitude in decimal degrees (-180 to 180)
         
     Returns:
         List of dicts with 'path' and 'row' keys (can be multiple for overlap areas)
+        
+    Example:
+        >>> get_wrs_path_row(40.7, -74.0)  # Manhattan, NY
+        [{'path': 14, 'row': 32}]
     """
-    # Delegate to whichever LandsatUtil implementation is loaded
-    util = landsat_module.LandsatUtil()
-    return util.get_wrs(lat, lon)
+    # Use pure functional implementation - no class instantiation needed
+    return _get_wrs_path_row(lat, lon)
 
 
 def filter_landsat_scenes(
@@ -46,77 +58,27 @@ def filter_landsat_scenes(
 ) -> str | None:
     """Find Landsat scene directory for given date and path/row.
     
+    Searches the USGS Landsat S3 bucket for scenes matching the specified
+    acquisition date and WRS-2 coordinates. This function handles Landsat's
+    multi-day acquisition windows and returns the appropriate scene directory.
+    
     Args:
-        year: Target year
-        month: Target month
-        day: Target day
-        path: WRS path
-        row: WRS row
-        collection: Landsat collection name
+        year: Target acquisition year
+        month: Target acquisition month (1-12)
+        day: Target acquisition day (1-31)
+        path: WRS-2 path (1-233)
+        row: WRS-2 row (1-248)
+        collection: Landsat collection identifier (default: collection02)
         
     Returns:
         S3 prefix for scene directory or None if not found
-    """
-    # This method is only available in the original OGR-based class
-    # We need to create an instance of the original class directly
-    # Import the base class definition
-    import collections
-    import boto3
-    from osgeo import ogr
-    import shapely.geometry
-    from datetime import datetime as dt
-    
-    class _LandsatUtilOriginal:
-        """Minimal implementation of filter_landsat_data_dir method."""
-        dir_cache: collections.OrderedDict[str, list[dict[str, str]]] = (
-            collections.OrderedDict()
-        )
-        MAX_CACHE_SIZE = 100
         
-        def filter_landsat_data_dir(
-            self, year: int, month: int, day: int, path: str, row: str
-        ) -> str | None:
-            yr: str = str(year)
-            mo: str = str(month).zfill(2)
-            da: str = str(day).zfill(2)
-            prefix: str = f"collection02/level-2/standard/oli-tirs/{yr}/{path}/{row}/"
-            directories: list[dict[str, str]]
-            if prefix in self.dir_cache:
-                directories = self.dir_cache[prefix]
-            else:
-                session = boto3.Session()
-                s3 = session.client("s3")
-                resp = s3.list_objects_v2(
-                    Bucket="usgs-landsat",
-                    Prefix=prefix,
-                    RequestPayer="requester",
-                    Delimiter="/",
-                )
-                directories = []
-                common_prefixes = resp.get("CommonPrefixes", [])
-                for prefix_entry in common_prefixes:
-                    if isinstance(prefix_entry, dict) and "Prefix" in prefix_entry:
-                        directories.append({"Prefix": prefix_entry["Prefix"]})
-                if len(self.dir_cache) >= self.MAX_CACHE_SIZE:
-                    self.dir_cache.popitem(last=False)
-                self.dir_cache[prefix] = directories
-            target: dt = dt.strptime(yr + mo + da, "%Y%m%d")
-            selected: str | None = None
-            for entry in directories:
-                dr: list[str] = entry["Prefix"].split("/")[-2].split("_")[3:5]
-                start: dt = dt.strptime(dr[0], "%Y%m%d")
-                end: dt = dt.strptime(dr[1], "%Y%m%d")
-                if start <= target <= end:
-                    selected = entry["Prefix"]
-                    break
-            return selected
-    
-    util = _LandsatUtilOriginal()
-    return util.filter_landsat_data_dir(
-        year, month, day, 
-        str(path).zfill(3),  # Convert to 3-digit string format
-        str(row).zfill(3)    # Convert to 3-digit string format
-    )
+    Example:
+        >>> filter_landsat_scenes(2023, 6, 15, 14, 32)
+        'collection02/level-2/standard/oli-tirs/2023/014/032/LC08_L2SP_014032_20230615_20230621_02_T1/'
+    """
+    # Use pure functional implementation
+    return find_landsat_scene_directory(year, month, day, path, row, collection)
 
 
 def download_landsat_band(
@@ -127,46 +89,26 @@ def download_landsat_band(
 ) -> str:
     """Download a specific Landsat band from AWS.
     
+    Downloads individual Landsat bands or quality assessment files from the
+    USGS Landsat S3 bucket. Supports both spectral bands (1-7) and QA layers
+    for comprehensive data acquisition in the pipeline.
+    
     Args:
-        scene_dir: S3 directory containing scene
-        band: Band number (1-7) or name ('QA_PIXEL', 'QA_RADSAT', 'QA_AEROSOL')
-        output_path: Local path to save file
-        aws_credentials: Optional AWS credentials dict
+        scene_dir: S3 directory containing scene (from filter_landsat_scenes)
+        band: Band number (1-7) or QA layer ('QA_PIXEL', 'QA_RADSAT', 'QA_AEROSOL')
+        output_path: Local file path for downloaded data
+        aws_credentials: Optional AWS credentials dict (uses default chain if None)
         
     Returns:
         Path to downloaded file
+        
+    Example:
+        >>> scene = filter_landsat_scenes(2023, 6, 15, 14, 32)
+        >>> download_landsat_band(scene, 4, '/tmp/landsat_b4.tif')
+        '/tmp/landsat_b4.tif'
     """
-    # This method is also only in the original class
-    # We'll use a minimal implementation
-    import os
-    import boto3
-    from boto3.session import Session
-    
-    scene: str = scene_dir.split("/")[-2]
-    key: str
-    if band in ("QA_PIXEL", "QA_RADSAT", "QA_AEROSOL"):
-        suffix_map: dict[str, str] = {
-            "QA_PIXEL": "_QA_PIXEL.TIF",
-            "QA_RADSAT": "_QA_RADSAT.TIF",
-            "QA_AEROSOL": "_SR_QA_AEROSOL.TIF",
-        }
-        suffix = suffix_map[str(band)]
-        key = scene_dir + scene + suffix
-    else:
-        key = f"{scene_dir}{scene}_SR_B{band}.TIF"
-    
-    # Use provided AWS keys or default credential chain
-    session: Session = boto3.Session()
-    s3 = session.client("s3")
-    
-    # Ensure the directory for the output file exists
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    
-    s3.download_file(
-        "usgs-landsat", key, output_path, ExtraArgs={"RequestPayer": "requester"}
-    )
-    
-    return output_path
+    # Use pure functional implementation
+    return download_landsat_file(scene_dir, band, output_path, aws_credentials)
 
 
 def download_tiles_for_band(
@@ -190,22 +132,81 @@ def download_tiles_for_band(
     Returns:
         Tuple of (band_files, qa_pixel_files, qa_radsat_files, qa_aerosol_files)
     """
-    # Extract bbox components and create a temp directory
-    import tempfile
+    # Extract bbox components
     min_lon, min_lat, max_lon, max_lat = bbox
     
     # Create a temporary directory for downloads
     temp_dir = tempfile.mkdtemp(prefix="landsat_")
     
-    # Delegate to existing implementation
-    # Note: existing function expects lat1, lon1, lat2, lon2 format
-    return _download_tiles_for_band(
-        band, year, month, day,
-        min_lat, min_lon,  # lat1, lon1
-        max_lat, max_lon,  # lat2, lon2
-        temp_dir,
-        ignore_missing
-    )
+    # Get WRS path/row with validation
+    wrs1_results = get_wrs_path_row(min_lat, min_lon)
+    wrs2_results = get_wrs_path_row(max_lat, max_lon)
+    
+    if not wrs1_results:
+        raise RuntimeError(
+            f"No WRS path/row found for coordinates: ({min_lat}, {min_lon}). "
+            "This location may be over water or outside Landsat coverage."
+        )
+    if not wrs2_results:
+        raise RuntimeError(
+            f"No WRS path/row found for coordinates: ({max_lat}, {max_lon}). "
+            "This location may be over water or outside Landsat coverage."
+        )
+    
+    wrs1 = wrs1_results[0]
+    wrs2 = wrs2_results[0]
+    paths = range(min(wrs1["path"], wrs2["path"]), max(wrs1["path"], wrs2["path"]) + 1)
+    rows = range(min(wrs1["row"], wrs2["row"]), max(wrs1["row"], wrs2["row"]) + 1)
+    
+    downloads: list[str] = []
+    pixels: list[str] = []
+    radsat: list[str] = []
+    aerosol: list[str] = []
+    
+    for p in paths:
+        for r in rows:
+            # Find scene directory
+            scene_dir = filter_landsat_scenes(year, month, day, p, r)
+            
+            if not scene_dir:
+                if ignore_missing:
+                    print(
+                        f"Warning: No data found for tile P{p:03d}R{r:03d} on {year}-{month}-{day}. Skipping."
+                    )
+                    continue
+                else:
+                    raise RuntimeError(
+                        f"No data for tile P{p:03d}R{r:03d} on {year}-{month}-{day}"
+                    )
+            
+            base = scene_dir.split("/")[-2]
+            
+            # Download band file
+            out_src = os.path.join(temp_dir, f"{base}_SR_B{band}.TIF")
+            if not os.path.exists(out_src):
+                print(f"Downloading {out_src}...")
+                download_landsat_band(scene_dir, band, out_src)
+            else:
+                print(f"File {out_src} exists..")
+            downloads.append(out_src)
+            
+            # Download QA files
+            qa_types = {
+                "QA_PIXEL": ("_QA_PIXEL.TIF", pixels),
+                "QA_RADSAT": ("_QA_RADSAT.TIF", radsat),
+                "QA_AEROSOL": ("_SR_QA_AEROSOL.TIF", aerosol),
+            }
+            
+            for qa_key, (suffix, target_list) in qa_types.items():
+                out_qa = os.path.join(temp_dir, f"{base}{suffix}")
+                if not os.path.exists(out_qa):
+                    print(f"Downloading {out_qa}...")
+                    download_landsat_band(scene_dir, qa_key, out_qa)
+                else:
+                    print(f"File {out_qa} exists..")
+                target_list.append(out_qa)
+    
+    return downloads, pixels, radsat, aerosol
 
 
 def download_tiles_with_composites(
@@ -229,75 +230,93 @@ def download_tiles_with_composites(
     Returns:
         List of tuples, each containing (band_files, qa_pixel, qa_radsat, qa_aerosol)
     """
-    # Extract bbox components and create a temp directory
-    import tempfile
-    min_lon, min_lat, max_lon, max_lat = bbox
-    
     # Create a temporary directory for downloads
     temp_dir = tempfile.mkdtemp(prefix="landsat_composite_")
     
-    # Delegate to existing implementation
-    return _download_tiles_for_band_with_composites(
-        band, year, month, day,
-        min_lat, min_lon,  # lat1, lon1
-        max_lat, max_lon,  # lat2, lon2
-        temp_dir,
-        composite_history_months
-    )
+    # Download primary tiles
+    tiles = [download_tiles_for_band(band, year, month, day, bbox, ignore_missing=False)]
+    
+    # Download historical composites
+    for months_back in range(1, composite_history_months + 1):
+        # Calculate date for historical composite
+        target_date = datetime(year, month, day) - timedelta(days=months_back * 30)
+        hist_year = target_date.year
+        hist_month = target_date.month
+        hist_day = target_date.day
+        
+        try:
+            # Try to download historical data, ignoring missing tiles
+            hist_tiles = download_tiles_for_band(
+                band, hist_year, hist_month, hist_day, bbox, ignore_missing=True
+            )
+            if any(hist_tiles):  # Only add if we got some data
+                tiles.append(hist_tiles)
+        except Exception as e:
+            print(f"Warning: Could not download composite for {hist_year}-{hist_month}-{hist_day}: {e}")
+            continue
+    
+    return tiles
+
+
+def get_tiles_for_bbox(bbox: BBox) -> list[dict[str, int]]:
+    """Get all WRS-2 path/row tiles needed to cover a bounding box.
+    
+    Identifies all Landsat tiles required to achieve complete coverage of the
+    specified geographic area. Essential for regional analysis requiring multiple
+    Landsat scenes to cover the area of interest.
+    
+    Args:
+        bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
+        
+    Returns:
+        List of dicts with 'path' and 'row' keys covering the bounding box
+        
+    Example:
+        >>> get_tiles_for_bbox((-75.0, 40.0, -73.0, 42.0))  # NYC region
+        [{'path': 13, 'row': 32}, {'path': 14, 'row': 32}]
+    """
+    min_lon, min_lat, max_lon, max_lat = bbox
+    return get_wrs_tiles_for_bbox(min_lat, max_lat, min_lon, max_lon)
 
 
 def get_landsat_metadata(scene_path: str) -> dict[str, Any]:
     """Extract metadata from Landsat scene.
     
+    Extracts comprehensive metadata from Landsat band files including scaling
+    factors, spatial reference, and acquisition information. This metadata is
+    essential for proper radiometric processing in the pipeline.
+    
     Args:
-        scene_path: Path to scene file or directory
+        scene_path: Path to Landsat band TIFF file
         
     Returns:
-        Dictionary containing scale factors, offsets, acquisition date, etc.
+        Dictionary containing scale factors, offsets, spatial reference, etc.
+        
+    Example:
+        >>> metadata = get_landsat_metadata('/path/to/LC08_L2SP_014032_B4.TIF')
+        >>> print(metadata['scale_factor'])
+        0.0000275
     """
-    # Extract metadata using GDAL
-    from osgeo import gdal
-    import os
+    # Use pure functional implementation  
+    return get_landsat_band_metadata(scene_path)
+
+
+def get_cloud_cover(qa_pixel_path: str) -> float:
+    """Calculate cloud cover percentage from QA_PIXEL band.
     
-    # Open the dataset
-    ds = gdal.Open(scene_path)
-    if not ds:
-        raise ValueError(f"Could not open scene file: {scene_path}")
+    Analyzes the QA_PIXEL band to determine scene cloud coverage. This metric
+    is crucial for scene selection and quality assessment, helping users
+    choose the clearest available imagery for analysis.
     
-    # Extract basic metadata
-    metadata = {
-        "width": ds.RasterXSize,
-        "height": ds.RasterYSize,
-        "bands": ds.RasterCount,
-        "projection": ds.GetProjection(),
-        "geotransform": ds.GetGeoTransform(),
-    }
-    
-    # Try to extract Landsat-specific metadata
-    # These are standard for Landsat Collection 2 Level-2 products
-    landsat_metadata = ds.GetMetadata()
-    
-    # Common Landsat scaling factors for Collection 2
-    metadata.update({
-        "scale_factor": 0.0000275,  # Standard for surface reflectance
-        "add_offset": -0.2,         # Standard for surface reflectance
-        "valid_range": [7273, 43636],  # After scaling: ~0.0 to 1.0
-        "fill_value": 0,
-    })
-    
-    # Extract acquisition date from filename if possible
-    basename = os.path.basename(scene_path)
-    if "_" in basename and len(basename) > 20:
-        # Landsat naming convention: LC08_L2SP_PPPRRR_YYYYMMDD_...
-        parts = basename.split("_")
-        if len(parts) >= 4:
-            date_str = parts[3]
-            if len(date_str) == 8:
-                metadata["acquisition_date"] = date_str
-    
-    # Add any additional metadata from GDAL
-    if landsat_metadata:
-        metadata["gdal_metadata"] = landsat_metadata
-    
-    ds = None  # Close dataset
-    return metadata
+    Args:
+        qa_pixel_path: Path to QA_PIXEL.TIF file
+        
+    Returns:
+        Cloud cover percentage (0.0 to 100.0)
+        
+    Example:
+        >>> cloud_cover = get_cloud_cover('/path/to/LC08_QA_PIXEL.TIF')
+        >>> print(f"Scene has {cloud_cover:.1f}% cloud cover")
+    """
+    # Use pure functional implementation
+    return calculate_landsat_cloud_cover(qa_pixel_path)

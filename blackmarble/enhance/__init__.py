@@ -7,14 +7,16 @@ This module provides enhancement capabilities including:
 """
 
 from .contrast import (
-    adaptive_histogram_equalization,
+    adaptive_local_contrast,
     chain_enhancements,
-    compute_enhancement_statistics,
+    clahe_enhancement,
     enhance_contrast,
     gamma_correction,
-    histogram_matching,
-    multi_scale_retinex,
+    highlight_features,
+    multi_scale_enhancement,
     normalize_data,
+    remove_outliers,
+    sigmoid_correction,
 )
 
 from .features import (
@@ -43,14 +45,16 @@ from .visualize import (
 
 __all__ = [
     # Contrast functions
-    "adaptive_histogram_equalization",
+    "adaptive_local_contrast",
     "chain_enhancements",
-    "compute_enhancement_statistics",
+    "clahe_enhancement",
     "enhance_contrast",
     "gamma_correction",
-    "histogram_matching",
-    "multi_scale_retinex",
+    "highlight_features",
+    "multi_scale_enhancement",
     "normalize_data",
+    "remove_outliers",
+    "sigmoid_correction",
     # Feature enhancement functions
     "create_urban_gradient",
     "detect_urban_corridors",
