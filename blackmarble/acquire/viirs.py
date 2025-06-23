@@ -120,12 +120,53 @@ def download_viirs_h5(
     try:
         response = requests.get(api_url, timeout=30)
         response.raise_for_status()
-        api_data = response.json()
+        
+        # Check content type
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'text/html' in content_type:
+            # This is an HTML error page, not JSON
+            html_preview = response.text[:500]
+            raise RuntimeError(
+                f"NASA LAADS API returned HTML instead of JSON. "
+                f"This usually indicates an authentication or endpoint issue. "
+                f"URL: {api_url}\n"
+                f"Content preview: {html_preview}"
+            )
+        
+        # Try to parse JSON
+        try:
+            api_data = response.json()
+        except ValueError as e:
+            # Not valid JSON - show what we got
+            content_preview = response.text[:500]
+            raise RuntimeError(
+                f"NASA LAADS API returned invalid JSON. "
+                f"Content-Type: {content_type}\n"
+                f"Content preview: {content_preview}"
+            )
+            
     except requests.exceptions.RequestException as e:
         raise RuntimeError(f"Failed to query NASA LAADS API: {e}")
     
     # Extract file list from API response
+    if not isinstance(api_data, dict):
+        raise RuntimeError(
+            f"NASA LAADS API returned unexpected data type: {type(api_data).__name__}. "
+            f"Expected dict with 'content' field."
+        )
+    
     items = api_data.get("content", [])
+    if not isinstance(items, list):
+        # Check if we got an error response
+        if "error" in api_data:
+            error_msg = api_data.get("error", {}).get("message", "Unknown error")
+            raise RuntimeError(f"NASA LAADS API error: {error_msg}")
+        else:
+            raise RuntimeError(
+                f"NASA LAADS API returned unexpected structure. "
+                f"Expected 'content' to be a list, got: {type(items).__name__}"
+            )
+    
     print(f"Found {len(items)} VNP46A2 files for {year}-{day_of_year:03d}")
     
     # Search for the specific tile we need
@@ -184,11 +225,54 @@ def download_viirs_h5(
         with session.get(download_link, stream=True, timeout=300) as download_response:
             download_response.raise_for_status()
             
-            with open(output_path, "wb") as output_file:
+            # Check content type to detect HTML error pages
+            content_type = download_response.headers.get('Content-Type', '').lower()
+            if 'text/html' in content_type:
+                # Read the HTML content to get error details
+                html_content = download_response.text[:1000]  # First 1000 chars
+                raise RuntimeError(
+                    f"Received HTML error page instead of HDF5 file. "
+                    f"This usually indicates an authentication issue. "
+                    f"Content preview: {html_content[:200]}..."
+                )
+            
+            # Write to temporary file first
+            temp_path = output_path + '.tmp'
+            with open(temp_path, "wb") as output_file:
                 # Download in 8KB chunks to manage memory usage
+                first_chunk = True
                 for chunk in download_response.iter_content(chunk_size=8192):
                     if chunk:  # Filter out keep-alive chunks
+                        if first_chunk:
+                            # Check if first chunk looks like HTML
+                            if chunk.startswith(b'<!DOCTYPE') or chunk.startswith(b'<html'):
+                                os.remove(temp_path)
+                                raise RuntimeError(
+                                    f"Downloaded file appears to be HTML, not HDF5. "
+                                    f"This usually indicates an authentication or access issue. "
+                                    f"First bytes: {chunk[:100]}"
+                                )
+                            # Check for HDF5 magic number
+                            if not chunk.startswith(b'\x89HDF'):
+                                print(f"Warning: File does not start with HDF5 magic number")
+                            first_chunk = False
                         output_file.write(chunk)
+            
+            # Verify file size is reasonable (VNP46A2 files are typically 2-5 MB)
+            file_size = os.path.getsize(temp_path)
+            if file_size < 1000:  # Less than 1KB is definitely wrong
+                with open(temp_path, 'rb') as f:
+                    content = f.read(500)
+                os.remove(temp_path)
+                raise RuntimeError(
+                    f"Downloaded file is too small ({file_size} bytes). "
+                    f"Content preview: {content[:200]}"
+                )
+            
+            # Move temp file to final location
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            os.rename(temp_path, output_path)
         
         print(f"Successfully downloaded {matching_filename} ({os.path.getsize(output_path):,} bytes)")
         return output_path
@@ -239,6 +323,32 @@ def convert_viirs_hdf_to_tiff(
         Requires GDAL/OGR for HDF5 and GeoTIFF support. The output uses WGS84
         geographic coordinates (EPSG:4326) with pixel registration.
     """
+    # First validate the file is actually HDF5
+    if not os.path.exists(hdf_file):
+        raise ValueError(f"HDF5 file not found: {hdf_file}")
+    
+    # Check file size
+    file_size = os.path.getsize(hdf_file)
+    if file_size < 1000:
+        raise ValueError(
+            f"HDF5 file is too small ({file_size} bytes). "
+            f"This may be an HTML error page. Check authentication."
+        )
+    
+    # Check file header for HDF5 magic number or HTML
+    with open(hdf_file, 'rb') as f:
+        header = f.read(100)
+        if header.startswith(b'<!DOCTYPE') or header.startswith(b'<html'):
+            # Try to read more to get error details
+            f.seek(0)
+            content = f.read(1000).decode('utf-8', errors='ignore')
+            raise ValueError(
+                f"File {hdf_file} is an HTML error page, not HDF5. "
+                f"Content preview: {content[:200]}..."
+            )
+        if not header.startswith(b'\x89HDF'):
+            print(f"Warning: {hdf_file} does not have HDF5 magic number. Header: {header[:20]}")
+    
     try:
         from osgeo import gdal
     except ImportError:

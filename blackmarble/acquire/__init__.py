@@ -16,11 +16,16 @@ from .landsat import (
 )
 
 from .osm import (
+    buffer_and_rasterize_roads,
+    buffer_roads_in_utm,
+    calculate_utm_zone,
     create_road_raster,
+    create_road_raster_from_transform,
     create_simple_road_mask,
     fetch_road_network,
     get_hierarchical_road_filters,
     rasterize_road_shapes,
+    rasterize_road_shapes_with_crs,
     roads_graph_to_shapes,
 )
 
@@ -44,11 +49,16 @@ __all__ = [
     "get_landsat_metadata",
     "get_wrs_path_row",
     # OSM functions
+    "buffer_and_rasterize_roads",
+    "buffer_roads_in_utm",
+    "calculate_utm_zone",
     "create_road_raster",
+    "create_road_raster_from_transform",
     "create_simple_road_mask",
     "fetch_road_network",
     "get_hierarchical_road_filters",
     "rasterize_road_shapes",
+    "rasterize_road_shapes_with_crs",
     "roads_graph_to_shapes",
     # VIIRS functions
     "convert_viirs_hdf_to_tiff",

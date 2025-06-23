@@ -177,8 +177,25 @@ def black_marble_pipeline(
             viirs_corrected = viirs_clipped
     
     # 4. Reproject everything to common grid
-    target_crs = config.preparation.target_crs if config else "EPSG:3857"
+    # Determine appropriate UTM zone for the area
+    center_lon = (bbox[0] + bbox[2]) / 2
+    center_lat = (bbox[1] + bbox[3]) / 2
+    
+    # Calculate UTM zone (simplified - assumes northern hemisphere)
+    utm_zone = int((center_lon + 180) / 6) + 1
+    hemisphere = 'north' if center_lat >= 0 else 'south'
+    epsg_code = 32600 + utm_zone if hemisphere == 'north' else 32700 + utm_zone
+    
+    # Use configured CRS or default to UTM for accurate local analysis
+    target_crs = config.preparation.target_crs if config else f"EPSG:{epsg_code}"
     target_resolution = config.preparation.target_resolution if config else 30.0
+    
+    # Print projection info clearly
+    if config and config.preparation.target_crs:
+        print(f"Target projection: {target_crs}")
+        print(f"Area center is in UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'} (used for road buffering)")
+    else:
+        print(f"Using projection: {target_crs} (UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'})")
     
     # Reproject Landsat bands
     landsat_reprojected = {}
@@ -201,38 +218,62 @@ def black_marble_pipeline(
             reference_shape = reprojected.shape
             reference_bbox = new_bbox
     
-    # Reproject VIIRS to match Landsat grid
+    # Reproject VIIRS to target CRS first
     viirs_reprojected = None
+    viirs_transform = None
     if viirs_corrected is not None and viirs_profile is not None:
-        viirs_reprojected, _, _ = prepare.reproject_image(
+        viirs_reprojected, viirs_transform, _ = prepare.reproject_image(
             data=viirs_corrected,
             src_transform=viirs_profile['transform'],
             src_crs=viirs_profile['crs'],
-            dst_crs=target_crs,
-            dst_transform=reference_transform,
-            dst_shape=(reference_shape[0], reference_shape[1]) if reference_shape is not None else None
+            dst_crs=target_crs
         )
+        
+        # Now align VIIRS to the Landsat reference grid
+        if reference_transform is not None and reference_shape is not None:
+            # Use the first Landsat band as reference
+            reference_band = landsat_reprojected[list(landsat_reprojected.keys())[0]]
+            
+            # Align VIIRS to match Landsat grid exactly
+            aligned_rasters = prepare.align_rasters(
+                rasters=[reference_band, viirs_reprojected],
+                transforms=[reference_transform, viirs_transform],
+                reference_idx=0,  # Use Landsat as reference
+                resampling="bilinear"  # Bilinear is good for continuous data like NTL
+            )
+            
+            # Extract the aligned VIIRS data
+            viirs_reprojected = aligned_rasters[1][0]
+            viirs_transform = aligned_rasters[1][1]
+            
+            print(f"Aligned VIIRS shape: {viirs_reprojected.shape}")
+            print(f"Reference Landsat shape: {reference_shape}")
     
     # Rasterize roads to match grid
     roads_rasterized = None
     if road_network is not None and reference_shape is not None and reference_transform is not None:
-        # Convert road network graph to shapes for rasterization
-        road_shapes = acquire.roads_graph_to_shapes(
+        # Use the new CRS-aware road rasterization
+        # This handles meter-based buffering via UTM internally
+        buffer_meters = 30.0  # Buffer roads by 30 meters
+        
+        print(f"Road buffering: {buffer_meters:.1f} meters (applied in UTM)")
+        print(f"Rasterizing to: {target_crs}")
+        print(f"Road network has {len(road_network.nodes)} nodes, {len(road_network.edges)} edges")
+        
+        # Use the new function that buffers and rasterizes with CRS support
+        roads_rasterized = acquire.buffer_and_rasterize_roads(
             graph=road_network,
-            buffer_distance=config.acquisition.osm_buffer if config else 0.00005
+            bbox=bbox,
+            transform=reference_transform,
+            crs=target_crs,
+            shape=(reference_shape[0], reference_shape[1]),
+            buffer_meters=buffer_meters,
+            hierarchical=True  # Use hierarchical road classification
         )
         
-        # Rasterize the road shapes to match the Landsat grid
-        if road_shapes:
-            roads_rasterized = acquire.rasterize_road_shapes(
-                shapes=road_shapes,
-                reference_transform=reference_transform,
-                shape=(reference_shape[0], reference_shape[1]),
-                all_touched=True  # Include all pixels touched by roads
-            )
-        else:
-            # No roads found in the area
-            roads_rasterized = np.zeros(reference_shape, dtype=np.uint8)
+        # Print statistics
+        road_pixels = np.sum(roads_rasterized > 0)
+        print(f"Rasterized {road_pixels} pixels ({road_pixels / roads_rasterized.size * 100:.2f}%)")
     
     
     # ==================== ANALYZE PHASE ====================
@@ -263,6 +304,17 @@ def black_marble_pipeline(
     # 3. Calculate urban index combining NTL and vegetation
     ndui = None
     if ntl_composite is not None and ndvi is not None:
+        # Verify shapes match before calculating NDUI
+        if ntl_composite.shape != ndvi.shape:
+            print(f"WARNING: Shape mismatch after alignment!")
+            print(f"  NTL shape: {ntl_composite.shape}")
+            print(f"  NDVI shape: {ndvi.shape}")
+            raise ValueError(
+                f"NTL and NDVI shapes still don't match after alignment: "
+                f"{ntl_composite.shape} vs {ndvi.shape}. This indicates a problem "
+                f"with the spatial alignment step."
+            )
+        
         ndui = analyze.calculate_ndui(
             ntl=ntl_composite,
             ndvi=ndvi,
@@ -272,24 +324,27 @@ def black_marble_pipeline(
             ndui_floor=config.analysis.ndui_floor if config else 0.02,
             epsilon=config.analysis.ndui_epsilon if config else 1e-6
         )
+        
+        # Enhance NDUI with roads (following bm.py approach)
+        if ndui is not None and roads_rasterized is not None:
+            # Apply road enhancement directly to NDUI like bm.py does
+            # Major roads (1, 4): factor 1.3
+            # Minor roads (2, 3, 5, 6): factor 1.1
+            ndui_enhanced = ndui.copy()
+            ndui_enhanced = np.where((roads_rasterized == 1) | (roads_rasterized == 4), 
+                                   ndui * 1.3, ndui_enhanced)
+            ndui_enhanced = np.where((roads_rasterized == 2) | (roads_rasterized == 3) | 
+                                   (roads_rasterized == 5) | (roads_rasterized == 6),
+                                   ndui * 1.1, ndui_enhanced)
+            # Normalize back like bm.py
+            ndui = ndui_enhanced / 1.3
     
-    # 4. Create urban mask from indices
+    # 4. Skip composite index - we'll use NDUI directly like bm.py
+    # The urban mask is essentially where NDUI is high
     urban_mask = None
-    if ndvi is not None and ndui is not None:
-        # Use combine_indices_for_classification to create composite index
-        # Then threshold to create urban mask
-        composite_index = analyze.combine_indices_for_classification(
-            ndvi=ndvi,
-            ndwi=ndwi if ndwi is not None else np.zeros_like(ndvi),
-            ndui=ndui,
-            weights={
-                "ndvi": -0.3,  # Negative weight - urban areas have low NDVI
-                "ndwi": -0.2,  # Negative weight - urban areas have low NDWI
-                "ndui": 0.5    # Positive weight - urban areas have high NDUI
-            }
-        )
-        # Create binary urban mask by thresholding the composite index
-        urban_mask = composite_index > 0.3
+    if ndui is not None:
+        # Create a simple threshold mask for other processing needs
+        urban_mask = ndui > 0.3  # Reasonable threshold for urban areas
     
     
     # ==================== ENHANCE PHASE ====================

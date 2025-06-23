@@ -175,7 +175,9 @@ def create_cog(
             profile["zstd_level"] = 9  # Higher compression for archival
         
         # Create directory if needed
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        # Use abspath to ensure we have a proper directory path
+        output_dir = os.path.dirname(os.path.abspath(output_path))
+        os.makedirs(output_dir, exist_ok=True)
         
         # Write COG with overviews
         with rasterio.open(output_path, "w", **profile) as dst:

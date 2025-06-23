@@ -74,9 +74,13 @@ def graph_to_shapes(
 
     shapes = []
     for _, edge in edges_gdf.iterrows():
-        # Buffer the line geometry
-        buffered = edge.geometry.buffer(buffer_distance)
-        shapes.append(shapely.geometry.mapping(buffered))
+        # Buffer the line geometry if buffer_distance > 0
+        if buffer_distance > 0:
+            buffered = edge.geometry.buffer(buffer_distance)
+            shapes.append(shapely.geometry.mapping(buffered))
+        else:
+            # Return line geometry without buffering
+            shapes.append(shapely.geometry.mapping(edge.geometry))
 
     print(f"Created {len(shapes)} buffered road shapes")
     return shapes
