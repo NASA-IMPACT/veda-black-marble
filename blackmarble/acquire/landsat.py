@@ -163,8 +163,18 @@ def download_tiles_for_band(
     
     wrs1 = wrs1_results[0]
     wrs2 = wrs2_results[0]
+    
+    # Debug: print tile range
+    print(f"  Tile selection for band {band} on {year}-{month:02d}-{day:02d}:")
+    print(f"    SW corner ({min_lat}, {min_lon}) -> Path {wrs1['path']}, Row {wrs1['row']}")
+    print(f"    NE corner ({max_lat}, {max_lon}) -> Path {wrs2['path']}, Row {wrs2['row']}")
+    
     paths = range(min(wrs1["path"], wrs2["path"]), max(wrs1["path"], wrs2["path"]) + 1)
     rows = range(min(wrs1["row"], wrs2["row"]), max(wrs1["row"], wrs2["row"]) + 1)
+    
+    print(f"    Path range: {list(paths)}")
+    print(f"    Row range: {list(rows)}")
+    print(f"    Total tiles: {len(paths) * len(rows)}")
     
     downloads: list[str] = []
     pixels: list[str] = []

@@ -41,12 +41,12 @@ def coordinates_to_viirs_tile(lat: float, lon: float) -> tuple[int, int]:
         Each tile covers exactly 10x10 degrees in geographic coordinates.
     """
     # Convert latitude to vertical tile index (0-17, where 0 is northernmost)
-    # Formula: v = int((90 - lat) / 10), but using 180-degree range for precision
-    vertical_tile = int(((-lat + 90.0) / 180.0) * 18)
+    # Each tile is 10 degrees tall
+    vertical_tile = int((90 - lat) / 10)
     
     # Convert longitude to horizontal tile index (0-35, where 0 is westernmost)  
-    # Formula: h = int((lon + 180) / 10), but using 360-degree range for precision
-    horizontal_tile = int(((lon + 180.0) / 360.0) * 36)
+    # Each tile is 10 degrees wide
+    horizontal_tile = int((lon + 180) / 10)
     
     # Ensure tiles are within valid ranges
     vertical_tile = max(0, min(17, vertical_tile))
@@ -809,6 +809,19 @@ def download_vnp46a2_tiles(
     
     # Get tiles that cover the bbox
     tiles = get_tiles_for_bbox(bbox)
+    
+    # Debug: Print tile selection
+    print(f"\nVIIRS tile selection for bbox {bbox}:")
+    print(f"  Date: {year}-{month:02d}-{day:02d}")
+    print(f"  Number of tiles: {len(tiles)}")
+    for i, (v, h) in enumerate(tiles):
+        print(f"  Tile {i+1}: h{h:02d}v{v:02d}")
+        # Calculate tile bounds for debugging
+        west = (10 * h) - 180
+        east = west + 10
+        north = 90 - (10 * v)
+        south = north - 10
+        print(f"    Bounds: ({west}, {south}, {east}, {north})")
     
     # Initialize result lists
     result = {

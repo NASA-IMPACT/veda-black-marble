@@ -198,6 +198,9 @@ def black_marble_pipeline(
         # Create VRT mosaic if we have multiple VIIRS tiles
         if len(viirs_data['gap_filled_ntl']) > 1:
             print(f"Creating VRT mosaic for {len(viirs_data['gap_filled_ntl'])} VIIRS gap-filled NTL tiles")
+            print("VIIRS tiles in mosaic:")
+            for i, tile_path in enumerate(viirs_data['gap_filled_ntl']):
+                print(f"  {i+1}. {os.path.basename(tile_path)}")
             viirs_ntl_vrt = prepare.create_virtual_raster(
                 file_paths=viirs_data['gap_filled_ntl'],
                 output_vrt="data/temp/viirs_gap_filled_ntl_mosaic.vrt"
@@ -208,11 +211,14 @@ def black_marble_pipeline(
         
         # CRITICAL: Crop VIIRS to bounding box like bm.py does
         # This ensures we only process the area of interest, not entire tiles
+        print(f"\nCropping VIIRS data to bbox: {bbox}")
+        print(f"  VIIRS data shape before crop: {viirs_ntl.shape}")
         viirs_ntl, viirs_transform, _ = prepare.crop_to_bounds(
             data=viirs_ntl,
             src_transform=viirs_profile['transform'],
             bounds=bbox
         )
+        print(f"  VIIRS data shape after crop: {viirs_ntl.shape}")
         
         # CRITICAL: Resample to finer resolution like bm.py (scale = 0.00011111111)
         # This fills gaps through bilinear interpolation
@@ -238,6 +244,9 @@ def black_marble_pipeline(
             # Create VRT mosaic for quality if we have multiple tiles
             if len(viirs_data['quality']) > 1:
                 print(f"Creating VRT mosaic for {len(viirs_data['quality'])} VIIRS quality tiles")
+                print("VIIRS quality tiles in mosaic:")
+                for i, tile_path in enumerate(viirs_data['quality']):
+                    print(f"  {i+1}. {os.path.basename(tile_path)}")
                 viirs_quality_vrt = prepare.create_virtual_raster(
                     file_paths=viirs_data['quality'],
                     output_vrt="data/temp/viirs_quality_mosaic.vrt"
@@ -272,14 +281,17 @@ def black_marble_pipeline(
             # We discovered that bm.py uses HDF5 subdataset index 3, which is
             # "Latest_High_Quality_Retrieval", NOT "Mandatory_Quality_Flag" (index 4).
             # 
-            # This layer has simple 0-255 values that become binary 0/1 after
-            # bilinear resampling during the subset_raster_normal process.
+            # This layer has simple 0-255 values:
+            #   0 = High quality retrieval
+            #   1 = Good quality retrieval
+            #   2+ = Lower quality or issues
             #
-            # The mask logic is simple: quality == 0 means GOOD quality
-            # This gives us ~50-70% coverage depending on the data.
+            # IMPORTANT FIX: We should accept both 0 and 1 as good quality
+            # The original implementation only accepted 0, which caused black
+            # regions where quality=1 (still good quality per NASA docs)
             #
-            # No bit extraction needed - just use quality == 0
-            quality_mask = (quality_flag == 0).astype(float)
+            # No bit extraction needed - just use quality <= 1
+            quality_mask = (quality_flag <= 1).astype(float)
             
             # DIAGNOSTIC: Print quality mask statistics
             print(f"\nVIIRS Quality Mask Statistics (Latest_High_Quality_Retrieval):")
@@ -288,7 +300,7 @@ def black_marble_pipeline(
             print(f"  Unique quality values: {len(np.unique(quality_flag))}")
             if len(np.unique(quality_flag)) <= 10:
                 print(f"  Quality values: {np.unique(quality_flag)}")
-            print(f"  Pixels with quality==0 (good): {quality_mask.sum()} ({quality_mask.sum() / quality_mask.size * 100:.1f}%)")
+            print(f"  Pixels with quality<=1 (high/good): {quality_mask.sum()} ({quality_mask.sum() / quality_mask.size * 100:.1f}%)")
             print(f"  Non-zero VIIRS values before mask: {(viirs_ntl > 0).sum()}")
             print(f"  Non-zero VIIRS values after mask: {(viirs_ntl * quality_mask > 0).sum()}")
             
