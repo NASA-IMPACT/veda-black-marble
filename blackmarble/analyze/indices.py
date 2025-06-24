@@ -220,33 +220,34 @@ def calculate_ndui(
     if ndwi is not None and ndwi.shape != ntl.shape:
         raise ValueError(f"NDWI shape {ndwi.shape} must match NTL shape {ntl.shape}")
     
-    # Step 1: Normalize nighttime lights to [0, 1] range
-    # Clamp NTL values to the specified range
-    ntl_clamped = np.clip(ntl, ntl_floor, ntl_ceiling)
+    # Step 1: Apply floor/ceiling and normalize by ceiling (like bm.py)
+    # First clip to ceiling
+    ntl_clipped = np.where(ntl > ntl_ceiling, ntl_ceiling, ntl)
+    # Then apply floor
+    ntl_clipped = np.where(ntl_clipped < ntl_floor, 0.0, ntl_clipped)
+    # Normalize by dividing by ceiling (not range)
+    ntl_normalized = ntl_clipped / ntl_ceiling
     
-    # Normalize to [0, 1] scale
-    ntl_range = ntl_ceiling - ntl_floor
-    ntl_normalized = (ntl_clamped - ntl_floor) / ntl_range
+    # Step 2: Calculate NDUI using original Black Marble formula
+    # Original formula: (ntl - ndvi) / (ntl + ndvi + epsilon)
+    ndui = (ntl_normalized - ndvi) / (ntl_normalized + ndvi + epsilon)
     
-    # Step 2: Calculate NDUI using normalized NTL and NDVI
-    # Add 1 to NDVI to ensure positive denominator (NDVI range becomes [0, 2])
-    # Add epsilon to handle edge cases where NDVI might be exactly -1
-    denominator = 1.0 + ndvi + epsilon
-    
-    # Calculate raw NDUI
-    ndui = ntl_normalized / denominator
-    
-    # Step 3: Apply minimum threshold to remove low-confidence detections
-    ndui = np.where(ndui < ndui_floor, 0.0, ndui)
+    # Step 3: Clamp to [-1, 1]
+    ndui = np.where(ndui > 1.0, 1.0, ndui)
+    ndui = np.where(ndui < -1.0, -1.0, ndui)
     
     # Step 4: Apply water masking if NDWI is provided
     if ndwi is not None:
-        # Water pixels (NDWI > 0) are set to 0 since they cannot be urban
-        water_mask = ndwi > 0.0
-        ndui = np.where(water_mask, 0.0, ndui)
+        # Water pixels (NDWI >= 0) are set to -1 (like bm.py)
+        water_mask = ndwi >= 0.0
+        ndui = np.where(water_mask, -1.0, ndui)
     
-    # Step 5: Ensure values remain in [0, 1] range
-    ndui = np.clip(ndui, 0.0, 1.0)
+    # Step 5: Transform to [0, 1] range using bm.py formula
+    # Transform: abs((ndui + 1.0)) / 2.0
+    ndui = np.abs((ndui + 1.0)) / 2.0
+    
+    # Step 6: Apply floor threshold
+    ndui = np.where(ndui < ndui_floor, 0.0, ndui)
     
     return ndui
 

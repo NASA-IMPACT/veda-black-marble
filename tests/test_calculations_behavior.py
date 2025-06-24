@@ -381,14 +381,15 @@ class TestLunarCorrectionBehavior:
 
         corrected = apply_lunar_correction(ntl, lunar, quality, config)
 
-        # Quality 0 and 2 should have values
-        assert corrected[0, 0] > 0  # Flag 0 is valid
-        assert corrected[0, 2] > 0  # Flag 2 is valid
+        # Based on analysis: quality 0 and 2 should be EXCLUDED (they have low max values)
+        # Quality 0 and 2 should be zero
+        assert_close(corrected[0, 0], 0)  # Flag 0 excluded
+        assert_close(corrected[0, 2], 0)  # Flag 2 excluded
 
-        # Others should be zero
-        assert_close(corrected[0, 1], 0)  # Flag 1 invalid
-        assert_close(corrected[0, 3], 0)  # Flag 3 invalid
-        assert_close(corrected[0, 4], 0)  # Flag 4 invalid
+        # Others should have values
+        assert corrected[0, 1] > 0  # Flag 1 is valid
+        assert corrected[0, 3] > 0  # Flag 3 is valid
+        assert corrected[0, 4] > 0  # Flag 4 is valid
 
     def test_fill_value_handling(self):
         """Test handling of VIIRS fill values."""

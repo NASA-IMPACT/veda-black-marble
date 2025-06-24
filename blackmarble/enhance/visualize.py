@@ -166,10 +166,11 @@ def apply_inferno_colormap(
         inferno_g = np.load(data_dir / "inferno_g.npy")
         inferno_b = np.load(data_dir / "inferno_b.npy")
         
+        # Normalize from [0, 255] to [0, 1] range expected by apply_colormap
         colormap_data = {
-            "r": inferno_r,
-            "g": inferno_g,
-            "b": inferno_b
+            "r": inferno_r.astype(float) / 255.0,
+            "g": inferno_g.astype(float) / 255.0,
+            "b": inferno_b.astype(float) / 255.0
         }
     except FileNotFoundError:
         # Fallback to built-in inferno approximation
@@ -178,7 +179,7 @@ def apply_inferno_colormap(
     # Apply colormap with specified scale range
     result = apply_colormap(
         data=data,
-        colormap="inferno" if colormap_data is None else "grayscale",
+        colormap="inferno",  # This is only used when colormap_data is None
         colormap_data=colormap_data,
         scale_range=scale_range
     )

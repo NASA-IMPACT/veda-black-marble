@@ -304,8 +304,10 @@ def convert_viirs_hdf_to_tiff(
         layer: HDF5 subdataset index to extract:
                - 0: DNB_At_Sensor_Radiance (primary nighttime lights)
                - 1: Lunar_Irradiance (moon brightness correction)
-               - 2: Mandatory_Quality_Flag (data quality indicators)
-               - 3: QF_Cloud_Mask (cloud detection flags)
+               - 2: Gap_Filled_DNB_BRDF-Corrected_NTL (gap-filled version)
+               - 3: Latest_High_Quality_Retrieval (quality flag used by bm.py)
+               - 4: Mandatory_Quality_Flag (complex bit-packed quality)
+               - 5: QF_Cloud_Mask (cloud detection flags)
         
     Returns:
         Path to the created GeoTIFF file (same as output_file)
@@ -488,13 +490,13 @@ def extract_viirs_layers(
             'description': "Lunar irradiance correction factor"
         },
         'quality_flag': {
-            'index': 2,
-            'filename': f"{basename}_Mandatory_Quality_Flag.tif", 
+            'index': 3,  # Use Latest_High_Quality_Retrieval like bm.py
+            'filename': f"{basename}_Latest_High_Quality_Retrieval.tif", 
             'mandatory': True,
-            'description': "Mandatory quality assessment flags"
+            'description': "Latest high quality retrieval flag (becomes 0/1 after resampling)"
         },
         'cloud_mask': {
-            'index': 3,
+            'index': 5,  # QF_Cloud_Mask is actually at index 5
             'filename': f"{basename}_QF_Cloud_Mask.tif",
             'mandatory': False,
             'description': "Cloud detection quality flags"
@@ -563,8 +565,10 @@ def read_viirs_with_rasterio(
     layer_map = {
         'DNB_At_Sensor_Radiance': 0,
         'Lunar_Irradiance': 1,
-        'Mandatory_Quality_Flag': 2,
-        'QF_Cloud_Mask': 3,
+        'Gap_Filled_DNB_BRDF-Corrected_NTL': 2,
+        'Latest_High_Quality_Retrieval': 3,  # This is what bm.py uses
+        'Mandatory_Quality_Flag': 4,
+        'QF_Cloud_Mask': 5,
     }
     
     layer_idx = layer_map.get(layer_name, 0)

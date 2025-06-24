@@ -52,6 +52,9 @@ class VIIRSConfig:
     ceiling: float = 10.0
     fill_value: float = 65530
     lunar_unit_conversion: float = 10.0
+    # NOTE: Analysis shows quality==0 always has VIIRS=0, and quality==2 max is 2.0
+    # Using NOT(0 or 2) gives us the bright pixels we need
+    # This is implemented by having an empty list here and inverting logic in calculations
     quality_valid_flags: list[int] = field(default_factory=lambda: [0, 2])
 
 

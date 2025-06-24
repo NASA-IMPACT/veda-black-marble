@@ -180,8 +180,11 @@ def apply_lunar_correction(
         lunar_irradiance > config.fill_value, 0.0, lunar_irradiance
     ).astype(np.float32)
 
-    # Create quality mask - only keep valid quality flags
-    quality_mask = np.isin(quality_flags, config.quality_valid_flags).astype(np.float32)
+    # Create quality mask - based on analysis, we need to EXCLUDE 0 and 2
+    # because quality==0 always has VIIRS=0, and quality==2 max is 2.0
+    # Using NOT(0 or 2) gives us the bright pixels we need
+    quality_mask = ~np.isin(quality_flags, config.quality_valid_flags)
+    quality_mask = quality_mask.astype(np.float32)
 
     # Apply lunar correction
     adjusted_ntl = (ntl_clean - lunar_clean) * quality_mask

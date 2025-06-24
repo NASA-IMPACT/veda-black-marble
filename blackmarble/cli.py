@@ -134,6 +134,12 @@ def run_target(
         "-c", 
         help="Configuration preset: 'default', 'high_quality', or 'fast'.",
     ),
+    save_diagnostics: bool = typer.Option(
+        False,
+        "--save-diagnostics",
+        "-d",
+        help="Save diagnostic intermediate outputs to data/diagnostics/",
+    ),
 ):
     """
     Runs the new target Black Marble processing pipeline for a given area and date.
@@ -189,6 +195,11 @@ def run_target(
     else:
         typer.echo(f"Error: Unknown config preset '{config_preset}'. Use 'default', 'high_quality', or 'fast'.", err=True)
         raise typer.Exit(code=1)
+    
+    # Enable diagnostics if requested
+    if save_diagnostics:
+        config.save_diagnostics = True
+        typer.echo("📊 Diagnostic outputs will be saved to data/diagnostics/")
     
     # Display processing info
     typer.echo("Starting Target Black Marble pipeline:")

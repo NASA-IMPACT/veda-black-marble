@@ -210,7 +210,7 @@ class TestCompleteProcessingPipeline:
             )
         if "QF" not in scene:
             scene["QF"] = viirs.get(
-                "quality_flag", np.zeros((150, 150), dtype=np.uint8)
+                "quality_flag", np.ones((150, 150), dtype=np.uint8)  # Quality = 1 (valid)
             )
         if "NTL" not in scene:
             scene["NTL"] = viirs.get(
@@ -275,8 +275,8 @@ class TestCompleteProcessingPipeline:
         # Uniform lunar illumination
         lunar = np.full(shape, 20.0, dtype=np.float32)
 
-        # All good quality
-        quality = np.zeros(shape, dtype=np.uint8)
+        # All valid quality (not 0 or 2)
+        quality = np.ones(shape, dtype=np.uint8)  # Quality = 1
 
         # Apply correction
         corrected = apply_lunar_correction(ntl, lunar, quality)
@@ -289,12 +289,12 @@ class TestCompleteProcessingPipeline:
         assert 0.8 < corrected[-1, 0] <= 1.0  # (200-20)/10/10, capped at 1.0
 
         # Test quality masking
-        quality[50:, :] = 3  # Poor quality
+        quality[50:, :] = 0  # Quality 0 is now masked out
         corrected_masked = apply_lunar_correction(ntl, lunar, quality)
 
-        # Poor quality pixels should be zero
+        # Quality 0 pixels should be zero
         assert np.all(corrected_masked[50:, :] == 0)
-        # Good quality pixels should be non-zero where NTL > lunar
+        # Valid quality pixels should be non-zero where NTL > lunar
         # First few rows have NTL < lunar, so they'll be 0
         assert np.all(corrected_masked[30:50, :] > 0)  # Where NTL > lunar
 
@@ -365,7 +365,7 @@ class TestProcessingEdgeCases:
         # Saturated NTL
         ntl = np.full(shape, 1000.0, dtype=np.float32)
         lunar = np.zeros(shape, dtype=np.float32)
-        quality = np.zeros(shape, dtype=np.uint8)
+        quality = np.ones(shape, dtype=np.uint8)  # Quality = 1 (valid)
 
         corrected = apply_lunar_correction(ntl, lunar, quality)
 
@@ -397,8 +397,9 @@ class TestProcessingEdgeCases:
 
         corrected = apply_lunar_correction(ntl, lunar, quality)
 
-        # Only quality 0 and 2 should have values
-        valid_mask = (quality == 0) | (quality == 2)
+        # Based on analysis: quality 0 and 2 should be EXCLUDED (they have low max values)
+        # Only quality NOT in [0, 2] should have values
+        valid_mask = ~((quality == 0) | (quality == 2))
         assert np.all(corrected[~valid_mask] == 0)
         assert np.all(corrected[valid_mask] > 0)
 

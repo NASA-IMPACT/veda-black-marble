@@ -197,7 +197,7 @@ def _process_large_scene(scene_id):
     green = rng.rand(*shape).astype(np.float32)
     ntl = rng.rand(*shape).astype(np.float32) * 10
     lunar = rng.rand(*shape).astype(np.float32) * 5
-    quality = np.zeros(shape, dtype=np.uint8)
+    quality = np.ones(shape, dtype=np.uint8)  # Quality = 1 (valid)
     roads = rng.randint(0, 6, shape, dtype=np.uint8)
 
     # Perform calculations

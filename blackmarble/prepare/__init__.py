@@ -68,6 +68,10 @@ from .spatial import (
     stack_arrays_with_padding,
 )
 
+from .diagnostic import (
+    save_diagnostic,
+)
+
 # CRITICAL FIX: Unified calculate_utm_zone function to resolve API inconsistency
 #
 # The original implementation had two conflicting versions:
@@ -178,4 +182,6 @@ __all__ = [
     "reproject_image",
     "resample_image",
     "stack_arrays_with_padding",
+    # Diagnostic functions
+    "save_diagnostic",
 ]

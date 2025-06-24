@@ -56,6 +56,11 @@ def create_cog(
     from rasterio.enums import Resampling
     import os
     
+    # Ensure output directory exists
+    output_dir = os.path.dirname(os.path.abspath(output_path))
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+    
     # Validate compression choice for scientific data
     # CRITICAL: For Black Marble nighttime lights, we need lossless compression
     # to preserve precise radiance values for scientific analysis

@@ -177,7 +177,7 @@ class TestLunarCorrection:
 
         ntl = np.array([[100.0, 200.0], [150.0, 300.0]])
         lunar = np.array([[10.0, 20.0], [15.0, 30.0]])
-        quality = np.array([[0, 0], [2, 2]])  # All good quality
+        quality = np.array([[1, 3], [1, 3]])  # All valid quality (not 0 or 2)
 
         corrected = apply_lunar_correction(ntl, lunar, quality, config)
 
@@ -195,17 +195,17 @@ class TestLunarCorrection:
 
         ntl = np.array([[100.0, 100.0], [100.0, 100.0]])
         lunar = np.array([[10.0, 10.0], [10.0, 10.0]])
-        quality = np.array([[0, 1], [2, 3]])  # 0,2 good; 1,3 bad
+        quality = np.array([[0, 1], [2, 3]])  # Based on analysis: 0,2 excluded; 1,3 valid
 
         corrected = apply_lunar_correction(ntl, lunar, quality, config)
 
-        # Good quality pixels should have values
-        assert corrected[0, 0] > 0  # quality = 0
-        assert corrected[1, 0] > 0  # quality = 2
+        # Quality 0 and 2 should be zero (excluded based on analysis)
+        assert pytest.approx(corrected[0, 0], abs=1e-8) == 0  # quality = 0
+        assert pytest.approx(corrected[1, 0], abs=1e-8) == 0  # quality = 2
 
-        # Bad quality pixels should be zero
-        assert pytest.approx(corrected[0, 1], abs=1e-8) == 0  # quality = 1
-        assert pytest.approx(corrected[1, 1], abs=1e-8) == 0  # quality = 3
+        # Quality 1 and 3 should have values (valid pixels)
+        assert corrected[0, 1] > 0  # quality = 1
+        assert corrected[1, 1] > 0  # quality = 3
 
     def test_lunar_fill_values(self):
         """Test handling of fill values."""
