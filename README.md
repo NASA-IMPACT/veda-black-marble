@@ -40,7 +40,16 @@ You can run the pipeline locally (no Docker) once dependencies are installed.
    python cli.py
    ```
 
-Outputs will land in the `outputs/` directory. If `UPLOAD_BUCKET` and `UPLOAD_FILE` are set, the final COG will also be uploaded to S3.
+Outputs will be saved in the `data/outputs/` directory. If `UPLOAD_BUCKET` and `UPLOAD_FILE` are set, the final COG will also be uploaded to S3.
+
+### Directory Structure
+```
+data/
+├── outputs/      # Final Black Marble output files
+├── landsat/      # Downloaded Landsat data (if applicable)
+├── viirs/        # Downloaded VIIRS nighttime lights data
+└── osm/          # OpenStreetMap road network data
+```
 
 ## Advanced Features
 

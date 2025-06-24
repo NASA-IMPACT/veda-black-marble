@@ -16,6 +16,9 @@ from boto3.session import Session
 import collections
 from osgeo import gdal
 
+# Enable GDAL exceptions for better error handling
+gdal.UseExceptions()
+
 try:
     from osgeo import ogr
 except ImportError:

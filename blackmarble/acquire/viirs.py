@@ -489,6 +489,12 @@ def extract_viirs_layers(
             'mandatory': False,
             'description': "Lunar irradiance correction factor"
         },
+        'gap_filled_ntl': {
+            'index': 2,
+            'filename': f"{basename}_Gap_Filled_DNB_BRDF-Corrected_NTL.tif",
+            'mandatory': True,
+            'description': "Gap-filled BRDF-corrected nighttime lights (NASA pre-processed)"
+        },
         'quality_flag': {
             'index': 3,  # Use Latest_High_Quality_Retrieval like bm.py
             'filename': f"{basename}_Latest_High_Quality_Retrieval.tif", 
@@ -747,7 +753,8 @@ def download_vnp46a2_tiles(
     product: str = "DNB_At_Sensor_Radiance",
     output_dir: str = ".",
     earthdata_token: str | None = None,
-    skip_existing: bool = True
+    skip_existing: bool = True,
+    cache_dir: str | None = None
 ) -> dict[str, list[str]]:
     """Download all VNP46A2 tiles for a date and bounding box.
     
@@ -763,6 +770,7 @@ def download_vnp46a2_tiles(
         output_dir: Directory to save downloaded files
         earthdata_token: NASA Earthdata token (uses env var if None)
         skip_existing: Skip downloading files that already exist
+        cache_dir: Optional cache directory for storing downloads
         
     Returns:
         Dictionary with keys:
@@ -785,22 +793,29 @@ def download_vnp46a2_tiles(
         if not earthdata_token:
             raise ValueError("Earthdata token required. Set EARTHDATA_TOKEN env var or pass as parameter.")
     
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Get tiles that cover the bbox
-    tiles = get_tiles_for_bbox(bbox)
-    
     # Extract date components
     year = date.year
     month = date.month
     day = date.day
+    
+    # Use cache directory if provided, otherwise use output_dir
+    if cache_dir:
+        # Create structured cache directory: cache/viirs/YYYY/MM/DD/
+        effective_output_dir = os.path.join(cache_dir, "viirs", f"{year:04d}", f"{month:02d}", f"{day:02d}")
+        os.makedirs(effective_output_dir, exist_ok=True)
+    else:
+        effective_output_dir = output_dir
+        os.makedirs(effective_output_dir, exist_ok=True)
+    
+    # Get tiles that cover the bbox
+    tiles = get_tiles_for_bbox(bbox)
     
     # Initialize result lists
     result = {
         'radiance': [],
         'lunar': [],
         'quality': [],
+        'gap_filled_ntl': [],
         'metadata': []
     }
     
@@ -808,11 +823,11 @@ def download_vnp46a2_tiles(
     for v, h in tiles:
         # Create filename for HDF5 file
         hdf_filename = f"VNP46A2_h{h:02d}v{v:02d}_{year}{month:02d}{day:02d}.h5"
-        hdf_path = os.path.join(output_dir, hdf_filename)
+        hdf_path = os.path.join(effective_output_dir, hdf_filename)
         
         # Skip if exists and skip_existing is True
         if skip_existing and os.path.exists(hdf_path):
-            print(f"Skipping existing file: {hdf_path}")
+            print(f"Using cached HDF5 file: {hdf_path}")
         else:
             # Download HDF5 file
             download_viirs_h5(
@@ -824,7 +839,7 @@ def download_vnp46a2_tiles(
         
         # Extract layers to GeoTIFF
         try:
-            layer_files = extract_viirs_layers(hdf_path, output_dir)
+            layer_files = extract_viirs_layers(hdf_path, effective_output_dir)
             
             # Add to result lists
             if 'radiance' in layer_files:
@@ -833,6 +848,8 @@ def download_vnp46a2_tiles(
                 result['lunar'].append(layer_files['lunar_irradiance'])
             if 'quality_flag' in layer_files:
                 result['quality'].append(layer_files['quality_flag'])
+            if 'gap_filled_ntl' in layer_files:
+                result['gap_filled_ntl'].append(layer_files['gap_filled_ntl'])
             
             # Extract metadata
             metadata = get_viirs_metadata(hdf_path)

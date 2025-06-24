@@ -222,57 +222,155 @@ def crop_to_bounds(
     Returns:
         Tuple of (cropped_data, new_transform, actual_bounds)
     """
-    # Get dimensions
-    if data.ndim == 2:
-        height, width = data.shape
-    else:
-        _, height, width = data.shape
+    try:
+        # Use rasterio for exact cropping
+        import rasterio
+        from rasterio.windows import from_bounds
+        
+        # Apply buffer to bounds
+        min_x, min_y, max_x, max_y = bounds
+        if buffer > 0:
+            if buffer_units == "crs":
+                min_x -= buffer
+                min_y -= buffer
+                max_x += buffer
+                max_y += buffer
+            else:  # pixels
+                pixel_buffer_x = buffer * abs(transform.a)
+                pixel_buffer_y = buffer * abs(transform.e)
+                min_x -= pixel_buffer_x
+                min_y -= pixel_buffer_y
+                max_x += pixel_buffer_x
+                max_y += pixel_buffer_y
+        
+        # Get window from bounds - rasterio handles fractional pixels
+        window = from_bounds(min_x, min_y, max_x, max_y, transform)
+        
+        # Round to integer pixels to match GDAL's projWin behavior
+        col_off = round(window.col_off)
+        row_off = round(window.row_off)
+        width = round(window.width)
+        height = round(window.height)
+        
+        # Get data dimensions
+        if data.ndim == 2:
+            data_height, data_width = data.shape
+        else:
+            _, data_height, data_width = data.shape
+        
+        # Ensure we don't exceed data bounds
+        col_off = max(0, col_off)
+        row_off = max(0, row_off)
+        col_end = min(data_width, col_off + width)
+        row_end = min(data_height, row_off + height)
+        
+        # Crop the data
+        if data.ndim == 2:
+            cropped = data[row_off:row_end, col_off:col_end]
+        else:
+            cropped = data[:, row_off:row_end, col_off:col_end]
+        
+        # Calculate the new transform
+        new_transform: Affine = transform * Affine.translation(col_off, row_off)
+        
+        # Calculate actual bounds of the cropped data
+        actual_height, actual_width = cropped.shape[-2:]
+        actual_bounds = (
+            new_transform.c,  # west
+            new_transform.f + new_transform.e * actual_height,  # south
+            new_transform.c + new_transform.a * actual_width,  # east
+            new_transform.f   # north
+        )
+        
+        return cropped, new_transform, actual_bounds
+        
+    except ImportError:
+        # Fallback if rasterio not available
+        raise ImportError("Rasterio is required for crop_to_bounds")
 
-    # Apply buffer to bounds
+
+def crop_and_resample_to_bounds(
+    data: np.ndarray,
+    transform: Affine,
+    bounds: tuple[float, float, float, float],
+    target_resolution: float,
+    resampling: str = "bilinear",
+    crs: str = "EPSG:4326",
+) -> tuple[np.ndarray, Affine, tuple[float, float, float, float]]:
+    """Crop and resample to exact bounds at specified resolution.
+    
+    This replicates bm.py's behavior of resampling to a target resolution
+    which creates a pixel-aligned grid that can exactly match the bounds.
+    
+    Args:
+        data: Input image array (2D or 3D)
+        transform: Affine transform for the data
+        bounds: Target bounds (min_x, min_y, max_x, max_y)
+        target_resolution: Target pixel size in CRS units
+        resampling: Resampling method (default: "bilinear")
+        crs: Coordinate reference system (default: "EPSG:4326")
+        
+    Returns:
+        Tuple of (resampled_data, new_transform, actual_bounds)
+    """
+    import rasterio
+    from rasterio.warp import reproject, Resampling
+    from rasterio.transform import from_bounds
+    
     min_x, min_y, max_x, max_y = bounds
-    if buffer > 0:
-        if buffer_units == "crs":
-            min_x -= buffer
-            min_y -= buffer
-            max_x += buffer
-            max_y += buffer
-        else:  # pixels
-            pixel_buffer_x = buffer * abs(transform.a)
-            pixel_buffer_y = buffer * abs(transform.e)
-            min_x -= pixel_buffer_x
-            min_y -= pixel_buffer_y
-            max_x += pixel_buffer_x
-            max_y += pixel_buffer_y
-
-    # Convert bounds to pixel coordinates
-    inv_transform = ~transform
-    col_min, row_max = inv_transform * (min_x, min_y)
-    col_max, row_min = inv_transform * (max_x, max_y)
-
-    # Round to integer pixels and clip to data bounds
-    col_min = max(0, int(np.floor(col_min)))
-    col_max = min(width, int(np.ceil(col_max)))
-    row_min = max(0, int(np.floor(row_min)))
-    row_max = min(height, int(np.ceil(row_max)))
-
-    # Crop data
+    
+    # Calculate output dimensions for exact bounds
+    out_width = int(round((max_x - min_x) / target_resolution))
+    out_height = int(round((max_y - min_y) / target_resolution))
+    
+    # Create transform for exact bounds
+    out_transform = from_bounds(min_x, min_y, max_x, max_y, out_width, out_height)
+    
+    # Map resampling string to enum
+    resampling_map = {
+        "nearest": Resampling.nearest,
+        "bilinear": Resampling.bilinear,
+        "cubic": Resampling.cubic,
+        "average": Resampling.average,
+    }
+    resampling_enum = resampling_map.get(resampling, Resampling.bilinear)
+    
+    # Create output array
     if data.ndim == 2:
-        cropped = data[row_min:row_max, col_min:col_max]
+        out_shape = (out_height, out_width)
+        out_data = np.empty(out_shape, dtype=data.dtype)
+        
+        # Reproject to exact bounds
+        reproject(
+            source=data,
+            destination=out_data,
+            src_transform=transform,
+            dst_transform=out_transform,
+            src_crs=crs,
+            dst_crs=crs,
+            resampling=resampling_enum
+        )
     else:
-        cropped = data[:, row_min:row_max, col_min:col_max]
-
-    # Update transform for cropped data
-    new_transform = transform * Affine.translation(col_min, row_min)
-
-    # Calculate actual bounds of cropped data
-    actual_bounds = (
-        new_transform.c,
-        new_transform.f + new_transform.e * (row_max - row_min),
-        new_transform.c + new_transform.a * (col_max - col_min),
-        new_transform.f,
-    )
-
-    return cropped, new_transform, actual_bounds
+        # Handle multi-band
+        n_bands = data.shape[0]
+        out_shape = (n_bands, out_height, out_width)
+        out_data = np.empty(out_shape, dtype=data.dtype)
+        
+        for i in range(n_bands):
+            reproject(
+                source=data[i],
+                destination=out_data[i],
+                src_transform=transform,
+                dst_transform=out_transform,
+                src_crs=crs,
+                dst_crs=crs,
+                resampling=resampling_enum
+            )
+    
+    # The output bounds are exactly what was requested
+    actual_bounds = (min_x, min_y, max_x, max_y)
+    
+    return out_data, out_transform, actual_bounds
 
 
 def align_rasters(

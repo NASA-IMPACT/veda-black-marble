@@ -171,9 +171,9 @@ def calculate_ndui(
     handle the wide dynamic range of nighttime lights data.
     
     Args:
-        ntl: Nighttime light radiance values in nW/cm²/sr.
-            Should be lunar-corrected VIIRS DNB radiance.
-            Typical range: [0, 50] with most urban areas < 10.
+        ntl: Nighttime light radiance values.
+            Can be either raw DN values (0-5000) or scaled nW/cm²/sr (0-50).
+            Function auto-detects based on range and scales if needed.
         ndvi: NDVI values from calculate_ndvi(), range [-1, 1].
             Used to suppress vegetation areas.
         ndwi: Optional NDWI values for water masking.
@@ -220,9 +220,18 @@ def calculate_ndui(
     if ndwi is not None and ndwi.shape != ntl.shape:
         raise ValueError(f"NDWI shape {ndwi.shape} must match NTL shape {ntl.shape}")
     
-    # Step 1: Apply floor/ceiling and normalize by ceiling (like bm.py)
+    # Step 1: Handle raw DN values if needed (auto-detect based on range)
+    # If max value > 100, assume raw DN values and scale by /10
+    if np.nanmax(ntl) > 100:
+        # Raw DN values - scale to nW/cm²/sr
+        ntl_scaled = ntl.astype(np.float32) / 10.0
+    else:
+        # Already scaled to nW/cm²/sr
+        ntl_scaled = ntl
+    
+    # Step 2: Apply floor/ceiling and normalize by ceiling (like bm.py)
     # First clip to ceiling
-    ntl_clipped = np.where(ntl > ntl_ceiling, ntl_ceiling, ntl)
+    ntl_clipped = np.where(ntl_scaled > ntl_ceiling, ntl_ceiling, ntl_scaled)
     # Then apply floor
     ntl_clipped = np.where(ntl_clipped < ntl_floor, 0.0, ntl_clipped)
     # Normalize by dividing by ceiling (not range)

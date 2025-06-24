@@ -45,57 +45,20 @@ def black_marble_pipeline(
     # ==================== ACQUIRE PHASE ====================
     # Get all the data we need from various sources
     
-    # 1. Acquire Landsat data for the area and date
-    # Download NIR band for NDVI calculation
-    print(f"Downloading Landsat data for bbox: {bbox}")
-    nir_files, nir_files_georef, _, _ = acquire.download_tiles_for_band(
-        band=5,  # NIR band
-        year=date.year,
-        month=date.month,
-        day=date.day,
-        bbox=bbox
-    )
+    # 1. Setup for Landsat acquisition
+    # Get number of months for compositing from config
+    composite_months = getattr(config, 'composite_history_months', 12) if config else 12
     
-    # Download RGB bands for visualization
-    red_files, red_files_georef, _, _ = acquire.download_tiles_for_band(
-        band=4,  # Red band
-        year=date.year,
-        month=date.month,
-        day=date.day,
-        bbox=bbox
-    )
-    
-    green_files, green_files_georef, _, _ = acquire.download_tiles_for_band(
-        band=3,  # Green band
-        year=date.year,
-        month=date.month,
-        day=date.day,
-        bbox=bbox
-    )
-    
-    blue_files, blue_files_georef, _, _ = acquire.download_tiles_for_band(
-        band=2,  # Blue band
-        year=date.year,
-        month=date.month,
-        day=date.day,
-        bbox=bbox
-    )
-    
-    # Download quality bands
-    qa_files, qa_files_georef, _, _ = acquire.download_tiles_for_band(
-        band="QA_PIXEL",
-        year=date.year,
-        month=date.month,
-        day=date.day,
-        bbox=bbox
-    )
+    # Get cache directory from config if enabled
+    cache_dir = getattr(config, 'cache_dir', None) if config and getattr(config, 'cache_downloads', False) else None
     
     # 2. Acquire VIIRS nighttime lights data
     viirs_data = acquire.download_vnp46a2_tiles(
         date=date,
         bbox=bbox,
         output_dir="./data/viirs",
-        skip_existing=True
+        skip_existing=True,
+        cache_dir=cache_dir
     )
     
     # 3. Acquire OpenStreetMap road network
@@ -116,114 +79,137 @@ def black_marble_pipeline(
     # Ensure temp directory exists for VRTs
     os.makedirs("data/temp", exist_ok=True)
     
-    # 1. Load and scale Landsat data to reflectance
-    # Use VRT for efficient lazy loading and mosaicking
-    landsat_bands = {}
-    landsat_vrts = {}
+    # 1. Process Landsat data date-by-date with QA masking
+    # This ensures QA masks are applied before temporal compositing
+    print("Processing Landsat data with date-by-date QA masking")
     
-    for band_name, files, georef_files in [
-        ("B2", blue_files, blue_files_georef),
-        ("B3", green_files, green_files_georef),
-        ("B4", red_files, red_files_georef),
-        ("B5", nir_files, nir_files_georef),
-    ]:
-        if files:
-            print(f"Creating VRT for {band_name} with {len(files)} scene(s)")
-            
-            # Create VRT for all scenes of this band
-            if len(files) > 1:
-                # Create VRT mosaic for multiple scenes
-                vrt_path = prepare.create_virtual_raster(
-                    file_paths=files,
-                    output_vrt=f"data/temp/{band_name}_mosaic.vrt"
-                )
-                print(f"Created VRT mosaic: {vrt_path}")
-            else:
-                # Single scene - use file directly
-                vrt_path = files[0]
-            
-            # Load the VRT/file and scale to reflectance
-            data, profile = prepare.load_with_rasterio(vrt_path)
-            
-            # Scale to reflectance
-            scaled_data = prepare.scale_landsat_bands(
-                data,
-                scale_factor=config.preparation.landsat_scale_factor if hasattr(config, 'preparation') else (config.landsat.band_scale_factor if hasattr(config, 'landsat') else 0.0000275),
-                add_offset=config.preparation.landsat_add_offset if hasattr(config, 'preparation') else (config.landsat.band_offset if hasattr(config, 'landsat') else -0.2)
-            )
-            
-            landsat_bands[band_name] = (scaled_data, profile)
-            landsat_vrts[band_name] = vrt_path
-            
-            # TODO: For very large areas, consider using windowed processing:
-            # from blackmarble.prepare.vrt_utils import process_vrt_by_chunks
-            # This would process the VRT in chunks without loading all into memory
+    # Get scale factors from config
+    scale_factor = config.preparation.landsat_scale_factor if hasattr(config, 'preparation') else (config.landsat.band_scale_factor if hasattr(config, 'landsat') else 0.0000275)
+    add_offset = config.preparation.landsat_add_offset if hasattr(config, 'preparation') else (config.landsat.band_offset if hasattr(config, 'landsat') else -0.2)
+    dilate_pixels = config.preparation.qa_dilation_radius if hasattr(config, 'preparation') else (config.landsat.qa_dilation_radius if hasattr(config, 'landsat') else 3)
     
-    # Load QA band - also use VRT for multiple scenes
-    qa_data = None
-    if qa_files:
-        print(f"Creating VRT for QA with {len(qa_files)} scene(s)")
-        
-        if len(qa_files) > 1:
-            # Create VRT for QA files
-            # Note: For QA, we might want different merge strategy
-            # but VRT will use "first" method by default
-            qa_vrt_path = prepare.create_virtual_raster(
-                file_paths=qa_files,
-                output_vrt="data/temp/QA_mosaic.vrt"
-            )
-            print(f"Created QA VRT mosaic: {qa_vrt_path}")
+    # Initialize stacks for each band
+    band_stacks = {
+        'B2': [],
+        'B3': [],
+        'B4': [],
+        'B5': []
+    }
+    reference_profile = None
+    
+    # Track downloaded files for metadata
+    all_landsat_files = {
+        'B2': [],
+        'B3': [],
+        'B4': [],
+        'B5': []
+    }
+    
+    # Calculate total number of dates to process
+    num_dates = composite_months + 1  # Primary date + historical dates
+    
+    # Process each date independently
+    for date_idx in range(num_dates):
+        if date_idx == 0:
+            # Primary date
+            target_date = date
+            print(f"\nProcessing primary date: {target_date.strftime('%Y-%m-%d')}")
         else:
-            qa_vrt_path = qa_files[0]
+            # Historical date
+            from datetime import timedelta
+            target_date = date - timedelta(days=date_idx * 30)
+            print(f"\nProcessing historical date {date_idx}: {target_date.strftime('%Y-%m-%d')}")
         
-        # Load QA data from VRT
-        qa_data, qa_profile = prepare.load_with_rasterio(qa_vrt_path)
-        
-        # Note: VRT uses "first" method by default, which takes the first valid pixel
-        # This is actually appropriate for QA bands in most cases
-        # If we need bitwise OR, we'd need to load all scenes and process in memory
-    
-    # 2. Apply quality masks to remove clouds/shadows
-    cloud_mask = None
-    if qa_data is not None:
-        cloud_mask = prepare.create_cloud_mask(
-            qa_pixel=qa_data,
-            conservative=True,  # Use conservative cloud masking
-            dilate_pixels=config.preparation.qa_dilation_radius if hasattr(config, 'preparation') else (config.landsat.qa_dilation_radius if hasattr(config, 'landsat') else 3)
-        )
-    
-    # Apply masks to all bands
-    if cloud_mask is not None:
-        for band_name in landsat_bands:
-            data, profile = landsat_bands[band_name]
-            landsat_bands[band_name] = (data * cloud_mask, profile)  # cloud_mask is True for clear pixels
+        # Download all bands for this specific date
+        try:
+            bands_data = acquire.download_all_bands_for_date(
+                year=target_date.year,
+                month=target_date.month,
+                day=target_date.day,
+                bbox=bbox,
+                bands=[2, 3, 4, 5, 'QA_PIXEL'],
+                cache_dir=cache_dir,
+                ignore_missing=(date_idx > 0)  # Only ignore missing for historical dates
+            )
             
-            # Save diagnostic output if requested
-            if config and getattr(config, 'save_diagnostics', False):
-                prepare.save_diagnostic(data * cloud_mask, profile,
-                                      f"data/diagnostics/landsat_{band_name}_masked.tif",
-                                      f"Landsat {band_name} after cloud masking")
+            # Process this date's data with QA masking
+            processed_data = prepare.process_landsat_date(
+                bands_data=bands_data,
+                bbox=bbox,
+                apply_qa_mask=True,
+                dilate_pixels=dilate_pixels,
+                cloud_strategy="moderate"  # Use bit-based moderate strategy
+            )
+            
+            # Add masked data to stacks and track files
+            for band_name in ['B2', 'B3', 'B4', 'B5']:
+                if band_name in processed_data:
+                    masked_data, profile = processed_data[band_name]
+                    band_stacks[band_name].append(masked_data)
+                    
+                    # Store first profile as reference
+                    if reference_profile is None:
+                        reference_profile = profile
+                
+                # Track downloaded files for metadata
+                if band_name in bands_data:
+                    band_files, _, _, _ = bands_data[band_name]
+                    all_landsat_files[band_name].extend(band_files)
+            
+        except Exception as e:
+            if date_idx > 0:  # Historical date
+                print(f"  Warning: Could not process date {target_date.strftime('%Y-%m-%d')}: {e}")
+                continue
+            else:  # Primary date
+                raise
+    
+    # Create temporal composites from the masked stacks
+    landsat_bands = {}
+    landsat_profiles = {}
+    
+    for band_name, stack in band_stacks.items():
+        if stack:
+            print(f"\nCreating temporal composite for {band_name} from {len(stack)} dates")
+            
+            # Create median composite from pre-masked data
+            composite_data = analyze.create_landsat_median_composite(
+                stack,
+                scale_factor=scale_factor,
+                add_offset=add_offset
+            )
+            
+            landsat_bands[band_name] = (composite_data, reference_profile)
+            landsat_profiles[band_name] = reference_profile
+            
+            print(f"  Created composite for {band_name}: shape={composite_data.shape}, "
+                  f"coverage={(composite_data > 0).sum()/composite_data.size*100:.1f}%")
+        else:
+            print(f"  Warning: No data found for {band_name}")
+    
+    # Note: QA masking has already been applied during date-by-date processing
+    # No need for separate QA compositing or post-processing masking
     
     # 3. Process VIIRS nighttime lights
-    # Load VIIRS radiance data
+    # Load VIIRS gap-filled BRDF-corrected NTL data
     viirs_corrected = None
     viirs_profile = None
-    if viirs_data and viirs_data['radiance']:
+    # Use gap-filled NTL if available, fall back to radiance if not
+    if viirs_data and viirs_data.get('gap_filled_ntl'):
         # Create VRT mosaic if we have multiple VIIRS tiles
-        if len(viirs_data['radiance']) > 1:
-            print(f"Creating VRT mosaic for {len(viirs_data['radiance'])} VIIRS radiance tiles")
-            viirs_radiance_vrt = prepare.create_virtual_raster(
-                file_paths=viirs_data['radiance'],
-                output_vrt="data/temp/viirs_radiance_mosaic.vrt"
+        if len(viirs_data['gap_filled_ntl']) > 1:
+            print(f"Creating VRT mosaic for {len(viirs_data['gap_filled_ntl'])} VIIRS gap-filled NTL tiles")
+            viirs_ntl_vrt = prepare.create_virtual_raster(
+                file_paths=viirs_data['gap_filled_ntl'],
+                output_vrt="data/temp/viirs_gap_filled_ntl_mosaic.vrt"
             )
-            viirs_radiance, viirs_profile = prepare.load_with_rasterio(viirs_radiance_vrt)
+            viirs_ntl, viirs_profile = prepare.load_with_rasterio(viirs_ntl_vrt)
         else:
-            viirs_radiance, viirs_profile = prepare.load_with_rasterio(viirs_data['radiance'][0])
+            viirs_ntl, viirs_profile = prepare.load_with_rasterio(viirs_data['gap_filled_ntl'][0])
         
         # CRITICAL: Crop VIIRS to bounding box like bm.py does
         # This ensures we only process the area of interest, not entire tiles
-        viirs_radiance, viirs_transform, _ = prepare.crop_to_bounds(
-            data=viirs_radiance,
+        viirs_ntl, viirs_transform, _ = prepare.crop_to_bounds(
+            data=viirs_ntl,
             src_transform=viirs_profile['transform'],
             bounds=bbox
         )
@@ -231,8 +217,8 @@ def black_marble_pipeline(
         # CRITICAL: Resample to finer resolution like bm.py (scale = 0.00011111111)
         # This fills gaps through bilinear interpolation
         target_resolution = 0.00011111111  # ~12 meters, matching bm.py
-        viirs_radiance, viirs_transform = prepare.resample_image(
-            data=viirs_radiance,
+        viirs_ntl, viirs_transform = prepare.resample_image(
+            data=viirs_ntl,
             src_transform=viirs_transform,
             target_resolution=target_resolution,
             resampling='bilinear'
@@ -240,44 +226,16 @@ def black_marble_pipeline(
         
         # Update profile with new shape and transform
         viirs_profile['transform'] = viirs_transform
-        viirs_profile['height'] = viirs_radiance.shape[0]
-        viirs_profile['width'] = viirs_radiance.shape[1]
+        viirs_profile['height'] = viirs_ntl.shape[0]
+        viirs_profile['width'] = viirs_ntl.shape[1]
         
-        # CRITICAL: Handle nodata values like bm.py (line 1442)
-        # Set values > 65530 to 0 BEFORE scaling
-        viirs_radiance = np.where(viirs_radiance > 65530, 0, viirs_radiance)
+        # Gap-filled NTL is already BRDF-corrected by NASA
+        # No need for nodata handling or lunar correction
+        # Values are in nW/cm²/sr units
         
-        # Apply lunar correction BEFORE scaling (like bm.py does)
-        if viirs_data['lunar'] and viirs_data.get('quality'):
-            # Create VRT mosaics for lunar and quality if we have multiple tiles
-            if len(viirs_data['lunar']) > 1:
-                print(f"Creating VRT mosaic for {len(viirs_data['lunar'])} VIIRS lunar tiles")
-                viirs_lunar_vrt = prepare.create_virtual_raster(
-                    file_paths=viirs_data['lunar'],
-                    output_vrt="data/temp/viirs_lunar_mosaic.vrt"
-                )
-                lunar_irradiance, lunar_profile = prepare.load_with_rasterio(viirs_lunar_vrt)
-            else:
-                lunar_irradiance, lunar_profile = prepare.load_with_rasterio(viirs_data['lunar'][0])
-            
-            # Crop to bounds
-            lunar_irradiance, lunar_transform, _ = prepare.crop_to_bounds(
-                data=lunar_irradiance,
-                src_transform=lunar_profile['transform'],
-                bounds=bbox
-            )
-            # Resample to match radiance resolution
-            lunar_irradiance, lunar_transform = prepare.resample_image(
-                data=lunar_irradiance,
-                src_transform=lunar_transform,
-                target_resolution=target_resolution,
-                resampling='bilinear'
-            )
-            # Update profile
-            lunar_profile['transform'] = lunar_transform
-            lunar_profile['height'] = lunar_irradiance.shape[0]
-            lunar_profile['width'] = lunar_irradiance.shape[1]
-            
+        # Apply quality masking if available
+        if viirs_data.get('quality'):
+            # Create VRT mosaic for quality if we have multiple tiles
             if len(viirs_data['quality']) > 1:
                 print(f"Creating VRT mosaic for {len(viirs_data['quality'])} VIIRS quality tiles")
                 viirs_quality_vrt = prepare.create_virtual_raster(
@@ -306,9 +264,6 @@ def black_marble_pipeline(
             quality_profile['height'] = quality_flag.shape[0]
             quality_profile['width'] = quality_flag.shape[1]
             
-            # Handle lunar nodata like bm.py (line 1270)
-            lunar_irradiance = np.where(lunar_irradiance > 65530, 0, lunar_irradiance)
-            
             # CRITICAL QUALITY FLAG FIX - USING CORRECT LAYER
             # =================================================
             # 
@@ -334,67 +289,67 @@ def black_marble_pipeline(
             if len(np.unique(quality_flag)) <= 10:
                 print(f"  Quality values: {np.unique(quality_flag)}")
             print(f"  Pixels with quality==0 (good): {quality_mask.sum()} ({quality_mask.sum() / quality_mask.size * 100:.1f}%)")
-            print(f"  Non-zero VIIRS values before mask: {(viirs_radiance > 0).sum()}")
-            print(f"  Non-zero VIIRS values after mask: {(viirs_radiance * quality_mask > 0).sum()}")
+            print(f"  Non-zero VIIRS values before mask: {(viirs_ntl > 0).sum()}")
+            print(f"  Non-zero VIIRS values after mask: {(viirs_ntl * quality_mask > 0).sum()}")
             
-            viirs_adjusted = viirs_radiance * quality_mask - lunar_irradiance
-            viirs_adjusted = np.where(viirs_adjusted < 0, 0, viirs_adjusted)
+            # Apply quality mask to gap-filled NTL
+            viirs_corrected = viirs_ntl * quality_mask
             
             # Save diagnostic output if requested
             if config and getattr(config, 'save_diagnostics', False):
-                prepare.save_diagnostic(viirs_adjusted, viirs_profile, 
-                                      "data/diagnostics/viirs_lunar_corrected.tif",
-                                      "VIIRS after lunar correction")
-        elif viirs_data['lunar']:
-            # No quality flag available, simple subtraction
-            if len(viirs_data['lunar']) > 1:
-                print(f"Creating VRT mosaic for {len(viirs_data['lunar'])} VIIRS lunar tiles")
-                viirs_lunar_vrt = prepare.create_virtual_raster(
-                    file_paths=viirs_data['lunar'],
-                    output_vrt="data/temp/viirs_lunar_mosaic.vrt"
-                )
-                lunar_irradiance, lunar_profile = prepare.load_with_rasterio(viirs_lunar_vrt)
-            else:
-                lunar_irradiance, lunar_profile = prepare.load_with_rasterio(viirs_data['lunar'][0])
-            
-            # Crop to bounds
-            lunar_irradiance, lunar_transform, _ = prepare.crop_to_bounds(
-                data=lunar_irradiance,
-                src_transform=lunar_profile['transform'],
-                bounds=bbox
-            )
-            # Resample to match radiance resolution
-            lunar_irradiance, lunar_transform = prepare.resample_image(
-                data=lunar_irradiance,
-                src_transform=lunar_transform,
-                target_resolution=target_resolution,
-                resampling='bilinear'
-            )
-            # Update profile
-            lunar_profile['transform'] = lunar_transform
-            lunar_profile['height'] = lunar_irradiance.shape[0]
-            lunar_profile['width'] = lunar_irradiance.shape[1]
-            lunar_irradiance = np.where(lunar_irradiance > 65530, 0, lunar_irradiance)
-            viirs_adjusted = viirs_radiance - lunar_irradiance
-            viirs_adjusted = np.where(viirs_adjusted < 0, 0, viirs_adjusted)
+                prepare.save_diagnostic(viirs_corrected, viirs_profile, 
+                                      "data/diagnostics/viirs_quality_masked.tif",
+                                      "VIIRS gap-filled NTL after quality masking")
         else:
-            viirs_adjusted = viirs_radiance
+            # No quality masking available, use gap-filled NTL as-is
+            viirs_corrected = viirs_ntl
+            print("Warning: No quality data available, using gap-filled NTL without masking")
         
-        # NOW divide by 10 AFTER lunar correction (like bm.py line 1446)
-        viirs_scaled = viirs_adjusted / 10.0
-        
-        # Apply VIIRS floor and ceiling
-        viirs_corrected = prepare.apply_viirs_floor_ceiling(
-            ntl_data=viirs_scaled,
-            floor_value=config.analysis.ntl_floor if hasattr(config, 'analysis') else (config.viirs.floor if hasattr(config, 'viirs') else 0.1),
-            ceiling_value=config.analysis.ntl_ceiling if hasattr(config, 'analysis') else (config.viirs.ceiling if hasattr(config, 'viirs') else 10.0)
-        )
+        # OLD CODE (commented out):
+        # viirs_corrected = prepare.apply_viirs_floor_ceiling(
+        #     ntl_data=viirs_scaled,
+        #     floor_value=config.analysis.ntl_floor if hasattr(config, 'analysis') else (config.viirs.floor if hasattr(config, 'viirs') else 0.1),
+        #     ceiling_value=config.analysis.ntl_ceiling if hasattr(config, 'analysis') else (config.viirs.ceiling if hasattr(config, 'viirs') else 10.0)
+        # )
         
         # Save diagnostic output if requested
         if config and getattr(config, 'save_diagnostics', False):
             prepare.save_diagnostic(viirs_corrected, viirs_profile,
                                   "data/diagnostics/viirs_final.tif", 
-                                  "VIIRS final (scaled and clipped)")
+                                  "VIIRS final (gap-filled NTL)")
+    elif viirs_data and viirs_data.get('radiance'):
+        # Fallback: Use raw radiance if gap-filled NTL not available
+        print("Warning: Gap-filled NTL not available, falling back to raw radiance")
+        print("Consider updating VIIRS processing to extract gap-filled data")
+        # Process raw radiance data (simplified - no lunar correction)
+        if len(viirs_data['radiance']) > 1:
+            viirs_radiance_vrt = prepare.create_virtual_raster(
+                file_paths=viirs_data['radiance'],
+                output_vrt="data/temp/viirs_radiance_mosaic.vrt"
+            )
+            viirs_radiance, viirs_profile = prepare.load_with_rasterio(viirs_radiance_vrt)
+        else:
+            viirs_radiance, viirs_profile = prepare.load_with_rasterio(viirs_data['radiance'][0])
+        
+        # Crop and resample
+        viirs_radiance, viirs_transform, _ = prepare.crop_to_bounds(
+            data=viirs_radiance,
+            src_transform=viirs_profile['transform'],
+            bounds=bbox
+        )
+        viirs_radiance, viirs_transform = prepare.resample_image(
+            data=viirs_radiance,
+            src_transform=viirs_transform,
+            target_resolution=0.00011111111,
+            resampling='bilinear'
+        )
+        viirs_profile['transform'] = viirs_transform
+        viirs_profile['height'] = viirs_radiance.shape[0]
+        viirs_profile['width'] = viirs_radiance.shape[1]
+        
+        # Basic nodata handling
+        viirs_radiance = np.where(viirs_radiance > 65530, 0, viirs_radiance)
+        viirs_corrected = viirs_radiance
     
     # 4. Reproject everything to common grid
     # Determine appropriate UTM zone for the area
@@ -768,7 +723,7 @@ def black_marble_pipeline(
     metadata = export.create_metadata(
         data_sources={
             "landsat": {
-                "files": nir_files + red_files + green_files + blue_files,
+                "files": all_landsat_files['B5'] + all_landsat_files['B4'] + all_landsat_files['B3'] + all_landsat_files['B2'],
                 "date_range": f"{date.strftime('%Y-%m-%d')}",
                 "sensor": "Landsat 8/9",
                 "processing_level": "L2SP"

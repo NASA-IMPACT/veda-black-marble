@@ -12,6 +12,10 @@ import os
 from osgeo import gdal
 import numpy as np
 
+# Enable GDAL exceptions for better error handling
+# This prepares for GDAL 4.0 behavior and avoids FutureWarning
+gdal.UseExceptions()
+
 
 def get_geo(filepath: str, band: int) -> tuple[np.ndarray, tuple[float, ...], str]:
     """

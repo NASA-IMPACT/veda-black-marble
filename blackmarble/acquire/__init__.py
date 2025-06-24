@@ -7,6 +7,7 @@ This module handles downloading and fetching data from various sources:
 """
 
 from .landsat import (
+    download_all_bands_for_date,
     download_landsat_band,
     download_tiles_for_band,
     download_tiles_with_composites,
@@ -42,6 +43,7 @@ from .viirs import (
 
 __all__ = [
     # Landsat functions
+    "download_all_bands_for_date",
     "download_landsat_band",
     "download_tiles_for_band",
     "download_tiles_with_composites",

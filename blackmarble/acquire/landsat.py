@@ -117,7 +117,8 @@ def download_tiles_for_band(
     month: int,
     day: int,
     bbox: BBox,
-    ignore_missing: bool = False
+    ignore_missing: bool = False,
+    cache_dir: str | None = None
 ) -> tuple[list[str], list[str], list[str], list[str]]:
     """Download all tiles for a band covering the given bounding box.
     
@@ -128,6 +129,7 @@ def download_tiles_for_band(
         day: Target day
         bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
         ignore_missing: Whether to ignore missing tiles
+        cache_dir: Optional cache directory for storing downloads
         
     Returns:
         Tuple of (band_files, qa_pixel_files, qa_radsat_files, qa_aerosol_files)
@@ -135,8 +137,14 @@ def download_tiles_for_band(
     # Extract bbox components
     min_lon, min_lat, max_lon, max_lat = bbox
     
-    # Create a temporary directory for downloads
-    temp_dir = tempfile.mkdtemp(prefix="landsat_")
+    # Use cache directory if provided, otherwise create temporary directory
+    if cache_dir:
+        # Create structured cache directory: cache/landsat/YYYY/MM/DD/
+        download_dir = os.path.join(cache_dir, "landsat", f"{year:04d}", f"{month:02d}", f"{day:02d}")
+        os.makedirs(download_dir, exist_ok=True)
+    else:
+        # Use temporary directory
+        download_dir = tempfile.mkdtemp(prefix="landsat_")
     
     # Get WRS path/row with validation
     wrs1_results = get_wrs_path_row(min_lat, min_lon)
@@ -182,12 +190,12 @@ def download_tiles_for_band(
             base = scene_dir.split("/")[-2]
             
             # Download band file
-            out_src = os.path.join(temp_dir, f"{base}_SR_B{band}.TIF")
+            out_src = os.path.join(download_dir, f"{base}_SR_B{band}.TIF")
             if not os.path.exists(out_src):
                 print(f"Downloading {out_src}...")
                 download_landsat_band(scene_dir, band, out_src)
             else:
-                print(f"File {out_src} exists..")
+                print(f"Using cached file: {out_src}")
             downloads.append(out_src)
             
             # Download QA files
@@ -198,12 +206,12 @@ def download_tiles_for_band(
             }
             
             for qa_key, (suffix, target_list) in qa_types.items():
-                out_qa = os.path.join(temp_dir, f"{base}{suffix}")
+                out_qa = os.path.join(download_dir, f"{base}{suffix}")
                 if not os.path.exists(out_qa):
                     print(f"Downloading {out_qa}...")
                     download_landsat_band(scene_dir, qa_key, out_qa)
                 else:
-                    print(f"File {out_qa} exists..")
+                    print(f"Using cached file: {out_qa}")
                 target_list.append(out_qa)
     
     return downloads, pixels, radsat, aerosol
@@ -215,7 +223,8 @@ def download_tiles_with_composites(
     month: int,
     day: int,
     bbox: BBox,
-    composite_history_months: int = 12
+    composite_history_months: int = 12,
+    cache_dir: str | None = None
 ) -> list[tuple[list[str], list[str], list[str], list[str]]]:
     """Download tiles including historical composites for gap filling.
     
@@ -226,15 +235,13 @@ def download_tiles_with_composites(
         day: Target day
         bbox: Bounding box
         composite_history_months: Number of months of history to include
+        cache_dir: Optional cache directory for storing downloads
         
     Returns:
         List of tuples, each containing (band_files, qa_pixel, qa_radsat, qa_aerosol)
     """
-    # Create a temporary directory for downloads
-    temp_dir = tempfile.mkdtemp(prefix="landsat_composite_")
-    
     # Download primary tiles
-    tiles = [download_tiles_for_band(band, year, month, day, bbox, ignore_missing=False)]
+    tiles = [download_tiles_for_band(band, year, month, day, bbox, ignore_missing=False, cache_dir=cache_dir)]
     
     # Download historical composites
     for months_back in range(1, composite_history_months + 1):
@@ -247,7 +254,7 @@ def download_tiles_with_composites(
         try:
             # Try to download historical data, ignoring missing tiles
             hist_tiles = download_tiles_for_band(
-                band, hist_year, hist_month, hist_day, bbox, ignore_missing=True
+                band, hist_year, hist_month, hist_day, bbox, ignore_missing=True, cache_dir=cache_dir
             )
             if any(hist_tiles):  # Only add if we got some data
                 tiles.append(hist_tiles)
@@ -277,6 +284,70 @@ def get_tiles_for_bbox(bbox: BBox) -> list[dict[str, int]]:
     """
     min_lon, min_lat, max_lon, max_lat = bbox
     return get_wrs_tiles_for_bbox(min_lat, max_lat, min_lon, max_lon)
+
+
+def download_all_bands_for_date(
+    year: int,
+    month: int,
+    day: int,
+    bbox: BBox,
+    bands: list[int | str] | None = None,
+    cache_dir: str | None = None,
+    ignore_missing: bool = False
+) -> dict[str, tuple[list[str], list[str], list[str], list[str]]]:
+    """Download all specified bands for a single date.
+    
+    Downloads multiple Landsat bands for the same acquisition date, ensuring
+    temporal consistency when applying QA masks. This function is essential
+    for the date-by-date processing approach where QA masks are applied
+    before temporal compositing.
+    
+    Args:
+        year: Target year
+        month: Target month
+        day: Target day
+        bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
+        bands: List of bands to download (default: [2,3,4,5,'QA_PIXEL'])
+        cache_dir: Optional cache directory for storing downloads
+        ignore_missing: Whether to ignore missing tiles
+        
+    Returns:
+        Dictionary mapping band names to tuples of (band_files, qa_pixel, qa_radsat, qa_aerosol)
+        
+    Example:
+        >>> bands_data = download_all_bands_for_date(2023, 9, 15, bbox, bands=[2,3,4,5,'QA_PIXEL'])
+        >>> b2_files = bands_data['B2'][0]
+        >>> qa_files = bands_data['QA_PIXEL'][0]
+    """
+    if bands is None:
+        bands = [2, 3, 4, 5, 'QA_PIXEL']
+    
+    result = {}
+    
+    for band in bands:
+        band_key = f'B{band}' if isinstance(band, int) else band
+        print(f"Downloading {band_key} for {year}-{month:02d}-{day:02d}")
+        
+        try:
+            # Download this band for the specified date
+            band_data = download_tiles_for_band(
+                band=band,
+                year=year,
+                month=month,
+                day=day,
+                bbox=bbox,
+                ignore_missing=ignore_missing,
+                cache_dir=cache_dir
+            )
+            result[band_key] = band_data
+        except Exception as e:
+            if ignore_missing:
+                print(f"Warning: Could not download {band_key} for {year}-{month:02d}-{day:02d}: {e}")
+                result[band_key] = ([], [], [], [])
+            else:
+                raise
+    
+    return result
 
 
 def get_landsat_metadata(scene_path: str) -> dict[str, Any]:

@@ -140,6 +140,11 @@ def run_target(
         "-d",
         help="Save diagnostic intermediate outputs to data/diagnostics/",
     ),
+    cache_downloads: bool = typer.Option(
+        False,
+        "--cache-downloads",
+        help="Cache downloaded files in data/cache/ for faster re-runs (development mode).",
+    ),
 ):
     """
     Runs the new target Black Marble processing pipeline for a given area and date.
@@ -200,6 +205,12 @@ def run_target(
     if save_diagnostics:
         config.save_diagnostics = True
         typer.echo("📊 Diagnostic outputs will be saved to data/diagnostics/")
+    
+    # Enable download caching if requested
+    if cache_downloads:
+        config.cache_downloads = True
+        config.cache_dir = "data/cache"
+        typer.echo("💾 Download caching enabled - files will be saved to data/cache/")
     
     # Display processing info
     typer.echo("Starting Target Black Marble pipeline:")

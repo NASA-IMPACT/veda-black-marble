@@ -13,6 +13,9 @@ from pyproj import Proj
 from typing import Any
 from .coords import wkt_to_json
 
+# Enable GDAL exceptions for better error handling
+gdal.UseExceptions()
+
 
 def subset_raster_normal(
     input_raster: str,

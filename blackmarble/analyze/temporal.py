@@ -14,6 +14,61 @@ Transform = Any  # rasterio.transform.Affine
 BBox = tuple[float, float, float, float]
 
 
+def create_landsat_median_composite(
+    data_list: list[ArrayLike],
+    scale_factor: float = 0.0000275,
+    add_offset: float = -0.2
+) -> ArrayLike:
+    """Create median composite from multiple Landsat scenes.
+    
+    This function performs temporal compositing on pre-masked data:
+    1. Stacks all input arrays (which already have NaN for masked pixels)
+    2. Scales to reflectance
+    3. Takes nanmedian to ignore masked/missing data
+    4. Replaces remaining NaN with 0
+    
+    This is essential for filling gaps from clouds and missing data
+    in Landsat time series.
+    
+    Args:
+        data_list: List of 2D arrays (one per date) with NaN for masked pixels
+        scale_factor: Scale factor for reflectance conversion
+        add_offset: Offset for reflectance conversion
+        
+    Returns:
+        Median composite array with same shape as inputs
+    """
+    import numpy as np
+    
+    if not data_list:
+        raise ValueError("No data provided for compositing")
+    
+    # Find common shape (they might be slightly different)
+    shapes = [d.shape for d in data_list]
+    min_height = min(s[0] for s in shapes)
+    min_width = min(s[1] for s in shapes)
+    
+    # Crop all to common size and scale to reflectance
+    scaled_data = []
+    for data in data_list:
+        # Crop to common size
+        cropped = data[:min_height, :min_width]
+        # Scale to reflectance (NaN values remain NaN)
+        scaled = cropped * scale_factor + add_offset
+        scaled_data.append(scaled)
+    
+    # Stack all temporal data
+    stacked = np.stack(scaled_data)
+    
+    # Take median ignoring NaN (already in the data from masking)
+    median_composite = np.nanmedian(stacked, axis=0)
+    
+    # Replace remaining NaN with 0
+    median_composite = np.where(np.isnan(median_composite), 0, median_composite)
+    
+    return median_composite
+
+
 def create_temporal_composite(
     data_stack: ArrayLike,
     dates: list[datetime] | None = None,

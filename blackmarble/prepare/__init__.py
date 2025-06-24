@@ -72,6 +72,19 @@ from .diagnostic import (
     save_diagnostic,
 )
 
+from .landsat import (
+    process_landsat_date,
+)
+
+from .landsat_qa import (
+    QALevel,
+    qa_mask,
+    composite_masked,
+    create_landsat_cloud_mask,
+    decode_qa_pixel,
+    print_qa_pixel_summary,
+)
+
 # CRITICAL FIX: Unified calculate_utm_zone function to resolve API inconsistency
 #
 # The original implementation had two conflicting versions:
@@ -184,4 +197,13 @@ __all__ = [
     "stack_arrays_with_padding",
     # Diagnostic functions
     "save_diagnostic",
+    # Landsat functions
+    "process_landsat_date",
+    # Landsat QA functions
+    "QALevel",
+    "qa_mask",
+    "composite_masked",
+    "create_landsat_cloud_mask",
+    "decode_qa_pixel",
+    "print_qa_pixel_summary",
 ]
