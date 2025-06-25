@@ -120,12 +120,18 @@ def run(
     if save_diagnostics:
         config.save_diagnostics = True
         typer.echo("📊 Diagnostic outputs will be saved to data/diagnostics/")
+        # Create diagnostics directory
+        os.makedirs("data/diagnostics", exist_ok=True)
     
     # Enable download caching if requested
     if cache_downloads:
         config.cache_downloads = True
-        config.cache_dir = "data/cache"
-        typer.echo("💾 Download caching enabled - files will be saved to data/cache/")
+        # Set default cache directory if not specified
+        if not config.cache_dir:
+            config.cache_dir = os.path.expanduser("~/.cache/black_marble")
+        typer.echo(f"💾 Download caching enabled: {config.cache_dir}")
+        # Create cache directory
+        os.makedirs(config.cache_dir, exist_ok=True)
     
     # Display processing info
     typer.echo("Starting Black Marble pipeline:")

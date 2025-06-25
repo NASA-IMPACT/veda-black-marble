@@ -299,6 +299,7 @@ def gamma_correction(
         Gamma-corrected array
     """
     # Preserve zero mask if requested
+    zero_mask = None
     if preserve_zeros:
         zero_mask = data == 0
     
@@ -306,7 +307,7 @@ def gamma_correction(
     result = np.power(np.clip(data, 0, 1), gamma)
     
     # Restore zeros if requested
-    if preserve_zeros:
+    if preserve_zeros and zero_mask is not None:
         result[zero_mask] = 0
     
     return result

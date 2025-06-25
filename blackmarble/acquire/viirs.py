@@ -451,7 +451,6 @@ def extract_viirs_layers(
     Returns:
         Dictionary mapping layer names to their output file paths:
         - 'radiance': DNB at-sensor radiance (nW cm⁻² sr⁻¹) - primary nighttime lights
-        - 'lunar_irradiance': Lunar irradiance correction factor
         - 'quality_flag': Mandatory quality assessment flags
         - 'cloud_mask': Cloud detection mask (if available)
         
@@ -482,12 +481,6 @@ def extract_viirs_layers(
             'filename': f"{basename}_DNB_At_Sensor_Radiance.tif",
             'mandatory': True,
             'description': "Day/Night Band at-sensor radiance"
-        },
-        'lunar_irradiance': {
-            'index': 1, 
-            'filename': f"{basename}_Lunar_Irradiance.tif",
-            'mandatory': False,
-            'description': "Lunar irradiance correction factor"
         },
         'gap_filled_ntl': {
             'index': 2,
@@ -775,7 +768,6 @@ def download_vnp46a2_tiles(
     Returns:
         Dictionary with keys:
         - 'radiance': List of radiance GeoTIFF paths
-        - 'lunar': List of lunar irradiance GeoTIFF paths
         - 'quality': List of quality flag GeoTIFF paths
         - 'metadata': List of metadata dictionaries
         
@@ -826,7 +818,6 @@ def download_vnp46a2_tiles(
     # Initialize result lists
     result = {
         'radiance': [],
-        'lunar': [],
         'quality': [],
         'gap_filled_ntl': [],
         'metadata': []
@@ -857,8 +848,6 @@ def download_vnp46a2_tiles(
             # Add to result lists
             if 'radiance' in layer_files:
                 result['radiance'].append(layer_files['radiance'])
-            if 'lunar_irradiance' in layer_files:
-                result['lunar'].append(layer_files['lunar_irradiance'])
             if 'quality_flag' in layer_files:
                 result['quality'].append(layer_files['quality_flag'])
             if 'gap_filled_ntl' in layer_files:

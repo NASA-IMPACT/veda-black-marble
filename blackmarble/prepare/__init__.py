@@ -46,7 +46,6 @@ from .quality import (
 )
 
 from .scaling import (
-    apply_lunar_correction,
     apply_viirs_floor_ceiling,
     calculate_ntli,
     detect_if_already_scaled,
@@ -177,7 +176,6 @@ __all__ = [
     "create_water_mask",
     "dilate_mask",
     # Scaling functions
-    "apply_lunar_correction",
     "apply_viirs_floor_ceiling",
     "calculate_ntli",
     "detect_if_already_scaled",

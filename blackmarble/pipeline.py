@@ -84,9 +84,9 @@ def black_marble_pipeline(
     print("Processing Landsat data with date-by-date QA masking")
     
     # Get scale factors from config
-    scale_factor = config.preparation.landsat_scale_factor if hasattr(config, 'preparation') else (config.landsat.band_scale_factor if hasattr(config, 'landsat') else 0.0000275)
-    add_offset = config.preparation.landsat_add_offset if hasattr(config, 'preparation') else (config.landsat.band_offset if hasattr(config, 'landsat') else -0.2)
-    dilate_pixels = config.preparation.qa_dilation_radius if hasattr(config, 'preparation') else (config.landsat.qa_dilation_radius if hasattr(config, 'landsat') else 3)
+    scale_factor = config.preparation.landsat_scale_factor if config and hasattr(config, 'preparation') else 0.0000275
+    add_offset = config.preparation.landsat_add_offset if config and hasattr(config, 'preparation') else -0.2
+    dilate_pixels = config.preparation.qa_dilation_radius if config and hasattr(config, 'preparation') else 3
     
     # Initialize stacks for each band
     band_stacks = {
@@ -563,9 +563,9 @@ def black_marble_pipeline(
             ntl=ntl_composite,
             ndvi=ndvi,
             ndwi=ndwi,  # Optional, can be None
-            ntl_floor=config.analysis.ntl_floor if hasattr(config, 'analysis') else (config.viirs.floor if hasattr(config, 'viirs') else 0.1),
-            ntl_ceiling=config.analysis.ntl_ceiling if hasattr(config, 'analysis') else (config.viirs.ceiling if hasattr(config, 'viirs') else 10.0),
-            ndui_floor=config.analysis.ndui_floor if hasattr(config, 'analysis') else (config.ndui.floor if hasattr(config, 'ndui') else 0.02),
+            ntl_floor=config.analysis.ntl_floor if config and hasattr(config, 'analysis') else 0.1,
+            ntl_ceiling=config.analysis.ntl_ceiling if config and hasattr(config, 'analysis') else 10.0,
+            ndui_floor=config.analysis.ndui_floor if config and hasattr(config, 'analysis') else 0.02,
             epsilon=1e-6
         )
         
@@ -752,7 +752,6 @@ def black_marble_pipeline(
             }
         },
         processing_steps=[
-            "lunar_correction",
             "cloud_masking", 
             "spatial_reprojection",
             "index_calculation",

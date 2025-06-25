@@ -58,10 +58,7 @@ class PreparationConfig:
     qa_dilation_radius: int = 3
     
     # VIIRS corrections
-    apply_lunar_correction: bool = True
-    lunar_correction_threshold: float = 0.0005
     viirs_fill_value: float = 65530
-    lunar_unit_conversion: float = 10.0
     quality_valid_flags: list[int] = field(default_factory=lambda: [0, 2])
     
     # Spatial processing
@@ -171,6 +168,11 @@ class PipelineConfig:
     max_workers: int = 4
     min_valid_pixel_percentage: float = 10.0
     use_parallel: bool = True
+    
+    # Caching and diagnostics
+    cache_downloads: bool = False
+    cache_dir: str | None = None
+    save_diagnostics: bool = False
     
     @classmethod
     def for_bm_parity(cls, bbox: BBox, date: datetime, output_path: str) -> "PipelineConfig":

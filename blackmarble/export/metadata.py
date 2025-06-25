@@ -889,9 +889,11 @@ def bundle_outputs(
     quicklook_path = os.path.join(bundle_dir, f"{bundle_name}_quicklook.png")
     if not os.path.exists(quicklook_path):
         try:
-            generate_quicklook(primary_data, quicklook_path)
-            bundled_files["quicklook"] = quicklook_path
-            metadata["bundle_info"]["bundle_contents"].append("quicklook.png")
+            # TODO: generate_quicklook function not implemented
+            # generate_quicklook(primary_data, quicklook_path)
+            # bundled_files["quicklook"] = quicklook_path
+            # metadata["bundle_info"]["bundle_contents"].append("quicklook.png")
+            pass
         except:
             pass  # Quicklook generation is optional
     

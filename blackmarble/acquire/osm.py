@@ -7,13 +7,13 @@ and converting it to raster format for integration with satellite imagery.
 from typing import Any, Literal
 import numpy.typing as npt
 import numpy as np
-import os
 import rasterio
 from rasterio.crs import CRS
 from rasterio.warp import transform_geom, transform_bounds
 from shapely.geometry import shape, mapping
 from shapely.ops import transform
 import pyproj
+import shapely
 
 import osmnx as ox
 import networkx as nx
@@ -662,7 +662,7 @@ def buffer_and_rasterize_roads(
                 highway_type = highway_type[0]  # Use first type
                 
             # Get value for this road type
-            value = road_hierarchy.get(highway_type, 6)  # Default to service/other
+            value = road_hierarchy.get(str(highway_type), 6)  # Default to service/other
             
             # Convert geometry to GeoJSON dict
             geom_dict = geom_to_dict(edge.geometry)

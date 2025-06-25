@@ -98,7 +98,9 @@ def apply_colormap(
     # Stack into RGB array
     if alpha is not None:
         if np.isscalar(alpha):
-            a = np.full_like(r, int(alpha * 255), dtype=np.uint8)
+            # Cast to float first, then to int
+            alpha_value = float(np.real(alpha))  # Handle any numeric type
+            a = np.full_like(r, int(alpha_value * 255), dtype=np.uint8)
         else:
             a = (np.clip(alpha, 0, 1) * 255).astype(np.uint8)
         return np.stack([r, g, b, a], axis=0)

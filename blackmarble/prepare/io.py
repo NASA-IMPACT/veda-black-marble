@@ -597,7 +597,7 @@ def setup_output_profile(
             'count': 1,
             'dtype': 'float32',
             'crs': 'EPSG:4326',
-            'transform': rasterio.transform.Affine.identity()
+            'transform': rasterio.Affine.identity()
         }
     
     # Apply driver
@@ -828,12 +828,10 @@ def create_memory_efficient_reader(
                     actual_height = min(chunk_height + 2 * overlap, height - row_start)
                     actual_width = min(chunk_width + 2 * overlap, width - col_start)
                     
-                    # Create window
-                    window = Window(
-                        col_off=col_start,
-                        row_off=row_start,
-                        width=actual_width,
-                        height=actual_height
+                    # Create window using from_slices
+                    window = Window.from_slices(
+                        (row_start, row_start + actual_height),
+                        (col_start, col_start + actual_width)
                     )
                     
                     # Read chunk

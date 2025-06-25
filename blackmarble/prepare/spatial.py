@@ -80,8 +80,13 @@ def reproject_image(
         )
         if dst_shape is None:
             dst_shape = (dst_height, dst_width)
+    else:
+        # Ensure dst_shape is set if it was None but dst_transform was provided
+        if dst_shape is None:
+            raise ValueError("dst_shape must be provided when dst_transform is provided")
 
     # Create output array
+    assert dst_shape is not None  # Type checker hint
     reprojected = np.empty((bands,) + dst_shape, dtype=data.dtype)
 
     # Reproject each band
@@ -676,12 +681,12 @@ def calculate_utm_zone(lat: float, lon: float) -> tuple[int, str]:
     Returns:
         Tuple of (zone_number, hemisphere)
     """
-    # Implementation adapted from coords.py:22 get_utm_zone()
-    # WATCHPOINT: coords.py returns (easting, northing, zone_number, zone_letter)
-    # We need just (zone_number, hemisphere)
-    from ..coords import get_utm_zone
+    # Calculate UTM zone from longitude
+    # UTM zones are 6 degrees wide
+    zone_number = int((lon + 180) / 6) + 1
     
-    easting, northing, zone_number, zone_letter = get_utm_zone(lat, lon)
+    # Clamp to valid range [1, 60]
+    zone_number = max(1, min(60, zone_number))
     
     # Determine hemisphere from zone letter or latitude
     if zone_letter and ord(zone_letter) >= ord('N'):

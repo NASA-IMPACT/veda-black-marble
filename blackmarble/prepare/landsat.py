@@ -5,7 +5,7 @@ including date-by-date processing with QA masking applied before temporal compos
 """
 
 import os
-from typing import Any
+from typing import Any, Literal
 import numpy as np
 import numpy.typing as npt
 
@@ -24,7 +24,7 @@ def process_landsat_date(
     bbox: BBox | None = None,
     apply_qa_mask: bool = True,
     dilate_pixels: int = 3,
-    cloud_strategy: str = "moderate"
+    cloud_strategy: Literal["conservative", "moderate", "permissive"] = "moderate"
 ) -> dict[str, tuple[ArrayLike, dict[str, Any]]]:
     """Process all Landsat bands for a single date with QA masking.
     
@@ -123,7 +123,7 @@ def process_landsat_date(
                 qa_data, qa_transform, _ = crop_to_bounds(
                     data=qa_data,
                     src_transform=qa_profile['transform'],
-                    bounds=bbox_transformed if 'bbox_transformed' in locals() else bbox
+                    bounds=bbox_transformed
                 )
                 qa_profile['transform'] = qa_transform
                 qa_profile['height'] = qa_data.shape[0]

@@ -123,6 +123,7 @@ def validate_for_cog(
                         result["valid"] = False
                 
                 # Check overviews
+                overviews = []
                 if check_overviews:
                     overviews = src.overviews(1) if src.count > 0 else []
                     result["statistics"]["has_overviews"] = len(overviews) > 0
@@ -573,11 +574,14 @@ def validate_spatial_alignment(
                 errors.append(f"Dimension mismatch: ({ref_width}x{ref_height}) vs ({cand_width}x{cand_height})")
                 
                 # Check if it's just a bounds issue
-                expected_width = int((ref_bounds.right - ref_bounds.left) / ref_pixel_width)
-                expected_height = int((ref_bounds.top - ref_bounds.bottom) / ref_pixel_height)
-                
-                if abs(expected_width - cand_width) <= 1 and abs(expected_height - cand_height) <= 1:
-                    errors.append("Minor dimension difference - likely rounding error")
+                if ref_bounds:
+                    expected_width = int((ref_bounds.right - ref_bounds.left) / ref_pixel_width)
+                    expected_height = int((ref_bounds.top - ref_bounds.bottom) / ref_pixel_height)
+                    
+                    if abs(expected_width - cand_width) <= 1 and abs(expected_height - cand_height) <= 1:
+                        errors.append("Minor dimension difference - likely rounding error")
+                    else:
+                        result["recommendations"].append(f"Crop or pad {candidate_name} to match reference dimensions")
                 else:
                     result["recommendations"].append(f"Crop or pad {candidate_name} to match reference dimensions")
         
@@ -926,8 +930,16 @@ def validate_cog_structure(
             # Get additional COG info
             info = cog_info(file_path)
             if info:
-                result["ifd_structure"] = info.get("IFD", {})
-                result["overview_info"] = info.get("overviews", {})
+                # info is likely a namedtuple or object, not a dict
+                if hasattr(info, 'IFD'):
+                    result["ifd_structure"] = info.IFD
+                elif hasattr(info, '__dict__') and 'IFD' in info.__dict__:
+                    result["ifd_structure"] = info.__dict__.get("IFD", {})
+                    
+                if hasattr(info, 'overviews'):
+                    result["overview_info"] = info.overviews
+                elif hasattr(info, '__dict__') and 'overviews' in info.__dict__:
+                    result["overview_info"] = info.__dict__.get("overviews", {})
             
         except ImportError:
             # Fallback to manual validation
@@ -1001,6 +1013,8 @@ def validate_cog_structure(
                         result["warnings"].append("File size suggests missing data or compression issues")
                 
                 # 5. Additional metadata
+                if not isinstance(result["ifd_structure"], dict):
+                    result["ifd_structure"] = {}
                 result["ifd_structure"]["width"] = src.width
                 result["ifd_structure"]["height"] = src.height
                 result["ifd_structure"]["bands"] = src.count

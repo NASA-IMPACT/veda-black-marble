@@ -130,8 +130,9 @@ def detect_urban_corridors(
     corridors = lit_areas & road_areas
     
     # Label connected components
-    labeled_array, num_features = label(corridors)
-    num_features = int(num_features)  # Ensure it's an int
+    label_result = label(corridors)
+    labeled_array = label_result[0] if isinstance(label_result, tuple) else label_result
+    num_features = int(label_result[1]) if isinstance(label_result, tuple) and len(label_result) > 1 else 0
     
     # Filter by minimum length
     corridor_mask = np.zeros_like(corridors, dtype=bool)
@@ -171,7 +172,10 @@ def enhance_urban_boundaries(
         dist_outside = distance_transform_edt(~binary_mask)
         
         # Create boundary region
-        boundary_region = (dist_inside <= width) | (dist_outside <= width)
+        if isinstance(dist_inside, np.ndarray) and isinstance(dist_outside, np.ndarray):
+            boundary_region = (dist_inside <= float(width)) | (dist_outside <= float(width))
+        else:
+            boundary_region = np.zeros_like(binary_mask, dtype=bool)
         
         # Enhance using NTL data in boundary region
         enhanced = urban_mask.copy()
@@ -212,10 +216,12 @@ def suppress_blooming(
     
     # Apply suppression based on distance
     suppression_factor = np.ones_like(ntl_data)
-    affected_region = dist < kernel_size
-    
-    # Gradual suppression based on distance
-    suppression_factor[affected_region] = 0.5 + 0.5 * (dist[affected_region] / kernel_size)
+    if isinstance(dist, np.ndarray):
+        affected_region = dist < float(kernel_size)
+        # Gradual suppression based on distance
+        suppression_factor[affected_region] = 0.5 + 0.5 * (dist[affected_region] / kernel_size)
+    else:
+        affected_region = np.zeros_like(bloom_mask, dtype=bool)
     
     # Apply suppression to bright areas only
     result = ntl_data.copy()
@@ -272,6 +278,10 @@ def create_urban_gradient(
     # Calculate distance from urban areas
     distance = distance_transform_edt(~binary_mask)
     
+    # Ensure distance is an array
+    if not isinstance(distance, np.ndarray):
+        distance = np.zeros_like(binary_mask, dtype=float)
+    
     # Clip to maximum distance
     distance = np.minimum(distance, float(max_distance))
     
@@ -304,8 +314,9 @@ def enhance_small_settlements(
     lit_areas = ntl_data > threshold
     
     # Label connected components  
-    labeled_array, num_features = label(lit_areas)
-    num_features = int(num_features)  # Ensure it's an int
+    label_result = label(lit_areas)
+    labeled_array = label_result[0] if isinstance(label_result, tuple) else label_result
+    num_features = int(label_result[1]) if isinstance(label_result, tuple) and len(label_result) > 1 else 0
     
     # Enhance small settlements
     enhanced = ntl_data.copy()

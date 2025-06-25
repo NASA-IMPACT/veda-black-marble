@@ -482,9 +482,11 @@ def calculate_temporal_statistics(
                 
                 # Fit linear trend
                 try:
-                    slope, intercept, r_value, p_value, std_err = scipy_stats.linregress(
+                    result = scipy_stats.linregress(
                         time_numeric[valid_mask], pixel_series[valid_mask]
                     )
+                    slope = float(result.slope)
+                    r_value = float(result.rvalue)
                     trend_slope[i, j] = slope
                     trend_r2[i, j] = r_value ** 2
                 except:
@@ -761,6 +763,7 @@ def analyze_spatial_autocorrelation(
         denominator = np.nansum((data[valid_mask] - data_mean) ** 2)
         n_pairs = np.sum(~np.isnan(diff_right)) + np.sum(~np.isnan(diff_down))
         
+        n_valid = np.sum(valid_mask)
         if denominator > 0 and n_pairs > 0:
             global_geary = (n_valid - 1) * numerator / (2 * n_pairs * denominator)
         else:
@@ -796,12 +799,12 @@ def analyze_spatial_autocorrelation(
         lag_semivariance = []
         lag_counts = []
         
-        for i, lag in enumerate(lag_distances):
+        for i, lag in enumerate(lag_distances if lag_distances is not None else []):
             # Find pairs within lag distance
             if i == 0:
                 mask = distances <= lag
             else:
-                mask = (distances > lag_distances[i-1]) & (distances <= lag)
+                mask = (distances > lag_distances[i-1]) & (distances <= lag) if lag_distances is not None else False
             
             # Compute semivariance
             if np.any(mask):
@@ -823,7 +826,15 @@ def analyze_spatial_autocorrelation(
                 lag_semivariance.append(np.nan)
                 lag_counts.append(0)
         
-        result["lag_distances"] = lag_distances.tolist()
+        if lag_distances is not None:
+            if hasattr(lag_distances, 'tolist'):
+                result["lag_distances"] = lag_distances.tolist()
+            elif isinstance(lag_distances, list):
+                result["lag_distances"] = lag_distances
+            else:
+                result["lag_distances"] = list(lag_distances)
+        else:
+            result["lag_distances"] = []
         result["lag_semivariance"] = lag_semivariance
         result["lag_counts"] = lag_counts
         
@@ -834,9 +845,9 @@ def analyze_spatial_autocorrelation(
             threshold = 0.95 * max_semivar
             range_idx = np.where(np.array(lag_semivariance) >= threshold)[0]
             if len(range_idx) > 0:
-                result["range"] = float(lag_distances[range_idx[0]])
+                result["range"] = float(lag_distances[range_idx[0]]) if lag_distances is not None else np.nan
             else:
-                result["range"] = float(lag_distances[-1])
+                result["range"] = float(lag_distances[-1]) if lag_distances is not None else np.nan
         else:
             result["range"] = np.nan
     
@@ -967,15 +978,15 @@ def generate_quality_metrics_summary(
     
     # Distribution quality (penalize extreme skewness/kurtosis)
     if "distribution_metrics" in result and "skewness" in result["distribution_metrics"]:
-        skew = abs(result["distribution_metrics"]["skewness"])
-        kurt = abs(result["distribution_metrics"]["kurtosis"])
+        skew = abs(float(result["distribution_metrics"]["skewness"]))
+        kurt = abs(float(result["distribution_metrics"]["kurtosis"]))
         # Normal distribution has skewness=0, kurtosis=0
         distribution_score = 1.0 / (1.0 + 0.1 * skew + 0.05 * kurt)
         quality_scores["distribution"] = distribution_score
     
     # Spatial quality (higher autocorrelation = smoother, more realistic)
     if "spatial_metrics" in result and "moran_i" in result["spatial_metrics"]:
-        moran = result["spatial_metrics"]["moran_i"]
+        moran = float(result["spatial_metrics"]["moran_i"])
         if not np.isnan(moran):
             # Moran's I typically ranges from -1 to 1
             spatial_score = (moran + 1) / 2  # Normalize to [0, 1]
@@ -1006,15 +1017,15 @@ def generate_quality_metrics_summary(
         recommendations.append("Low data completeness - consider alternative data sources or relaxing quality criteria")
     
     if "distribution_metrics" in result and "skewness" in result["distribution_metrics"]:
-        if abs(result["distribution_metrics"]["skewness"]) > 2:
+        if abs(float(result["distribution_metrics"]["skewness"])) > 2:
             recommendations.append("Highly skewed distribution - consider log transformation or robust statistics")
     
     if "spatial_metrics" in result and "moran_i" in result["spatial_metrics"]:
-        if result["spatial_metrics"]["moran_i"] < 0:
+        if float(result["spatial_metrics"]["moran_i"]) < 0:
             recommendations.append("Negative spatial autocorrelation detected - check for processing artifacts")
     
     if "comparison_metrics" in result and "rmse" in result["comparison_metrics"]:
-        if result["comparison_metrics"]["correlation"] < 0.7:
+        if float(result["comparison_metrics"]["correlation"]) < 0.7:
             recommendations.append("Low correlation with reference - review processing parameters")
     
     if not recommendations:
@@ -1029,7 +1040,7 @@ def calculate_uncertainty_metrics(
     data: ArrayLike,
     observation_count: ArrayLike | None = None,
     quality_scores: ArrayLike | None = None
-) -> dict[str, ArrayLike]:
+) -> dict[str, Any]:
     """Calculate uncertainty metrics for processed data.
     
     This function estimates uncertainty in derived products based on

@@ -1,7 +1,7 @@
 """Data scaling and radiometric corrections.
 
-This module handles converting digital numbers to physical units,
-applying atmospheric corrections, and lunar illumination corrections.
+This module handles converting digital numbers to physical units
+and applying atmospheric corrections.
 """
 
 from typing import Any
@@ -68,68 +68,38 @@ def detect_if_already_scaled(
     return data_max <= reflectance_threshold and data_min >= -0.5
 
 
-def apply_lunar_correction(
-    vnp_data: ArrayLike,
-    lunar_irradiance: ArrayLike,
-    moon_illumination_fraction: ArrayLike | None = None
-) -> ArrayLike:
-    """Apply lunar BRDF correction to VIIRS nighttime lights.
-    
-    Args:
-        vnp_data: VIIRS Day/Night Band radiance
-        lunar_irradiance: Calculated lunar irradiance at surface
-        moon_illumination_fraction: Optional moon illumination fraction
-        
-    Returns:
-        Lunar-corrected radiance values
-    """
-    # Basic correction: subtract lunar contribution
-    corrected = vnp_data - lunar_irradiance
-    
-    # Ensure non-negative
-    corrected = np.where(corrected < 0, 0, corrected)
-    
-    # Advanced correction could be implemented here using moon_illumination_fraction
-    # and surface BRDF models
-    
-    return corrected
-
-
 def calculate_ntli(
     vnp_radiance: ArrayLike,
-    lunar_irradiance: ArrayLike,
-    quality_flag: ArrayLike,
+    quality_flag: ArrayLike | None = None,
     valid_flags: list[int] | None = None
 ) -> ArrayLike:
-    """Calculate Nighttime Light Index with lunar correction.
+    """Calculate Nighttime Light Index from VIIRS radiance.
     
     Args:
         vnp_radiance: VIIRS DNB radiance values
-        lunar_irradiance: Lunar irradiance values for correction
-        quality_flag: Quality flag array from VIIRS
+        quality_flag: Optional quality flag array from VIIRS
         valid_flags: List of valid quality flag values (default: [0, 2])
         
     Returns:
-        Lunar-corrected nighttime light radiance
+        Cleaned nighttime light radiance
     """
     if valid_flags is None:
         valid_flags = [0, 2]
     
     # Handle fill values
     vnp_clean = np.where(vnp_radiance > 65530, 0, vnp_radiance)
-    lunar_clean = np.where(lunar_irradiance > 65530, 0, lunar_irradiance)
     
-    # Create quality mask
-    quality_mask = np.isin(quality_flag, valid_flags)
+    # Apply quality mask if provided
+    if quality_flag is not None:
+        # Create quality mask
+        quality_mask = np.isin(quality_flag, valid_flags)
+        # Set invalid pixels to 0
+        vnp_clean = np.where(quality_mask, vnp_clean, 0)
     
-    # Apply lunar correction
-    lunar_corrected = vnp_clean - lunar_clean
+    # Ensure non-negative
+    vnp_clean = np.where(vnp_clean < 0, 0, vnp_clean)
     
-    # Set invalid pixels to 0
-    lunar_corrected = np.where(quality_mask, lunar_corrected, 0)
-    lunar_corrected = np.where(lunar_corrected < 0, 0, lunar_corrected)
-    
-    return lunar_corrected
+    return vnp_clean
 
 
 def apply_viirs_floor_ceiling(

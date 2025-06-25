@@ -4,7 +4,6 @@ This module provides analytical functions for:
 - Spectral indices calculation (NDVI, NDWI, NDUI)
 - Temporal compositing and time series analysis
 - Quality assessment and validation
-- Lunar correction for nighttime lights
 - Statistical analysis and metrics
 """
 
@@ -12,17 +11,6 @@ from .indices import (
     calculate_ndui,
     calculate_ndvi,
     calculate_ndwi,
-)
-
-from .lunar import (
-    analyze_lunar_cycle_effects,
-    apply_lunar_correction,
-    calculate_lunar_brdf,
-    calculate_moon_phase_weight,
-    compute_clear_sky_lunar_radiance,
-    compute_ntli_index,
-    detect_lunar_contamination,
-    estimate_lunar_reflectance,
 )
 
 from .quality import (
@@ -64,15 +52,6 @@ __all__ = [
     "calculate_ndui",
     "calculate_ndvi",
     "calculate_ndwi",
-    # Lunar functions
-    "analyze_lunar_cycle_effects",
-    "apply_lunar_correction",
-    "calculate_lunar_brdf",
-    "calculate_moon_phase_weight",
-    "compute_clear_sky_lunar_radiance",
-    "compute_ntli_index",
-    "detect_lunar_contamination",
-    "estimate_lunar_reflectance",
     # Quality functions
     "assess_data_quality",
     "calculate_quality_weighted_composite",
