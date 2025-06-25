@@ -33,16 +33,28 @@ def apply_colormap(
         RGB(A) array with shape (3 or 4, height, width) as uint8
     """
     # Pure implementation of colormap application
-    # First, normalize data to [0, 1]
+    # First, handle scale_range if provided
     if scale_range is not None:
+        # Clip data to scale_range first (like bm.py)
         vmin, vmax = scale_range
+        clipped_data = np.clip(data, vmin, vmax)
+        
+        # Auto-stretch: use actual min/max of clipped data (like bm.py's scale_image)
+        actual_min = np.nanmin(clipped_data)
+        actual_max = np.nanmax(clipped_data)
+        
+        # Use actual values for normalization to get full colormap range
+        if actual_max > actual_min:
+            normalized = (clipped_data - actual_min) / (actual_max - actual_min)
+        else:
+            normalized = np.zeros_like(clipped_data)
     else:
+        # No scale_range provided, use data's natural range
         vmin, vmax = np.nanmin(data), np.nanmax(data)
-    
-    if vmax > vmin:
-        normalized = (data - vmin) / (vmax - vmin)
-    else:
-        normalized = np.zeros_like(data)
+        if vmax > vmin:
+            normalized = (data - vmin) / (vmax - vmin)
+        else:
+            normalized = np.zeros_like(data)
     
     normalized = np.clip(normalized, 0, 1)
     
@@ -149,9 +161,16 @@ def apply_inferno_colormap(
 ) -> ArrayLike:
     """Apply inferno colormap optimized for nighttime lights.
     
+    This function mimics the behavior of bm.py's scale_image function by:
+    1. Clipping data to the scale_range
+    2. Auto-stretching the clipped data to use the full colormap range
+    
+    This ensures maximum contrast in the output image by using the actual
+    min/max values within the clipped range rather than the theoretical range.
+    
     Args:
         data: Nighttime lights data (should be in [0, 1])
-        scale_range: Range for optimal display contrast
+        scale_range: Range for clipping before auto-stretch (default: 0.3-0.8)
         zero_as_black: Whether to force zero values to black
         
     Returns:
@@ -162,9 +181,14 @@ def apply_inferno_colormap(
     
     try:
         # Load the exact inferno colormap arrays
-        inferno_r = np.load(data_dir / "inferno_r.npy")
-        inferno_g = np.load(data_dir / "inferno_g.npy")
-        inferno_b = np.load(data_dir / "inferno_b.npy")
+        inferno_r = np.load(data_dir / "inferno_r.npy").copy()
+        inferno_g = np.load(data_dir / "inferno_g.npy").copy()
+        inferno_b = np.load(data_dir / "inferno_b.npy").copy()
+        
+        # Force index 0 to black (like bm.py)
+        inferno_r[0] = 0
+        inferno_g[0] = 0
+        inferno_b[0] = 0
         
         # Normalize from [0, 255] to [0, 1] range expected by apply_colormap
         colormap_data = {

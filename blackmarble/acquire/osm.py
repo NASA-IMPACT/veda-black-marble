@@ -416,7 +416,7 @@ def rasterize_road_shapes_with_crs(
     shape: tuple[int, int],
     src_crs: str | CRS,
     dst_crs: str | CRS,
-    all_touched: bool = True
+    all_touched: bool = False
 ) -> ArrayLike:
     """Rasterize road shapes with coordinate system transformation.
     
@@ -690,14 +690,20 @@ def buffer_and_rasterize_roads(
     buffered_shapes = []
     
     if hierarchical:
-        # Define road type hierarchy
+        # Define road type hierarchy - matching bm.py exactly
         road_hierarchy = {
-            'motorway': 1, 'motorway_link': 1, 'trunk': 1, 'trunk_link': 1,
-            'primary': 2, 'primary_link': 2,
-            'secondary': 3, 'secondary_link': 3,
-            'tertiary': 4, 'tertiary_link': 4,
-            'residential': 5,
-            'service': 6, 'unclassified': 6, 'road': 6
+            # Value 1: Primary, secondary, tertiary roads (major city roads)
+            'primary': 1, 'primary_link': 1,
+            'secondary': 1, 'secondary_link': 1,
+            'tertiary': 1, 'tertiary_link': 1,
+            # Value 2: Motorways (highways)
+            'motorway': 2, 'motorway_link': 2,
+            # Value 3: Residential roads
+            'residential': 3,
+            # Value 4: Trunk roads (major highways)
+            'trunk': 4, 'trunk_link': 4,
+            # Value 5: Service and minor roads
+            'service': 5, 'unclassified': 5, 'road': 5, 'busway': 5
         }
         
         # Group edges by highway type
@@ -753,5 +759,5 @@ def buffer_and_rasterize_roads(
         shape=shape,
         src_crs="EPSG:4326",  # OSM data is in WGS84
         dst_crs=crs,
-        all_touched=True
+        all_touched=False  # Match bm.py - only rasterize pixels whose center is covered
     )

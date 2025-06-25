@@ -14,7 +14,7 @@ ArrayLike = npt.NDArray[Any]
 def calculate_ndvi(
     nir: ArrayLike,
     red: ArrayLike,
-    epsilon: float = 0.000001
+    epsilon: float = 0.0001
 ) -> ArrayLike:
     """Calculate Normalized Difference Vegetation Index (NDVI).
     
@@ -38,8 +38,8 @@ def calculate_ndvi(
         red: Red band reflectance (Band 4 for Landsat 8/9).
             Expected range: [0, 1] for surface reflectance.
         epsilon: Small value to prevent division by zero in areas where
-            NIR + Red approaches zero. Default 1e-6 is sufficient for
-            most surface reflectance values.
+            NIR + Red approaches zero. Default 1e-4 provides stability
+            when reflectance values are near zero.
             
     Returns:
         NDVI array with values mathematically bounded to [-1, 1].
@@ -79,7 +79,7 @@ def calculate_ndvi(
 def calculate_ndwi(
     green: ArrayLike,
     nir: ArrayLike,
-    epsilon: float = 0.000001
+    epsilon: float = 0.0001
 ) -> ArrayLike:
     """Calculate Normalized Difference Water Index (NDWI).
     
@@ -105,7 +105,8 @@ def calculate_ndwi(
         nir: Near-infrared band reflectance (Band 5 for Landsat 8/9).
             Expected range: [0, 1] for surface reflectance.
         epsilon: Small value to prevent division by zero in areas where
-            Green + NIR approaches zero. Default 1e-6 handles edge cases.
+            Green + NIR approaches zero. Default 1e-4 provides stability
+            when reflectance values are near zero.
             
     Returns:
         NDWI array with values mathematically bounded to [-1, 1].

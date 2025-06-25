@@ -460,7 +460,7 @@ def black_marble_pipeline(
     if road_network is not None and reference_shape is not None and reference_transform is not None:
         # Use the new CRS-aware road rasterization
         # This handles meter-based buffering via UTM internally
-        buffer_meters = 30.0  # Buffer roads by 30 meters
+        buffer_meters = 5.5  # Buffer roads by 5.5 meters (matching bm.py)
         
         print(f"Road buffering: {buffer_meters:.1f} meters (applied in UTM)")
         print(f"Rasterizing to: {target_crs}")
@@ -501,8 +501,8 @@ def black_marble_pipeline(
     if "B5" in landsat_reprojected and "B4" in landsat_reprojected:
         ndvi = analyze.calculate_ndvi(
             nir=landsat_reprojected["B5"],
-            red=landsat_reprojected["B4"],
-            epsilon=1e-6
+            red=landsat_reprojected["B4"]
+            # Use default epsilon=1e-4 for better stability
         )
         
         # Save diagnostic output if requested
@@ -515,8 +515,8 @@ def black_marble_pipeline(
     if "B3" in landsat_reprojected and "B5" in landsat_reprojected:
         ndwi = analyze.calculate_ndwi(
             green=landsat_reprojected["B3"],
-            nir=landsat_reprojected["B5"],
-            epsilon=1e-6
+            nir=landsat_reprojected["B5"]
+            # Use default epsilon=1e-4 for better stability
         )
         
         # Save diagnostic output if requested
@@ -680,10 +680,10 @@ def black_marble_pipeline(
         print(f"  Data type: {ndui.dtype}")
         
         # Apply inferno colormap to NDUI with appropriate scale range
-        # NDUI is normalized to [0, 1] so use full range
+        # Use 0.3-0.8 range to focus on urban areas (matching bm.py behavior)
         ntl_colored = enhance.apply_inferno_colormap(
             data=ndui,
-            scale_range=(0.0, 1.0)  # NDUI is 0-1 range, not 0.3-0.8
+            scale_range=(0.3, 0.8)  # Focus colormap on urban range for better contrast
         )
         
         # DIAGNOSTIC: Print data after colormap

@@ -55,6 +55,10 @@ def create_landsat_median_composite(
         cropped = data[:min_height, :min_width]
         # Scale to reflectance (NaN values remain NaN)
         scaled = cropped * scale_factor + add_offset
+        # CRITICAL FIX: Clamp reflectance to [0, 1] range
+        # The -0.2 offset can create negative values which break NDVI/NDWI calculations
+        # Preserve NaN values while clamping valid data
+        scaled = np.where(np.isnan(scaled), scaled, np.clip(scaled, 0.0, 1.0))
         scaled_data.append(scaled)
     
     # Stack all temporal data
