@@ -7,13 +7,6 @@ from datetime import datetime
 import tempfile
 from typing import Dict, Any
 
-# Import data generators
-from tests.fixtures.data_generators import (
-    generate_landsat_test_data,
-    generate_viirs_test_data,
-    generate_osm_road_data,
-    generate_complete_test_scene,
-)
 
 
 @pytest.fixture
@@ -45,48 +38,6 @@ def temp_dir():
     """Temporary directory for test outputs."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir)
-
-
-@pytest.fixture
-def landsat_test_data(test_shape):
-    """Generate Landsat test data."""
-    return generate_landsat_test_data(
-        shape=test_shape,
-        n_dates=1,
-        cloud_coverage=0.1,
-        seed=42
-    )
-
-
-@pytest.fixture
-def viirs_test_data(test_shape):
-    """Generate VIIRS test data."""
-    return generate_viirs_test_data(
-        shape=test_shape,
-        urban_centers=3,
-        seed=42
-    )
-
-
-@pytest.fixture
-def osm_test_data(test_shape):
-    """Generate OSM road test data."""
-    return generate_osm_road_data(
-        shape=test_shape,
-        n_major_roads=2,
-        n_minor_roads=5,
-        seed=42
-    )
-
-
-@pytest.fixture
-def complete_test_scene(test_shape):
-    """Generate complete test scene with all data sources."""
-    return generate_complete_test_scene(
-        shape=test_shape,
-        include_clouds=True,
-        seed=42
-    )
 
 
 @pytest.fixture
@@ -126,7 +77,7 @@ def mock_raster_adapter():
 @pytest.fixture
 def pipeline_config(manhattan_bbox, test_date, temp_dir):
     """Default pipeline configuration for testing."""
-    from blackmarble.target_config import PipelineConfig
+    from blackmarble.config import PipelineConfig
     
     output_path = str(temp_dir / "test_output.tif")
     return PipelineConfig.for_bm_parity(manhattan_bbox, test_date, output_path)
@@ -135,7 +86,7 @@ def pipeline_config(manhattan_bbox, test_date, temp_dir):
 @pytest.fixture
 def enhanced_pipeline_config(manhattan_bbox, test_date, temp_dir):
     """Enhanced pipeline configuration for testing."""
-    from blackmarble.target_config import PipelineConfig
+    from blackmarble.config import PipelineConfig
     
     output_path = str(temp_dir / "test_enhanced.tif")
     return PipelineConfig.for_enhanced_quality(manhattan_bbox, test_date, output_path)
@@ -181,19 +132,3 @@ def pytest_configure(config):
     )
 
 
-# Test data validation helpers
-def validate_landsat_data(data: Dict[str, Any]) -> bool:
-    """Validate Landsat data structure."""
-    required_bands = ['B3', 'B4', 'B5', 'QA_PIXEL', 'QA_AEROSOL', 'QA_RADSAT']
-    return all(band in data for band in required_bands)
-
-
-def validate_viirs_data(data: Dict[str, Any]) -> bool:
-    """Validate VIIRS data structure."""
-    required_layers = ['NTL', 'QF', 'LUNAR']
-    return all(layer in data for layer in required_layers)
-
-
-def validate_osm_data(data: Dict[str, Any]) -> bool:
-    """Validate OSM data structure."""
-    return 'roads' in data

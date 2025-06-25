@@ -10,9 +10,7 @@ from .landsat import (
     download_all_bands_for_date,
     download_landsat_band,
     download_tiles_for_band,
-    download_tiles_with_composites,
     filter_landsat_scenes,
-    get_landsat_metadata,
     get_wrs_path_row,
 )
 
@@ -20,9 +18,7 @@ from .osm import (
     buffer_and_rasterize_roads,
     buffer_roads_in_utm,
     calculate_utm_zone,
-    create_road_raster,
     create_road_raster_from_transform,
-    create_simple_road_mask,
     fetch_road_network,
     get_hierarchical_road_filters,
     rasterize_road_shapes,
@@ -36,7 +32,6 @@ from .viirs import (
     download_viirs_h5,
     download_vnp46a2_tiles,
     extract_viirs_layers,
-    get_tiles_for_bbox,
     get_viirs_metadata,
     read_viirs_with_rasterio,
 )
@@ -46,17 +41,13 @@ __all__ = [
     "download_all_bands_for_date",
     "download_landsat_band",
     "download_tiles_for_band",
-    "download_tiles_with_composites",
     "filter_landsat_scenes",
-    "get_landsat_metadata",
     "get_wrs_path_row",
     # OSM functions
     "buffer_and_rasterize_roads",
     "buffer_roads_in_utm",
     "calculate_utm_zone",
-    "create_road_raster",
     "create_road_raster_from_transform",
-    "create_simple_road_mask",
     "fetch_road_network",
     "get_hierarchical_road_filters",
     "rasterize_road_shapes",
@@ -68,7 +59,6 @@ __all__ = [
     "download_viirs_h5",
     "download_vnp46a2_tiles",
     "extract_viirs_layers",
-    "get_tiles_for_bbox",
     "get_viirs_metadata",
     "read_viirs_with_rasterio",
 ]

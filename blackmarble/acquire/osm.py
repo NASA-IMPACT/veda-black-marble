@@ -15,18 +15,130 @@ from shapely.geometry import shape, mapping
 from shapely.ops import transform
 import pyproj
 
-# Import pure functional implementations
-from blackmarble.osm_functions import (
-    download_osm_roads,
-    graph_to_shapes,
-    rasterize_shapes,
-    create_multi_type_road_raster
-)
+import osmnx as ox
+import networkx as nx
+import rasterio.features
 
 # Type aliases
 BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
 ArrayLike = npt.NDArray[Any]
 Transform = Any  # rasterio.transform.Affine
+
+
+def download_osm_roads(
+    north: float,
+    south: float,
+    east: float,
+    west: float,
+    road_filter: str | None = None,
+) -> nx.MultiDiGraph:
+    """Download OSM road network for a bounding box.
+
+    Args:
+        north: Northern latitude boundary
+        south: Southern latitude boundary
+        east: Eastern longitude boundary
+        west: Western longitude boundary
+        road_filter: Optional OSM filter string for road types
+
+    Returns:
+        NetworkX graph of roads
+
+    Raises:
+        Exception: If download fails
+    """
+    print(f"Downloading roads for bbox: N={north}, S={south}, E={east}, W={west}")
+    if road_filter:
+        print(f"Using filter: {road_filter}")
+
+    try:
+        # osmnx expects bbox as (west, south, east, north)
+        G = ox.graph_from_bbox(
+            bbox=(west, south, east, north),
+            retain_all=True,
+            truncate_by_edge=True,
+            simplify=True,
+            network_type="all",
+            custom_filter=road_filter if road_filter else None,
+        )
+        print(f"Downloaded {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+        return G
+    except Exception as e:
+        print(f"Error downloading roads: {type(e).__name__}: {e}")
+        raise
+
+
+def graph_to_shapes(
+    G: nx.MultiDiGraph, buffer_distance: float = 0.00005
+) -> list[dict[str, Any]]:
+    """Convert NetworkX road graph to buffered polygon shapes.
+
+    Args:
+        G: NetworkX graph of roads
+        buffer_distance: Buffer distance in degrees
+
+    Returns:
+        List of GeoJSON-like shape dictionaries
+    """
+    if G.number_of_edges() == 0:
+        return []
+
+    # Get edges as GeoDataFrame
+    _, edges_gdf = ox.graph_to_gdfs(G)
+
+    shapes = []
+    for _, edge in edges_gdf.iterrows():
+        # Buffer the line geometry if buffer_distance > 0
+        if buffer_distance > 0:
+            buffered = edge.geometry.buffer(buffer_distance)
+            shapes.append(shapely.geometry.mapping(buffered))
+        else:
+            # Return line geometry without buffering
+            shapes.append(shapely.geometry.mapping(edge.geometry))
+
+    print(f"Created {len(shapes)} buffered road shapes")
+    return shapes
+
+
+def rasterize_shapes(
+    shapes: list[dict[str, Any]],
+    height: int,
+    width: int,
+    transform: Any,
+    value: int = 1,
+    all_touched: bool = True,
+) -> np.ndarray:
+    """Rasterize polygon shapes to a numpy array.
+
+    Args:
+        shapes: List of GeoJSON-like shape dictionaries
+        height: Output raster height in pixels
+        width: Output raster width in pixels
+        transform: Affine transform for georeferencing
+        value: Value to burn into raster for shapes
+        all_touched: Whether to rasterize all touched pixels
+
+    Returns:
+        Numpy array with rasterized shapes
+    """
+    if not shapes:
+        print("No shapes to rasterize")
+        return np.zeros((height, width), dtype=np.uint8)
+
+    mask = rasterio.features.rasterize(
+        shapes,
+        out_shape=(height, width),
+        transform=transform,
+        fill=0,
+        all_touched=all_touched,
+        default_value=value,
+        dtype=np.uint8,
+    )
+
+    pixel_count = np.sum(mask > 0)
+    print(f"Rasterized {pixel_count} pixels ({100.0 * pixel_count / mask.size:.2f}%)")
+
+    return mask
 
 
 def fetch_road_network(
@@ -53,177 +165,11 @@ def fetch_road_network(
     east = max_lon
     west = min_lon
     
-    # Delegate to existing implementation
-    # Note: download_osm_roads doesn't use network_type parameter,
-    # it always uses 'all' internally
+    # Call download_osm_roads directly
+    # Note: network_type parameter is ignored, always uses 'all' internally
     return download_osm_roads(north, south, east, west, custom_filter)
 
 
-def create_road_raster(
-    bbox: BBox,
-    reference_raster: str,
-    output_path: str,
-    buffer_distance: float = 0.00005,
-    road_filters: list[str] | None = None,
-    buffer_meters: bool | None = None
-) -> str:
-    """Create rasterized road network with hierarchical values.
-    
-    Generates a hierarchical road classification raster where different road types
-    receive different pixel values (1-5). This is essential for the NDUI calculation
-    which uses road proximity to enhance urban light detection accuracy.
-    
-    The hierarchical classification prioritizes major transportation corridors
-    (motorways, primary roads) over local streets, enabling the pipeline to
-    apply appropriate enhancement factors based on road importance.
-    
-    Args:
-        bbox: Bounding box (min_lon, min_lat, max_lon, max_lat) for road data
-        reference_raster: Path to reference raster for spatial alignment
-        output_path: Path for output hierarchical road raster
-        buffer_distance: Road buffer width. Units depend on buffer_meters parameter:
-                        - If buffer_meters is True: distance in meters
-                        - If buffer_meters is False/None: distance in degrees
-                        Default: 0.00005 degrees (~5.5m at equator)
-        road_filters: Optional list of OSM filter strings for custom road types
-        buffer_meters: If True, interpret buffer_distance as meters and use UTM
-                      for accurate buffering. If None, auto-detect based on CRS.
-        
-    Returns:
-        Path to created road raster with hierarchical values (1-5)
-    """
-    # Extract spatial parameters from reference raster
-    with rasterio.open(reference_raster) as src:
-        height, width = src.height, src.width
-        transform = src.transform
-        profile = src.profile.copy()
-        crs = src.crs
-    
-    # Auto-detect if we should use meter-based buffering
-    if buffer_meters is None:
-        # Use meters for projected CRS (UTM, Web Mercator, etc)
-        # Use degrees for geographic CRS (WGS84, etc)
-        buffer_meters = crs is not None and crs.is_projected
-    
-    # If using meter-based buffering, delegate to CRS-aware function
-    if buffer_meters:
-        road_array = create_road_raster_from_transform(
-            bbox=bbox,
-            transform=transform,
-            crs=crs,
-            shape=(height, width),
-            buffer_meters=buffer_distance,  # Interpret as meters
-            road_type_values=None  # Use default mapping
-        )
-    else:
-        # Use traditional degree-based buffering
-        min_lon, min_lat, max_lon, max_lat = bbox
-        north, south, east, west = max_lat, min_lat, max_lon, min_lon
-        
-        # Generate hierarchical road raster using pure functional approach
-        road_array = create_multi_type_road_raster(
-            north=north,
-            south=south,
-            east=east,
-            west=west,
-            height=height,
-            width=width,
-            transform=transform,
-            buffer_distance=buffer_distance  # In degrees
-        )
-    
-    # Configure output profile for road classification raster
-    profile.update({
-        'count': 1,
-        'dtype': 'uint8',
-        'compress': 'deflate',
-        'nodata': 0
-    })
-    
-    # Write hierarchical road raster to file
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with rasterio.open(output_path, 'w', **profile) as dst:
-        dst.write(road_array, 1)
-    
-    return output_path
-
-
-def create_simple_road_mask(
-    bbox: BBox,
-    reference_raster: str,
-    output_path: str,
-    buffer_distance: float = 0.00005,
-    road_value: int = 1
-) -> str:
-    """Create simple binary road mask.
-    
-    Generates a binary road mask where all road types receive the same pixel value.
-    This simplified representation is useful for basic road proximity analysis
-    without the complexity of hierarchical road classification.
-    
-    Unlike the hierarchical version, this mask treats all roads equally,
-    making it suitable for applications where road type distinction is not
-    required, such as simple distance-to-road calculations.
-    
-    Args:
-        bbox: Bounding box (min_lon, min_lat, max_lon, max_lat) for road data
-        reference_raster: Path to reference raster for spatial alignment
-        output_path: Path for output binary road mask
-        buffer_distance: Road buffer width in decimal degrees (default ~5.5m at equator)
-        road_value: Pixel value for all road types (default: 1)
-        
-    Returns:
-        Path to created binary road mask
-    """
-    # Extract spatial parameters from reference raster
-    with rasterio.open(reference_raster) as src:
-        height, width = src.height, src.width
-        transform = src.transform
-        profile = src.profile.copy()
-    
-    # Convert bbox to standard north/south/east/west for OSM functions  
-    min_lon, min_lat, max_lon, max_lat = bbox
-    north, south, east, west = max_lat, min_lat, max_lon, min_lon
-    
-    # Download all road types without filtering
-    road_graph = download_osm_roads(
-        north=north,
-        south=south, 
-        east=east,
-        west=west,
-        road_filter=None  # Download all available roads
-    )
-    
-    # Convert road network to buffered polygon shapes
-    road_shapes = graph_to_shapes(
-        G=road_graph,
-        buffer_distance=buffer_distance
-    )
-    
-    # Rasterize all roads with uniform value
-    road_array = rasterize_shapes(
-        shapes=road_shapes,
-        height=height,
-        width=width,
-        transform=transform,
-        value=road_value,
-        all_touched=True
-    )
-    
-    # Configure output profile for binary road mask
-    profile.update({
-        'count': 1,
-        'dtype': 'uint8',
-        'compress': 'deflate',
-        'nodata': 0
-    })
-    
-    # Write binary road mask to file
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with rasterio.open(output_path, 'w', **profile) as dst:
-        dst.write(road_array, 1)
-    
-    return output_path
 
 
 def get_hierarchical_road_filters() -> dict[int, str]:

@@ -11,22 +11,74 @@ from typing import Any
 import numpy.typing as npt
 from datetime import datetime, timedelta
 
-# Import pure functional implementations
-from blackmarble.landsat_functions import (
-    get_wrs_path_row as _get_wrs_path_row,
-    get_wrs_tiles_for_bbox,
-    find_landsat_scene_directory,
-    download_landsat_file,
-    get_landsat_band_metadata,
-    calculate_landsat_cloud_cover
-)
+import boto3
+import collections
+from datetime import datetime
+import shapely.geometry
+from shapely.geometry import shape, Point
+
+# Global cache for S3 directory listings to improve performance
+_DIR_CACHE: collections.OrderedDict[str, list[dict[str, str]]] = collections.OrderedDict()
+_MAX_CACHE_SIZE = 100
 
 # Type aliases
 BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
 ArrayLike = npt.NDArray[Any]
 
 
-def get_wrs_path_row(lat: float, lon: float) -> list[dict[str, int]]:
+def load_wrs_shapefile(shapefile_path: str | None = None) -> list[tuple[shapely.geometry.Polygon, int, int]]:
+    """Load WRS-2 path/row polygons from shapefile.
+    
+    This function provides the core WRS-2 spatial lookup capability needed for
+    determining which Landsat tiles cover a given geographic area. It's essential
+    for the acquisition pipeline to identify appropriate data granules.
+    
+    Args:
+        shapefile_path: Path to WRS-2 shapefile, or None for bundled default
+        
+    Returns:
+        List of tuples: (polygon_geometry, path, row)
+        
+    Raises:
+        ImportError: If Fiona is not available
+        FileNotFoundError: If shapefile doesn't exist
+    """
+    try:
+        import fiona
+    except ImportError:
+        raise ImportError("Fiona is required for WRS shapefile processing. Install with: uv add fiona")
+    
+    # Use bundled default if none provided
+    if shapefile_path is None:
+        from importlib.resources import files
+        shapefile_path = str(files("blackmarble").joinpath("data", "WRS2_descending_0", "WRS2_descending.shp"))
+    
+    polygons = []
+    
+    # Read all features from the shapefile using Fiona for robust vector I/O
+    with fiona.open(shapefile_path, "r") as collection:
+        for feature in collection:
+            # Extract WRS path and row from feature attributes
+            properties = feature["properties"]
+            path = int(properties["PATH"])
+            row = int(properties["ROW"])
+            
+            # Convert GeoJSON geometry to shapely for spatial operations
+            geom = shape(feature["geometry"])
+            
+            # Only store valid polygon geometries (skip any malformed features)
+            if isinstance(geom, shapely.geometry.Polygon):
+                polygons.append((geom, path, row))
+    
+    print(f"Loaded {len(polygons)} WRS-2 path/row polygons from shapefile")
+    return polygons
+
+
+def get_wrs_path_row(
+    lat: float, 
+    lon: float, 
+    wrs_polygons: list[tuple[shapely.geometry.Polygon, int, int]] | None = None
+) -> list[dict[str, int]]:
     """Get Landsat WRS-2 path and row for given coordinates.
     
     Determines which Landsat WRS-2 tiles contain the specified geographic point.
@@ -36,6 +88,7 @@ def get_wrs_path_row(lat: float, lon: float) -> list[dict[str, int]]:
     Args:
         lat: Latitude in decimal degrees (-90 to 90)
         lon: Longitude in decimal degrees (-180 to 180)
+        wrs_polygons: Pre-loaded WRS polygons, or None to load from default shapefile
         
     Returns:
         List of dicts with 'path' and 'row' keys (can be multiple for overlap areas)
@@ -44,8 +97,20 @@ def get_wrs_path_row(lat: float, lon: float) -> list[dict[str, int]]:
         >>> get_wrs_path_row(40.7, -74.0)  # Manhattan, NY
         [{'path': 14, 'row': 32}]
     """
-    # Use pure functional implementation - no class instantiation needed
-    return _get_wrs_path_row(lat, lon)
+    # Load WRS polygons if not provided (allows caching by caller)
+    if wrs_polygons is None:
+        wrs_polygons = load_wrs_shapefile()
+    
+    # Create point geometry for spatial query
+    point = Point(lon, lat)
+    
+    # Find all WRS tiles that contain this point
+    results = []
+    for polygon, path, row in wrs_polygons:
+        if polygon.contains(point):
+            results.append({"path": path, "row": row})
+    
+    return results
 
 
 def filter_landsat_scenes(
@@ -77,8 +142,78 @@ def filter_landsat_scenes(
         >>> filter_landsat_scenes(2023, 6, 15, 14, 32)
         'collection02/level-2/standard/oli-tirs/2023/014/032/LC08_L2SP_014032_20230615_20230621_02_T1/'
     """
-    # Use pure functional implementation
-    return find_landsat_scene_directory(year, month, day, path, row, collection)
+    global _DIR_CACHE
+    
+    # Format inputs for S3 path construction
+    yr = str(year)
+    mo = str(month).zfill(2)
+    da = str(day).zfill(2)
+    path_str = str(path).zfill(3)
+    row_str = str(row).zfill(3)
+    
+    # Construct S3 prefix for this path/row/year combination
+    prefix = f"{collection}/level-2/standard/oli-tirs/{yr}/{path_str}/{row_str}/"
+    
+    # Check cache first to avoid redundant S3 API calls
+    if prefix in _DIR_CACHE:
+        directories = _DIR_CACHE[prefix]
+        print(f"Using cached directory listing for {prefix}")
+    else:
+        # Query S3 for available scene directories
+        print(f"Querying S3 for scenes in {prefix}")
+        session = boto3.Session()
+        s3 = session.client("s3")
+        
+        try:
+            resp = s3.list_objects_v2(
+                Bucket="usgs-landsat",
+                Prefix=prefix,
+                RequestPayer="requester",
+                Delimiter="/",
+            )
+            
+            # Extract directory prefixes from S3 response
+            directories = []
+            common_prefixes = resp.get("CommonPrefixes", [])
+            for prefix_entry in common_prefixes:
+                if isinstance(prefix_entry, dict) and "Prefix" in prefix_entry:
+                    directories.append({"Prefix": prefix_entry["Prefix"]})
+                    
+            print(f"Found {len(directories)} scene directories")
+            
+            # Cache the result, managing cache size
+            if len(_DIR_CACHE) >= _MAX_CACHE_SIZE:
+                _DIR_CACHE.popitem(last=False)  # Remove oldest entry
+            _DIR_CACHE[prefix] = directories
+            
+        except Exception as e:
+            print(f"Error querying S3: {e}")
+            return None
+    
+    # Find scene that covers the target date
+    target_date = datetime.strptime(yr + mo + da, "%Y%m%d")
+    
+    for entry in directories:
+        try:
+            # Parse scene name to extract acquisition date range
+            # Format: LC08_L2SP_PPPRRR_YYYYMMDD_YYYYMMDD_02_T1/
+            scene_name = entry["Prefix"].split("/")[-2]
+            date_parts = scene_name.split("_")[3:5]  # YYYYMMDD start and end dates
+            
+            start_date = datetime.strptime(date_parts[0], "%Y%m%d")
+            end_date = datetime.strptime(date_parts[1], "%Y%m%d")
+            
+            # Check if target date falls within scene's acquisition window
+            if start_date <= target_date <= end_date:
+                print(f"Selected scene: {scene_name}")
+                return entry["Prefix"]
+                
+        except (IndexError, ValueError) as e:
+            print(f"Error parsing scene name {entry.get('Prefix', 'unknown')}: {e}")
+            continue
+    
+    print(f"No scene found for {year}-{month:02d}-{day:02d} at path {path}, row {row}")
+    return None
 
 
 def download_landsat_band(
@@ -107,8 +242,161 @@ def download_landsat_band(
         >>> download_landsat_band(scene, 4, '/tmp/landsat_b4.tif')
         '/tmp/landsat_b4.tif'
     """
-    # Use pure functional implementation
-    return download_landsat_file(scene_dir, band, output_path, aws_credentials)
+    # Extract scene name from directory path
+    scene_name = scene_dir.rstrip("/").split("/")[-1]
+    
+    # Construct S3 object key based on band type
+    if band in ("QA_PIXEL", "QA_RADSAT", "QA_AEROSOL"):
+        # Quality assessment layers have specific suffixes
+        suffix_map = {
+            "QA_PIXEL": "_QA_PIXEL.TIF",
+            "QA_RADSAT": "_QA_RADSAT.TIF", 
+            "QA_AEROSOL": "_SR_QA_AEROSOL.TIF",
+        }
+        suffix = suffix_map[str(band)]
+        s3_key = scene_dir + scene_name + suffix
+    else:
+        # Spectral bands follow standard naming convention
+        s3_key = f"{scene_dir}{scene_name}_SR_B{band}.TIF"
+    
+    print(f"Downloading {s3_key} to {output_path}")
+    
+    # Create output directory if needed
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # Initialize S3 client with optional credentials
+    session = boto3.Session()
+    s3 = session.client("s3")
+    
+    # Download file with requester pays configuration
+    try:
+        s3.download_file(
+            "usgs-landsat", 
+            s3_key, 
+            output_path, 
+            ExtraArgs={"RequestPayer": "requester"}
+        )
+        print(f"Successfully downloaded to {output_path}")
+        return output_path
+        
+    except Exception as e:
+        print(f"Download failed: {e}")
+        raise
+
+
+def get_wrs_tiles_for_bbox(
+    min_lat: float,
+    max_lat: float, 
+    min_lon: float,
+    max_lon: float,
+    wrs_polygons: list[tuple[shapely.geometry.Polygon, int, int]] | None = None
+) -> list[dict[str, int]]:
+    """Find all WRS-2 path/row tiles intersecting a bounding box.
+    
+    Identifies all Landsat tiles needed to cover the specified geographic area.
+    This function is essential for regional analysis where multiple Landsat tiles
+    are required to achieve complete spatial coverage.
+    
+    Args:
+        min_lat: Minimum latitude of bounding box
+        max_lat: Maximum latitude of bounding box
+        min_lon: Minimum longitude of bounding box
+        max_lon: Maximum longitude of bounding box
+        wrs_polygons: Pre-loaded WRS polygons, or None to load from default shapefile
+        
+    Returns:
+        List of unique path/row dictionaries covering the bounding box
+    """
+    # Load WRS polygons if not provided
+    if wrs_polygons is None:
+        wrs_polygons = load_wrs_shapefile()
+    
+    # Create bounding box geometry
+    bbox = shapely.geometry.box(min_lon, min_lat, max_lon, max_lat)
+    
+    # Find all intersecting tiles, avoiding duplicates
+    results = []
+    seen = set()
+    
+    for polygon, path, row in wrs_polygons:
+        if polygon.intersects(bbox):
+            key = (path, row)
+            if key not in seen:
+                seen.add(key)
+                results.append({"path": path, "row": row})
+    
+    print(f"Found {len(results)} WRS tiles covering bounding box")
+    return results
+
+
+def get_landsat_band_metadata(file_path: str) -> dict[str, Any]:
+    """Extract metadata from a Landsat band file.
+    
+    Reads Landsat Collection 2 metadata including scaling factors, spatial reference,
+    and acquisition information. This metadata is essential for proper radiometric
+    processing and coordinate transformations in the pipeline.
+    
+    Args:
+        file_path: Path to Landsat band TIFF file
+        
+    Returns:
+        Dictionary containing scale factors, offsets, spatial reference, etc.
+        
+    Raises:
+        ValueError: If file cannot be opened or lacks required metadata
+    """
+    try:
+        import rasterio
+    except ImportError:
+        raise ImportError("rasterio is required for metadata extraction. Install with: uv add rasterio")
+    
+    with rasterio.open(file_path) as src:
+        # Extract basic raster properties
+        metadata = {
+            "width": src.width,
+            "height": src.height,
+            "count": src.count,
+            "dtype": str(src.dtype),
+            "crs": str(src.crs) if src.crs else None,
+            "bounds": src.bounds,
+            "transform": src.transform,
+            "nodata": src.nodata,
+        }
+        
+        # Extract Landsat Collection 2 scaling parameters
+        # These are standardized for surface reflectance products
+        if "SR_B" in os.path.basename(file_path):
+            # Surface reflectance bands
+            metadata.update({
+                "scale_factor": 0.0000275,  # Collection 2 surface reflectance
+                "add_offset": -0.2,
+                "valid_range": [7273, 43636],  # Post-scaling: ~0.0 to 1.0
+                "units": "reflectance",
+                "product_type": "surface_reflectance"
+            })
+        elif "QA_" in os.path.basename(file_path):
+            # Quality assessment layers (no scaling)
+            metadata.update({
+                "scale_factor": 1.0,
+                "add_offset": 0.0,
+                "product_type": "quality_assessment"
+            })
+        
+        # Extract GDAL tags if available
+        tags = src.tags()
+        if tags:
+            metadata["gdal_tags"] = tags
+        
+        # Parse acquisition date from filename
+        basename = os.path.basename(file_path)
+        if "_" in basename:
+            parts = basename.split("_")
+            if len(parts) >= 4:
+                date_str = parts[3]
+                if len(date_str) == 8 and date_str.isdigit():
+                    metadata["acquisition_date"] = date_str
+    
+    return metadata
 
 
 def download_tiles_for_band(
@@ -227,73 +515,6 @@ def download_tiles_for_band(
     return downloads, pixels, radsat, aerosol
 
 
-def download_tiles_with_composites(
-    band: int | str,
-    year: int,
-    month: int,
-    day: int,
-    bbox: BBox,
-    composite_history_months: int = 12,
-    cache_dir: str | None = None
-) -> list[tuple[list[str], list[str], list[str], list[str]]]:
-    """Download tiles including historical composites for gap filling.
-    
-    Args:
-        band: Band identifier
-        year: Target year
-        month: Target month
-        day: Target day
-        bbox: Bounding box
-        composite_history_months: Number of months of history to include
-        cache_dir: Optional cache directory for storing downloads
-        
-    Returns:
-        List of tuples, each containing (band_files, qa_pixel, qa_radsat, qa_aerosol)
-    """
-    # Download primary tiles
-    tiles = [download_tiles_for_band(band, year, month, day, bbox, ignore_missing=False, cache_dir=cache_dir)]
-    
-    # Download historical composites
-    for months_back in range(1, composite_history_months + 1):
-        # Calculate date for historical composite
-        target_date = datetime(year, month, day) - timedelta(days=months_back * 30)
-        hist_year = target_date.year
-        hist_month = target_date.month
-        hist_day = target_date.day
-        
-        try:
-            # Try to download historical data, ignoring missing tiles
-            hist_tiles = download_tiles_for_band(
-                band, hist_year, hist_month, hist_day, bbox, ignore_missing=True, cache_dir=cache_dir
-            )
-            if any(hist_tiles):  # Only add if we got some data
-                tiles.append(hist_tiles)
-        except Exception as e:
-            print(f"Warning: Could not download composite for {hist_year}-{hist_month}-{hist_day}: {e}")
-            continue
-    
-    return tiles
-
-
-def get_tiles_for_bbox(bbox: BBox) -> list[dict[str, int]]:
-    """Get all WRS-2 path/row tiles needed to cover a bounding box.
-    
-    Identifies all Landsat tiles required to achieve complete coverage of the
-    specified geographic area. Essential for regional analysis requiring multiple
-    Landsat scenes to cover the area of interest.
-    
-    Args:
-        bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
-        
-    Returns:
-        List of dicts with 'path' and 'row' keys covering the bounding box
-        
-    Example:
-        >>> get_tiles_for_bbox((-75.0, 40.0, -73.0, 42.0))  # NYC region
-        [{'path': 13, 'row': 32}, {'path': 14, 'row': 32}]
-    """
-    min_lon, min_lat, max_lon, max_lat = bbox
-    return get_wrs_tiles_for_bbox(min_lat, max_lat, min_lon, max_lon)
 
 
 def download_all_bands_for_date(
@@ -360,44 +581,5 @@ def download_all_bands_for_date(
     return result
 
 
-def get_landsat_metadata(scene_path: str) -> dict[str, Any]:
-    """Extract metadata from Landsat scene.
-    
-    Extracts comprehensive metadata from Landsat band files including scaling
-    factors, spatial reference, and acquisition information. This metadata is
-    essential for proper radiometric processing in the pipeline.
-    
-    Args:
-        scene_path: Path to Landsat band TIFF file
-        
-    Returns:
-        Dictionary containing scale factors, offsets, spatial reference, etc.
-        
-    Example:
-        >>> metadata = get_landsat_metadata('/path/to/LC08_L2SP_014032_B4.TIF')
-        >>> print(metadata['scale_factor'])
-        0.0000275
-    """
-    # Use pure functional implementation  
-    return get_landsat_band_metadata(scene_path)
 
 
-def get_cloud_cover(qa_pixel_path: str) -> float:
-    """Calculate cloud cover percentage from QA_PIXEL band.
-    
-    Analyzes the QA_PIXEL band to determine scene cloud coverage. This metric
-    is crucial for scene selection and quality assessment, helping users
-    choose the clearest available imagery for analysis.
-    
-    Args:
-        qa_pixel_path: Path to QA_PIXEL.TIF file
-        
-    Returns:
-        Cloud cover percentage (0.0 to 100.0)
-        
-    Example:
-        >>> cloud_cover = get_cloud_cover('/path/to/LC08_QA_PIXEL.TIF')
-        >>> print(f"Scene has {cloud_cover:.1f}% cloud cover")
-    """
-    # Use pure functional implementation
-    return calculate_landsat_cloud_cover(qa_pixel_path)

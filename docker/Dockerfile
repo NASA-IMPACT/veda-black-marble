@@ -18,7 +18,6 @@ RUN pip3 install rasterio
 RUN pip3 install fiona
 RUN pip3 install osmnx
 RUN pip3 install geopy
-RUN pip3 install rio-cogeo
 
 RUN mkdir -p /root/outputs/final
 RUN mkdir -p /root/outputs/temp
@@ -30,4 +29,5 @@ ADD inferno_r.npy /root/inferno_r.npy
  
 ADD bm.py /root/bm.py
 WORKDIR /root
-CMD ["python3", "-u", "/root/bm.py"]
+CMD ["python3", "/root/bm.py"]
+

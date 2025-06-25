@@ -5,6 +5,7 @@ from various QA bands and quality indicators in satellite data.
 """
 
 from typing import Any, Literal
+import numpy as np
 import numpy.typing as npt
 
 # Type aliases
@@ -27,9 +28,26 @@ def create_cloud_mask(
     Returns:
         Boolean mask where True indicates clear (non-cloud) pixels
     """
-    # Implementation from processing.py:376
-    from ..processing import create_cloud_mask as _create_cloud_mask
-    return _create_cloud_mask(qa_pixel, conservative=conservative, dilate_pixels=dilate_pixels)
+    if conservative:
+        # Conservative strategy: only keep clear land (21824) and clear water (21952)
+        valid_values = {21824, 21952}
+        mask = np.isin(qa_pixel, list(valid_values))
+    else:
+        # Permissive strategy: mask only high confidence clouds
+        # These are the QA values for different cloud confidence levels
+        invalid_values = {
+            55052,
+            54852,
+            54596,
+            22280,
+        }  # High/medium/low confidence clouds
+        mask = ~np.isin(qa_pixel, list(invalid_values))
+
+    # Apply dilation if requested
+    if dilate_pixels > 0:
+        mask = dilate_mask(mask.astype(float), dilate_pixels) > 0
+
+    return mask
 
 
 def create_aerosol_mask(
@@ -45,9 +63,17 @@ def create_aerosol_mask(
     Returns:
         Boolean mask where True indicates acceptable aerosol levels
     """
-    # Implementation from processing.py:478
-    from ..processing import create_aerosol_mask as _create_aerosol_mask
-    return _create_aerosol_mask(qa_aerosol, threshold=threshold)
+    if threshold == "standard":
+        # Standard threshold masks medium and high aerosol
+        invalid_values = {192, 194, 196, 228}
+    else:  # strict
+        # Strict threshold masks more aerosol values
+        invalid_values = {192, 194, 196, 224, 228}
+
+    # Create mask - pixels NOT in invalid set are kept
+    mask = ~np.isin(qa_aerosol, list(invalid_values))
+
+    return mask
 
 
 def create_saturation_mask(
@@ -63,10 +89,36 @@ def create_saturation_mask(
     Returns:
         Boolean mask where True indicates non-saturated pixels
     """
-    # Implementation from processing.py:503
-    # WATCHPOINT: processing.py checks bands 3-5, but docstring says 1-7
-    from ..processing import create_saturation_mask as _create_saturation_mask
-    return _create_saturation_mask(qa_radsat, band=band)
+    # Handle NaN values by treating them as invalid
+    qa_radsat_safe = np.where(np.isnan(qa_radsat), -1, qa_radsat).astype(np.int32)
+
+    if band is not None:
+        # Single band mask
+        if band not in {3, 4, 5}:
+            raise ValueError(f"Band must be 3, 4, or 5, got {band}")
+
+        # Band 3 = bit 2, Band 4 = bit 3, Band 5 = bit 4
+        bit_position = band - 1
+        bit_value = 1 << bit_position
+
+        # Pixel is valid if bit is NOT set
+        mask = (qa_radsat_safe & bit_value) == 0
+
+        # Also mask out original NaN pixels
+        mask = np.where(np.isnan(qa_radsat), False, mask)
+
+    else:
+        # Check all bands - pixel is valid only if NO bands are saturated
+        # Bits 2-4 represent bands 3-5
+        any_saturated_mask = 0b11100  # Bits 2, 3, 4
+
+        # Pixel is valid if none of the saturation bits are set
+        mask = (qa_radsat_safe & any_saturated_mask) == 0
+
+        # Also mask out original NaN pixels
+        mask = np.where(np.isnan(qa_radsat), False, mask)
+
+    return mask
 
 
 def create_water_mask(
@@ -109,8 +161,6 @@ def create_water_mask(
     # NDWI = (Green - NIR) / (Green + NIR)
     # - Water: High green reflectance, low NIR absorption → positive NDWI
     # - Land: Low green reflectance, high NIR absorption → negative NDWI
-    import numpy as np  # CRITICAL FIX: Add missing numpy import
-    
     water_pixels = ndwi > threshold
     
     # Handle NaN values: NaN pixels are neither water nor land, treat as land (False)
@@ -139,9 +189,13 @@ def create_viirs_quality_mask(
     Returns:
         Boolean mask where True indicates good quality pixels
     """
-    # Implementation from processing.py:567
-    from ..processing import create_viirs_quality_mask as _create_viirs_quality_mask
-    return _create_viirs_quality_mask(quality_flag, valid_flags=valid_flags)
+    if valid_flags is None:
+        valid_flags = [0, 2]  # Default: high quality (0) and moderate quality (2)
+
+    # Create mask for valid quality flags
+    mask = np.isin(quality_flag, valid_flags)
+
+    return mask
 
 
 def create_quality_mask(
@@ -165,56 +219,57 @@ def create_quality_mask(
         aerosol_threshold: Aerosol quality threshold
         include_saturation: Whether to include saturation mask
         saturation_bands: List of bands to check for saturation (e.g., [3, 4, 5]).
-            If None, the underlying processing.py function uses its default band selection.
-            CRITICAL: This parameter was missing from our signature but required by
-            processing.py:create_quality_mask. Without it, we cannot properly control
-            which bands are checked for saturation, potentially leading to incorrect
-            masking of valid data or failure to mask saturated pixels.
-            Bug potential: If processing.py expects this parameter and we don't provide
-            it, the function could fail or use wrong defaults.
+            If None, checks all bands.
         include_water: Whether to mask out water pixels
         water_threshold: NDWI threshold for water
         
     Returns:
         Combined quality mask
     """
-    # Implementation adapted from processing.py:411
-    # WATCHPOINT: processing.py doesn't support include_water parameter
-    # We need to handle water masking separately
-    from ..processing import create_quality_mask as _create_quality_mask
-    
-    # Extract QA bands for processing.py (it doesn't handle ndwi)
-    processing_qa_bands = {k: v for k, v in qa_bands.items() if k != "ndwi"}
-    
-    # Call processing.py version
-    # CRITICAL FIX: Pass through saturation_bands parameter properly
-    # Line-by-line expectation analysis:
-    # 1. User expects to control which bands are checked for saturation
-    # 2. processing.py needs this parameter to know which bands to examine
-    # 3. Default None means "use processing.py's default band selection"
-    # 4. If user provides [3, 4, 5], only those bands are checked
-    # 5. Bug risk: Not passing this parameter could cause saturation mask
-    #    to check wrong bands or use hardcoded defaults from processing.py
-    mask = _create_quality_mask(
-        processing_qa_bands,
-        combine_method=combine_method,
-        cloud_strategy=cloud_strategy,
-        cloud_dilate=cloud_dilate,
-        aerosol_threshold=aerosol_threshold,
-        include_saturation=include_saturation,
-        saturation_bands=saturation_bands  # CRITICAL FIX: Pass through user's band selection
-    )
-    
+    masks = []
+
+    # Cloud mask from QA_PIXEL
+    if "qa_pixel" in qa_bands:
+        cloud_mask = create_cloud_mask(
+            qa_bands["qa_pixel"],
+            conservative=(cloud_strategy == "conservative"),
+            dilate_pixels=cloud_dilate,
+        )
+        masks.append(cloud_mask)
+
+    # Aerosol mask from QA_AEROSOL
+    if "qa_aerosol" in qa_bands:
+        aerosol_mask = create_aerosol_mask(
+            qa_bands["qa_aerosol"], threshold=aerosol_threshold
+        )
+        masks.append(aerosol_mask)
+
+    # Radiometric saturation mask from QA_RADSAT
+    if include_saturation and "qa_radsat" in qa_bands:
+        if saturation_bands:
+            # Check specific bands
+            for band in saturation_bands:
+                sat_mask = create_saturation_mask(qa_bands["qa_radsat"], band=band)
+                masks.append(sat_mask)
+        else:
+            # Check all bands (3, 4, 5)
+            sat_mask = create_saturation_mask(qa_bands["qa_radsat"], band=None)
+            masks.append(sat_mask)
+
     # Handle water masking if requested
     if include_water and "ndwi" in qa_bands:
         water_mask = create_water_mask(qa_bands["ndwi"], threshold=water_threshold)
         # Mask out water pixels (water_mask is True for water)
         if combine_method == "and":
-            mask = mask & ~water_mask  # Remove water pixels
+            masks.append(~water_mask)  # Remove water pixels
         else:  # "or"
-            mask = mask | ~water_mask  # Include non-water pixels
-    
-    return mask
+            masks.append(~water_mask)  # Include non-water pixels
+
+    # Combine all masks
+    if not masks:
+        raise ValueError("No QA bands provided for quality masking")
+
+    return combine_masks(masks, method=combine_method)
 
 
 def combine_masks(
@@ -230,9 +285,32 @@ def combine_masks(
     Returns:
         Combined mask
     """
-    # Implementation from processing.py:589
-    from ..processing import combine_masks as _combine_masks
-    return _combine_masks(masks, method=method)
+    if not masks:
+        raise ValueError("No masks provided to combine")
+
+    # Ensure all masks have the same shape
+    shape = masks[0].shape
+    for i, mask in enumerate(masks[1:], 1):
+        if mask.shape != shape:
+            raise ValueError(f"Mask {i} has shape {mask.shape}, expected {shape}")
+
+    # Convert to boolean if needed
+    bool_masks = [mask.astype(bool) if mask.dtype != bool else mask for mask in masks]
+
+    if method == "and":
+        # All masks must be True for pixel to be valid
+        result = bool_masks[0].copy()
+        for mask in bool_masks[1:]:
+            result = result & mask
+    elif method == "or":
+        # Any mask can be True for pixel to be valid
+        result = bool_masks[0].copy()
+        for mask in bool_masks[1:]:
+            result = result | mask
+    else:
+        raise ValueError(f"Unknown combination method: {method}")
+
+    return result
 
 
 def dilate_mask(
@@ -250,11 +328,40 @@ def dilate_mask(
     Returns:
         Dilated mask
     """
-    # Implementation from processing.py:630
-    # WATCHPOINT: processing.py uses 'radius' parameter, not 'pixels'
-    # WATCHPOINT: processing.py doesn't support connectivity parameter
-    from ..processing import dilate_mask as _dilate_mask
-    return _dilate_mask(mask, radius=pixels)
+    if pixels == 0:
+        return mask.copy()
+
+    # Convert to float for processing
+    result = mask.astype(float) if mask.dtype != float else mask.copy()
+
+    # Simple dilation implementation without scipy
+    # This is a basic box filter approach
+    for _ in range(pixels):
+        # Create a temporary mask for this iteration
+        temp_mask = result.copy()
+
+        # For each pixel, if any neighbor is masked (0), mask this pixel too
+        for i in range(mask.shape[0]):
+            for j in range(mask.shape[1]):
+                # Check if any neighbor is masked
+                for di in range(-1, 2):
+                    for dj in range(-1, 2):
+                        ni, nj = i + di, j + dj
+                        # Check bounds
+                        if 0 <= ni < mask.shape[0] and 0 <= nj < mask.shape[1]:
+                            if result[ni, nj] == 0:
+                                temp_mask[i, j] = 0
+                                break
+                    if temp_mask[i, j] == 0:
+                        break
+
+        result = temp_mask
+
+    # Return same type as input
+    if mask.dtype == bool:
+        return result.astype(bool)
+    else:
+        return result
 
 
 def compute_quality_flags(
@@ -276,15 +383,36 @@ def compute_quality_flags(
     Returns:
         Boolean mask where True indicates good quality pixels
     """
-    # Implementation from bm_algorithms.py:375
-    from ..bm_algorithms import compute_quality_flags as _compute_quality_flags
-    return _compute_quality_flags(
-        qa_pixel,
-        qa_aerosol=qa_aerosol,
-        qa_radsat=qa_radsat,
-        cloud_values=cloud_values,
-        aerosol_values=aerosol_values
-    )
+    if cloud_values is None:
+        # Keep only clear land (21824) and clear water (21952)
+        cloud_values = (
+            list(range(1, 21823)) + 
+            list(range(21825, 21951)) + 
+            list(range(21953, 65535))
+        )
+    
+    if aerosol_values is None:
+        # These values indicate valid aerosol conditions
+        aerosol_values = [192, 194, 196, 228]
+    
+    # Create cloud mask (True = good pixel)
+    cloud_mask = ~np.isin(qa_pixel, cloud_values)
+    
+    # Combine with aerosol mask if provided
+    if qa_aerosol is not None:
+        aerosol_mask = np.isin(qa_aerosol, aerosol_values)
+        quality_mask = cloud_mask & aerosol_mask
+    else:
+        quality_mask = cloud_mask
+    
+    # Add saturation check if provided
+    if qa_radsat is not None:
+        # Check if any bands are saturated (bits 1-7)
+        # Bit 0 is "band 1 data quality" which we ignore
+        saturation_mask = qa_radsat == 0
+        quality_mask = quality_mask & saturation_mask
+    
+    return quality_mask
 
 
 def create_urban_mask(
@@ -308,16 +436,17 @@ def create_urban_mask(
     Returns:
         Boolean mask where True indicates urban pixels
     """
-    # Implementation from bm_algorithms.py:259
-    from ..bm_algorithms import create_urban_mask as _create_urban_mask
-    return _create_urban_mask(
-        ndvi,
-        ndwi,
-        ndui,
-        ndvi_threshold=ndvi_threshold,
-        ndwi_threshold=ndwi_threshold,
-        ndui_threshold=ndui_threshold
+    # Urban criteria:
+    # - Low vegetation (NDVI < threshold)
+    # - Not water (NDWI < threshold)
+    # - High urban index (NDUI > threshold)
+    urban_mask = (
+        (ndvi < ndvi_threshold) & 
+        (ndwi < ndwi_threshold) & 
+        (ndui > ndui_threshold)
     )
+    
+    return urban_mask
 
 
 def compute_mask_statistics(
@@ -338,7 +467,6 @@ def compute_mask_statistics(
         - mask_coverage: Spatial coverage metrics
     """
     # New implementation based on QualityStatistics from components
-    import numpy as np
     
     # Convert to boolean if needed
     bool_mask = mask.astype(bool) if mask.dtype != bool else mask

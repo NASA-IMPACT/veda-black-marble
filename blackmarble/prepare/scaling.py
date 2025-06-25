@@ -5,6 +5,7 @@ applying atmospheric corrections, and lunar illumination corrections.
 """
 
 from typing import Any
+import numpy as np
 import numpy.typing as npt
 
 # Type aliases
@@ -28,14 +29,20 @@ def scale_landsat_bands(
     Returns:
         Scaled surface reflectance values
     """
-    # Implementation from bm_algorithms.py:187
-    from ..bm_algorithms import scale_landsat_bands as _scale_landsat_bands
-    return _scale_landsat_bands(
-        band_data,
-        scale_factor=scale_factor,
-        add_offset=add_offset,
-        valid_range=valid_range
-    )
+    if valid_range is None:
+        valid_range = (7273, 43636)
+    
+    # Mask invalid values
+    band_masked = np.where(band_data < valid_range[0], 0, band_data)
+    band_masked = np.where(band_masked > valid_range[1], 0, band_masked)
+    
+    # Apply scale and offset
+    reflectance = band_masked * scale_factor + add_offset
+    
+    # Mask out-of-range DN values
+    reflectance = np.where(band_masked == 0, np.nan, reflectance)
+    
+    return reflectance
 
 
 def detect_if_already_scaled(
@@ -53,7 +60,6 @@ def detect_if_already_scaled(
     """
     # Based on logic from calculations.py:248
     # Check if data is already reflectance (values between -0.5 and threshold)
-    import numpy as np
     data_min = np.nanmin(band_data)
     data_max = np.nanmax(band_data)
     
@@ -77,13 +83,16 @@ def apply_lunar_correction(
     Returns:
         Lunar-corrected radiance values
     """
-    # Implementation from bm_algorithms.py:224
-    from ..bm_algorithms import apply_lunar_correction as _apply_lunar_correction
-    return _apply_lunar_correction(
-        vnp_data,
-        lunar_irradiance,
-        moon_illumination_fraction=moon_illumination_fraction
-    )
+    # Basic correction: subtract lunar contribution
+    corrected = vnp_data - lunar_irradiance
+    
+    # Ensure non-negative
+    corrected = np.where(corrected < 0, 0, corrected)
+    
+    # Advanced correction could be implemented here using moon_illumination_fraction
+    # and surface BRDF models
+    
+    return corrected
 
 
 def calculate_ntli(
@@ -103,14 +112,24 @@ def calculate_ntli(
     Returns:
         Lunar-corrected nighttime light radiance
     """
-    # Implementation from bm_algorithms.py:143
-    from ..bm_algorithms import calculate_ntli as _calculate_ntli
-    return _calculate_ntli(
-        vnp_radiance,
-        lunar_irradiance,
-        quality_flag,
-        valid_flags=valid_flags
-    )
+    if valid_flags is None:
+        valid_flags = [0, 2]
+    
+    # Handle fill values
+    vnp_clean = np.where(vnp_radiance > 65530, 0, vnp_radiance)
+    lunar_clean = np.where(lunar_irradiance > 65530, 0, lunar_irradiance)
+    
+    # Create quality mask
+    quality_mask = np.isin(quality_flag, valid_flags)
+    
+    # Apply lunar correction
+    lunar_corrected = vnp_clean - lunar_clean
+    
+    # Set invalid pixels to 0
+    lunar_corrected = np.where(quality_mask, lunar_corrected, 0)
+    lunar_corrected = np.where(lunar_corrected < 0, 0, lunar_corrected)
+    
+    return lunar_corrected
 
 
 def apply_viirs_floor_ceiling(
@@ -129,7 +148,6 @@ def apply_viirs_floor_ceiling(
         Thresholded NTL data
     """
     # Based on logic from bm_algorithms.py:119 (NDUI calculation)
-    import numpy as np
     
     # Apply ceiling first (clip values above ceiling)
     ntl_processed = np.where(ntl_data > ceiling_value, ceiling_value, ntl_data)
@@ -159,16 +177,20 @@ def normalize_to_range(
     Returns:
         Normalized data
     """
-    # Implementation from calculations.py:316
-    # WATCHPOINT: Parameter names differ - output_min/max vs out_min/max
-    from ..calculations import normalize_to_range as _normalize_to_range
-    return _normalize_to_range(
-        data,
-        output_min=out_min,
-        output_max=out_max,
-        input_min=in_min,
-        input_max=in_max
-    )
+    if in_min is None:
+        in_min = float(np.nanmin(data))
+    if in_max is None:
+        in_max = float(np.nanmax(data))
+
+    # Handle case where all values are the same
+    if in_max == in_min:
+        return np.full_like(data, (out_min + out_max) / 2)
+
+    # Linear scaling
+    scaled = (data - in_min) / (in_max - in_min)
+    scaled = scaled * (out_max - out_min) + out_min
+
+    return scaled
 
 
 def scale_to_byte(
@@ -186,12 +208,31 @@ def scale_to_byte(
     Returns:
         Scaled uint8 array
     """
-    # Implementation from processing.py:806
-    # WATCHPOINT: Parameter names differ - min_value/max_value vs in_min/in_max
-    from ..processing import scale_to_byte as _scale_to_byte
-    return _scale_to_byte(
-        data,
-        min_value=in_min,
-        max_value=in_max,
-        nodata_value=0  # Default nodata value
-    )
+    # Handle NaN values
+    valid_mask = ~np.isnan(data)
+
+    if not np.any(valid_mask):
+        # No valid data
+        return np.full(data.shape, 0, dtype=np.uint8)
+
+    # Auto-detect range if not provided
+    if in_min is None:
+        in_min = float(np.nanmin(data))
+    if in_max is None:
+        in_max = float(np.nanmax(data))
+
+    # Normalize to 0-1
+    if in_max > in_min:
+        normalized = (data - in_min) / (in_max - in_min)
+    else:
+        normalized = np.zeros_like(data)
+
+    # Scale to 0-255
+    scaled = normalized * 255
+
+    # Convert to uint8
+    result = np.zeros(data.shape, dtype=np.uint8)
+    result[valid_mask] = np.clip(np.round(scaled[valid_mask]), 0, 255).astype(np.uint8)
+    result[~valid_mask] = 0  # nodata value
+
+    return result
