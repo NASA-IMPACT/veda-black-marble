@@ -3,6 +3,9 @@ import os
 from datetime import datetime
 from pathlib import Path
 import typer
+import traceback
+from blackmarble.pipeline import black_marble_pipeline
+from blackmarble.config import PipelineConfig
 
 app = typer.Typer(
     help="Command-line interface for the VEDA Black Marble processing pipeline."
@@ -67,8 +70,6 @@ def run(
     - Urban index calculation (NDUI)
     - Cloud-optimized GeoTIFF output
     """
-    from blackmarble.pipeline import black_marble_pipeline
-    from blackmarble.config import PipelineConfig
     
     # Validate earthdata token
     if not earthdata_token:
@@ -168,7 +169,6 @@ def run(
             
     except Exception as e:
         typer.echo(f"\n❌ Pipeline failed: {str(e)}", err=True)
-        import traceback
         typer.echo(f"Traceback:\n{traceback.format_exc()}", err=True)
         raise typer.Exit(code=1)
 

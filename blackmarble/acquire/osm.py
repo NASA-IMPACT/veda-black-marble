@@ -8,16 +8,16 @@ from typing import Any, Literal
 import numpy.typing as npt
 import numpy as np
 import rasterio
+import rasterio.features
 from rasterio.crs import CRS
 from rasterio.warp import transform_geom, transform_bounds
 from shapely.geometry import shape, mapping
+from shapely.geometry import mapping as geom_to_dict
 from shapely.ops import transform
 import pyproj
 import shapely
-
 import osmnx as ox
 import networkx as nx
-import rasterio.features
 
 # Type aliases
 BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
@@ -427,7 +427,6 @@ def rasterize_road_shapes_with_crs(
     height, width = shape
     
     # Use rasterio.features.rasterize directly for more control
-    import rasterio.features
     raster = rasterio.features.rasterize(
         [(s['geometry'], s['value']) for s in reprojected_shapes],
         out_shape=(height, width),
@@ -619,9 +618,6 @@ def buffer_and_rasterize_roads(
         ...     graph, bbox, transform, "EPSG:3857", (200, 200), 30.0
         ... )
     """
-    import osmnx as ox
-    from shapely.geometry import mapping as geom_to_dict
-    
     # Get edges as GeoDataFrame for road type classification
     _, edges_gdf = ox.graph_to_gdfs(graph)
     

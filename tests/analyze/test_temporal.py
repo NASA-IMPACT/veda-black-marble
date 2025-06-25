@@ -1,84 +1,58 @@
-"""Test critical temporal compositing functions for bm.py parity.
+"""Test temporal analysis functions."""
 
-This module tests only the essential temporal functionality needed for bm.py parity.
-"""
-
-import pytest
 import numpy as np
-from datetime import datetime, timedelta
+import pytest
 
-from blackmarble.analyze.temporal import (
-    create_temporal_composite,
-    compute_temporal_statistics,
-)
+from blackmarble.analyze.temporal import create_landsat_median_composite
 
 
-def test_create_temporal_composite():
-    """Test temporal composite creation - CRITICAL for multi-date processing."""
-    # Create test data stack (3 dates, 3x3 pixels)
-    data_stack = np.array([
-        [[1, 2, 3], [4, 5, 6], [7, 8, 9]],      # Date 1
-        [[2, 3, 4], [5, 6, 7], [8, 9, 10]],    # Date 2
-        [[3, 4, 5], [6, 7, 8], [9, 10, 11]]    # Date 3
-    ])
+def test_create_landsat_median_composite():
+    """Test median composite creation."""
+    # Create test data with 3 dates
+    date1 = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.float32)
+    date2 = np.array([[2, 3, 4], [5, 6, 7]], dtype=np.float32)
+    date3 = np.array([[3, 4, 5], [6, 7, 8]], dtype=np.float32)
     
-    # Test median composite (default)
-    median_composite, count, metadata = create_temporal_composite(
-        data_stack,
-        method='median'
-    )
+    composite = create_landsat_median_composite([date1, date2, date3])
     
-    # Verify median calculation
-    assert median_composite.shape == (3, 3)
-    assert median_composite[0, 0] == 2  # Median of [1, 2, 3]
-    assert median_composite[1, 1] == 6  # Median of [5, 6, 7]
-    
-    # Test mean composite
-    mean_composite, _, _ = create_temporal_composite(
-        data_stack,
-        method='mean'
-    )
-    
-    assert mean_composite[0, 0] == 2  # Mean of [1, 2, 3]
+    # Should get median values
+    expected = np.array([[2, 3, 4], [5, 6, 7]], dtype=np.float32)
+    np.testing.assert_array_equal(composite, expected)
 
 
-def test_percentile_composite():
-    """Test percentile composite via create_temporal_composite."""
-    # Create test data
-    data_stack = np.array([
-        [[1, 5, 9], [2, 6, 10], [3, 7, 11]],
-        [[2, 6, 10], [3, 7, 11], [4, 8, 12]],
-        [[3, 7, 11], [4, 8, 12], [5, 9, 13]],
-        [[4, 8, 12], [5, 9, 13], [6, 10, 14]],
-        [[5, 9, 13], [6, 10, 14], [7, 11, 15]]
-    ])
+def test_create_landsat_median_composite_with_nan():
+    """Test median composite with NaN values."""
+    # Create test data with NaN (masked pixels)
+    date1 = np.array([[1, np.nan, 3], [4, 5, np.nan]], dtype=np.float32)
+    date2 = np.array([[2, 3, np.nan], [np.nan, 6, 7]], dtype=np.float32)
+    date3 = np.array([[3, 4, 5], [6, np.nan, 8]], dtype=np.float32)
     
-    # Test percentile via create_temporal_composite
-    p50, _, _ = create_temporal_composite(data_stack, method='median')
-    assert p50[0, 0] == 3  # Median of [1,2,3,4,5]
+    composite = create_landsat_median_composite([date1, date2, date3])
+    
+    # Should handle NaN correctly
+    assert composite[0, 0] == 2  # median of [1, 2, 3]
+    assert composite[0, 1] == 3.5  # median of [nan, 3, 4]
+    assert composite[0, 2] == 4  # median of [3, nan, 5]
+    assert composite[1, 0] == 5  # median of [4, nan, 6]
+    assert composite[1, 1] == 5.5  # median of [5, 6, nan]
+    assert composite[1, 2] == 7.5  # median of [nan, 7, 8]
 
 
-def test_compute_temporal_statistics():
-    """Test temporal statistics calculation - needed for quality assessment."""
-    # Create test data
-    data_stack = np.array([
-        [[1, 2, 3], [4, 5, 6]],
-        [[2, 3, 4], [5, 6, 7]],
-        [[3, 4, 5], [6, 7, 8]]
-    ])
+def test_create_landsat_median_composite_different_shapes():
+    """Test median composite with different input shapes."""
+    # Create test data with different shapes
+    date1 = np.ones((10, 10))
+    date2 = np.ones((12, 8)) * 2
+    date3 = np.ones((9, 11)) * 3
     
-    # Calculate statistics
-    stats = compute_temporal_statistics(data_stack)
+    composite = create_landsat_median_composite([date1, date2, date3])
     
-    # Verify statistics
-    assert 'mean' in stats
-    assert 'std' in stats
-    assert 'min' in stats
-    assert 'max' in stats
-    assert 'count' in stats
-    
-    # Check values
-    assert stats['mean'][0, 0] == 2  # Mean of [1, 2, 3]
-    assert stats['min'][0, 0] == 1
-    assert stats['max'][0, 0] == 3
-    assert stats['count'][0, 0] == 3  # 3 valid observations
+    # Should crop to minimum common size
+    assert composite.shape == (9, 8)
+    assert composite[0, 0] == 2  # median of [1, 2, 3]
+
+
+def test_create_landsat_median_composite_empty_list():
+    """Test error handling for empty input."""
+    with pytest.raises(ValueError, match="No data provided"):
+        create_landsat_median_composite([])

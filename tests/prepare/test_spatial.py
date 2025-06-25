@@ -18,75 +18,70 @@ from blackmarble.prepare.spatial import (
 def test_reproject_image():
     """Test image reprojection - CRITICAL for coordinate system alignment."""
     # Create test raster data
-    raster = {
-        'data': np.ones((10, 10), dtype=np.float32),
-        'transform': from_bounds(0, 0, 10, 10, 10, 10),
-        'crs': CRS.from_epsg(4326)
-    }
-    
+    data = np.ones((10, 10), dtype=np.float32)
+    transform = from_bounds(0, 0, 10, 10, 10, 10)
+    src_crs = CRS.from_epsg(4326)
     dst_crs = CRS.from_epsg(3857)  # Web Mercator
     
     # Reproject
-    reprojected = reproject_image(
-        raster,
+    reprojected_data, new_transform, new_bounds = reproject_image(
+        data,
+        transform,
+        src_crs,
         dst_crs,
         resampling='nearest'
     )
     
     # Basic validation
-    assert reprojected['data'].shape[0] > 0
-    assert reprojected['data'].shape[1] > 0
-    assert not np.all(np.isnan(reprojected['data']))
-    assert reprojected['transform'] is not None
-    assert reprojected['crs'] == dst_crs
+    assert reprojected_data.shape[0] > 0
+    assert reprojected_data.shape[1] > 0
+    assert not np.all(np.isnan(reprojected_data))
+    assert new_transform is not None
+    assert new_bounds is not None
 
 
 def test_crop_to_bounds():
     """Test cropping to bounds - CRITICAL for area of interest extraction."""
     # Create test raster
-    raster = {
-        'data': np.arange(100).reshape(10, 10).astype(np.float32),
-        'transform': from_bounds(0, 0, 10, 10, 10, 10),
-        'crs': CRS.from_epsg(4326)
-    }
+    data = np.arange(100).reshape(10, 10).astype(np.float32)
+    transform = from_bounds(0, 0, 10, 10, 10, 10)
     
     # Define crop bounds (center region)
     bounds = (3, 3, 7, 7)
     
     # Crop
-    cropped = crop_to_bounds(raster, bounds)
+    cropped_data, new_transform, actual_bounds = crop_to_bounds(data, transform, bounds)
     
     # Verify shape is smaller
-    assert cropped['data'].shape[0] < raster['data'].shape[0]
-    assert cropped['data'].shape[1] < raster['data'].shape[1]
+    assert cropped_data.shape[0] < data.shape[0]
+    assert cropped_data.shape[1] < data.shape[1]
     
     # Verify transform is updated
-    assert cropped['transform'] != raster['transform']
+    assert new_transform != transform
+    assert actual_bounds is not None
 
 
 def test_align_rasters():
     """Test raster alignment - needed for multi-source data integration."""
     # Create two misaligned rasters
-    raster1 = {
-        'data': np.ones((10, 10)),
-        'transform': from_bounds(0, 0, 10, 10, 10, 10),
-        'crs': CRS.from_epsg(4326)
-    }
+    data1 = np.ones((10, 10))
+    transform1 = from_bounds(0, 0, 10, 10, 10, 10)
     
-    raster2 = {
-        'data': np.ones((8, 8)) * 2,
-        'transform': from_bounds(1, 1, 9, 9, 8, 8),
-        'crs': CRS.from_epsg(4326)
-    }
+    data2 = np.ones((8, 8)) * 2
+    transform2 = from_bounds(1, 1, 9, 9, 8, 8)
     
     # Align rasters
     aligned = align_rasters(
-        [raster1, raster2],
-        target_crs=CRS.from_epsg(4326)
+        rasters=[data1, data2],
+        transforms=[transform1, transform2],
+        crs_list=["EPSG:4326", "EPSG:4326"],
+        reference_idx=0
     )
     
     # Verify alignment
     assert len(aligned) == 2
-    assert aligned[0]['data'].shape == aligned[1]['data'].shape
-    assert aligned[0]['transform'] == aligned[1]['transform']
-    assert aligned[0]['crs'] == aligned[1]['crs']
+    aligned_data1, aligned_transform1 = aligned[0]
+    aligned_data2, aligned_transform2 = aligned[1]
+    
+    assert aligned_data1.shape == aligned_data2.shape
+    assert np.array_equal(aligned_transform1, aligned_transform2)

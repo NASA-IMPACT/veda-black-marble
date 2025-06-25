@@ -10,12 +10,14 @@ import tempfile
 from typing import Any
 import numpy.typing as npt
 from datetime import datetime, timedelta
+from importlib.resources import files
 
 import boto3
 import collections
-from datetime import datetime
 import shapely.geometry
 from shapely.geometry import shape, Point
+import fiona
+import rasterio
 
 # Global cache for S3 directory listings to improve performance
 _DIR_CACHE: collections.OrderedDict[str, list[dict[str, str]]] = collections.OrderedDict()
@@ -43,14 +45,10 @@ def load_wrs_shapefile(shapefile_path: str | None = None) -> list[tuple[shapely.
         ImportError: If Fiona is not available
         FileNotFoundError: If shapefile doesn't exist
     """
-    try:
-        import fiona
-    except ImportError:
-        raise ImportError("Fiona is required for WRS shapefile processing. Install with: uv add fiona")
+    # Fiona import handled at module level
     
     # Use bundled default if none provided
     if shapefile_path is None:
-        from importlib.resources import files
         shapefile_path = str(files("blackmarble").joinpath("data", "WRS2_descending_0", "WRS2_descending.shp"))
     
     polygons = []
@@ -345,10 +343,7 @@ def get_landsat_band_metadata(file_path: str) -> dict[str, Any]:
     Raises:
         ValueError: If file cannot be opened or lacks required metadata
     """
-    try:
-        import rasterio
-    except ImportError:
-        raise ImportError("rasterio is required for metadata extraction. Install with: uv add rasterio")
+    # Rasterio import handled at module level
     
     with rasterio.open(file_path) as src:
         # Extract basic raster properties

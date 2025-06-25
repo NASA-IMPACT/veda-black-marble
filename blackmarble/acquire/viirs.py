@@ -10,6 +10,7 @@ import numpy.typing as npt
 import os
 import requests
 import shutil
+from osgeo import gdal
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -351,10 +352,7 @@ def convert_viirs_hdf_to_tiff(
         if not header.startswith(b'\x89HDF'):
             print(f"Warning: {hdf_file} does not have HDF5 magic number. Header: {header[:20]}")
     
-    try:
-        from osgeo import gdal
-    except ImportError:
-        raise ImportError("GDAL is required for HDF5 to GeoTIFF conversion. Install with: uv add gdal")
+    # GDAL import handled at module level
     
     # Open the HDF5 file using GDAL
     hdf_dataset = gdal.Open(hdf_file, gdal.GA_ReadOnly)
@@ -558,7 +556,6 @@ def read_viirs_with_rasterio(
     """
     # The rasterio implementation doesn't have a separate read function
     # We'll implement it directly here
-    from osgeo import gdal
     
     # Map layer names to subdataset indices
     layer_map = {
@@ -875,7 +872,6 @@ def get_viirs_metadata(hdf_file: str) -> dict[str, Any]:
         Dictionary containing acquisition date, tile info, quality stats, etc.
     """
     # Extract metadata using GDAL
-    from osgeo import gdal
     
     # Open HDF5 file
     ds = gdal.Open(hdf_file)

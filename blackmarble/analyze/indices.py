@@ -5,6 +5,8 @@ and derived products used in the Black Marble algorithm.
 """
 
 from typing import Any
+
+import numpy as np
 import numpy.typing as npt
 
 # Type aliases
@@ -58,7 +60,6 @@ def calculate_ndvi(
         suitable for masked data. Output is NOT clamped to [-1, 1] to
         preserve extreme values that may indicate processing issues.
     """
-    import numpy as np
     
     # Input validation
     if nir.shape != red.shape:
@@ -126,7 +127,6 @@ def calculate_ndwi(
         NDWI is used extensively in the prepare.quality module for
         water masking operations. Positive values indicate water presence.
     """
-    import numpy as np
     
     # Input validation
     if green.shape != nir.shape:
@@ -212,7 +212,6 @@ def calculate_ndui(
         This is the signature index of the Black Marble algorithm.
         Parameter tuning significantly affects urban detection accuracy.
     """
-    import numpy as np
     
     # Input validation
     if ntl.shape != ndvi.shape:

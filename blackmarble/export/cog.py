@@ -6,6 +6,14 @@ compression, and overview levels for efficient cloud-based access.
 
 from typing import Any, Literal
 import numpy.typing as npt
+import numpy as np
+import os
+import rasterio
+from rasterio.crs import CRS as RioCRS
+from rasterio.io import MemoryFile
+from rasterio.shutil import copy
+from rasterio.enums import Resampling
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -48,13 +56,6 @@ def create_cog(
     Returns:
         Path to created COG file
     """
-    import numpy as np
-    import rasterio
-    from rasterio.crs import CRS as RioCRS
-    from rasterio.io import MemoryFile
-    from rasterio.shutil import copy
-    from rasterio.enums import Resampling
-    import os
     
     # Ensure output directory exists
     output_dir = os.path.dirname(os.path.abspath(output_path))
@@ -231,7 +232,6 @@ def export_single_band(
     Returns:
         Path to created file
     """
-    import numpy as np
     
     data = np.asarray(data)
     if data.ndim != 2:
@@ -279,7 +279,6 @@ def export_multi_band(
     Returns:
         Path to created file
     """
-    import numpy as np
     
     if not bands:
         raise ValueError("No bands provided")
@@ -327,8 +326,6 @@ def create_overviews(
         levels: Overview levels (default: [2, 4, 8, 16])
         resampling: Resampling method
     """
-    import rasterio
-    from rasterio.enums import Resampling
     
     if levels is None:
         levels = [2, 4, 8, 16, 32]
@@ -371,10 +368,6 @@ def optimize_for_web(
     Returns:
         Path to optimized file
     """
-    import rasterio
-    from rasterio.shutil import copy
-    from rasterio.enums import Resampling
-    import numpy as np
     
     with rasterio.open(input_path) as src:
         # Read profile and update for COG
@@ -439,8 +432,6 @@ def batch_export_cogs(
     Returns:
         Dict mapping names to output file paths
     """
-    import os
-    from concurrent.futures import ProcessPoolExecutor, as_completed
     
     os.makedirs(output_dir, exist_ok=True)
     
