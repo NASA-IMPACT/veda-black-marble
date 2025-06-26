@@ -15,32 +15,56 @@ from typing import Any, Literal, cast
 import os
 import numpy as np
 import numpy.typing as npt
+import logging
 
 from .config import PipelineConfig
 from . import acquire, prepare, analyze, enhance, export
+from .pipeline_async import black_marble_pipeline_async
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
 BBox = tuple[float, float, float, float]
+
+logger = logging.getLogger(__name__)
 
 
 def black_marble_pipeline(
     bbox: BBox,
     date: datetime,
     output_path: str,
-    config: PipelineConfig | None = None
+    config: PipelineConfig | None = None,
+    use_async: bool = True,
+    earthdata_token: str | None = None
 ) -> dict[str, Any]:
     """Main Black Marble processing pipeline.
+    
+    By default, uses async downloads for maximum performance. Set use_async=False
+    to use the original sequential download approach.
     
     Args:
         bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
         date: Target date for processing
         output_path: Where to save the final output
         config: Optional configuration overrides
+        use_async: Use async downloads (default: True)
+        earthdata_token: NASA Earthdata token (or set EARTHDATA_TOKEN env var)
         
     Returns:
         Dictionary with results and metadata
     """
+    # Default to async pipeline for better performance
+    if use_async:
+        logger.info("Using async pipeline with front-loaded downloads")
+        return black_marble_pipeline_async(
+            bbox=bbox,
+            date=date,
+            output_path=output_path,
+            config=config,
+            earthdata_token=earthdata_token
+        )
+    
+    # Original sequential pipeline
+    logger.info("Using sequential pipeline (legacy mode)")
     
     # ==================== ACQUIRE PHASE ====================
     # Get all the data we need from various sources
@@ -239,8 +263,13 @@ def black_marble_pipeline(
         # No need for nodata handling or lunar correction
         # Values are in nW/cm²/sr units
         
+        # The gap-filled product already incorporates quality filtering
+        # by using the best available pixels from recent observations
+        viirs_corrected = viirs_ntl
+        
+        # OLD CODE - No longer needed with gap-filled product:
         # Apply quality masking if available
-        if viirs_data.get('quality'):
+        if False and viirs_data.get('quality'):
             # Create VRT mosaic for quality if we have multiple tiles
             if len(viirs_data['quality']) > 1:
                 print(f"Creating VRT mosaic for {len(viirs_data['quality'])} VIIRS quality tiles")

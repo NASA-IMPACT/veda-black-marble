@@ -19,12 +19,9 @@ from .validate import (
 )
 
 __all__ = [
-    # COG functions (used by pipeline)
     "create_cog",
     "export_multi_band",
     "export_single_band",
-    # Metadata functions (used by pipeline)
     "create_metadata",
-    # Validation functions (used by pipeline)
     "validate_for_cog",
 ]

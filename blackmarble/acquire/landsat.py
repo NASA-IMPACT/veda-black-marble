@@ -72,7 +72,7 @@ def load_wrs_shapefile(shapefile_path: str | None = None) -> list[tuple[shapely.
     return polygons
 
 
-def get_wrs_path_row(
+def get_wrs_tiles_for_point(
     lat: float, 
     lon: float, 
     wrs_polygons: list[tuple[shapely.geometry.Polygon, int, int]] | None = None
@@ -92,7 +92,7 @@ def get_wrs_path_row(
         List of dicts with 'path' and 'row' keys (can be multiple for overlap areas)
         
     Example:
-        >>> get_wrs_path_row(40.7, -74.0)  # Manhattan, NY
+        >>> get_wrs_tiles_for_point(40.7, -74.0)  # Manhattan, NY
         [{'path': 14, 'row': 32}]
     """
     # Load WRS polygons if not provided (allows caching by caller)
@@ -109,6 +109,84 @@ def get_wrs_path_row(
             results.append({"path": path, "row": row})
     
     return results
+
+
+def get_wrs_tiles_for_bbox_tuple(
+    bbox: BBox,
+    wrs_polygons: list[tuple[shapely.geometry.Polygon, int, int]] | None = None
+) -> list[dict[str, int]]:
+    """Get all Landsat WRS-2 tiles that intersect with a bounding box.
+    
+    This function finds ALL tiles that have any overlap with the specified
+    bounding box, not just tiles that contain specific points. This ensures
+    complete coverage of the area of interest.
+    
+    Args:
+        bbox: Bounding box as (min_lon, min_lat, max_lon, max_lat)
+        wrs_polygons: Pre-loaded WRS polygons, or None to load from default shapefile
+        
+    Returns:
+        List of unique dicts with 'path' and 'row' keys
+        
+    Example:
+        >>> get_wrs_tiles_for_bbox((-74.1, 40.6, -73.9, 40.8))  # NYC area
+        [{'path': 13, 'row': 32}, {'path': 14, 'row': 32}, {'path': 14, 'row': 33}]
+    """
+    from shapely.geometry import box
+    
+    # Load WRS polygons if not provided
+    if wrs_polygons is None:
+        wrs_polygons = load_wrs_shapefile()
+    
+    # Create bounding box polygon
+    min_lon, min_lat, max_lon, max_lat = bbox
+    bbox_polygon = box(min_lon, min_lat, max_lon, max_lat)
+    
+    # Find all WRS tiles that intersect with the bounding box
+    results = []
+    seen_tiles = set()  # Track unique path/row combinations
+    
+    for polygon, path, row in wrs_polygons:
+        if polygon.intersects(bbox_polygon):
+            tile_key = (path, row)
+            if tile_key not in seen_tiles:
+                seen_tiles.add(tile_key)
+                results.append({"path": path, "row": row})
+    
+    # Sort by path then row for consistent ordering
+    results.sort(key=lambda x: (x['path'], x['row']))
+    
+    return results
+
+
+def get_wrs_path_row(lat: float, lon: float) -> tuple[int, int]:
+    """Get WRS-2 path and row for given coordinates.
+    
+    Args:
+        lat: Latitude
+        lon: Longitude
+        
+    Returns:
+        Tuple of (path, row)
+    """
+    # Use the proper shapefile-based function
+    results = get_wrs_tiles_for_point(lat, lon, None)
+    
+    if results:
+        # Return first result as tuple
+        return results[0]['path'], results[0]['row']
+    else:
+        # Fallback calculation for areas not covered
+        # Fixed calculation based on actual WRS-2 grid
+        # WRS-2 paths increase westward, rows increase southward
+        path = int((184.5 - lon) % 233) + 1
+        row = int((90 - lat) / 1.42) + 1
+        
+        # Clamp to valid ranges
+        path = max(1, min(233, path))
+        row = max(1, min(248, row))
+        
+        return path, row
 
 
 def filter_landsat_scenes(

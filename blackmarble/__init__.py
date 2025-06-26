@@ -7,7 +7,6 @@ OSM road enhancement, and urban index calculation.
 
 __version__ = "0.1.0"
 
-# Export main pipeline function for convenience
 from .pipeline import black_marble_pipeline
 from .config import PipelineConfig
 

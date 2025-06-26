@@ -12,15 +12,22 @@ from .contrast import (
     normalize_data,
 )
 
+from .features import (
+    enhance_roads,
+    enhance_urban_features,
+)
+
 from .visualize import (
     apply_inferno_colormap,
+    create_false_color_composite,
 )
 
 __all__ = [
-    # Contrast functions (used by pipeline)
     "chain_enhancements",
     "enhance_contrast",
     "normalize_data",
-    # Visualization functions (used by pipeline)
+    "enhance_roads",
+    "enhance_urban_features",
     "apply_inferno_colormap",
+    "create_false_color_composite",
 ]

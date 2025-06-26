@@ -1,0 +1,351 @@
+"""Async downloader for VIIRS nighttime lights data from NASA LAADS."""
+
+import asyncio
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import List, Dict, Any, Optional, Tuple
+import logging
+
+import aiohttp
+
+from .async_base import (
+    AsyncDownloaderBase,
+    DownloadConfig,
+    DownloadStatus,
+    RateLimiter,
+    DownloadResult,
+    DownloadProgressTracker
+)
+
+
+logger = logging.getLogger(__name__)
+
+
+class AsyncVIIRSDownloader(AsyncDownloaderBase):
+    """Async downloader for VIIRS VNP46A2 data from NASA LAADS"""
+    
+    # API endpoints
+    BASE_URL = "https://ladsweb.modaps.eosdis.nasa.gov"
+    SEARCH_URL = f"{BASE_URL}/api/v2/content/details"
+    
+    def __init__(
+        self,
+        bearer_token: str,
+        config: Optional[DownloadConfig] = None,
+        rate_limiter: Optional[RateLimiter] = None,
+        progress_callback = None
+    ):
+        """
+        Args:
+            bearer_token: NASA Earthdata bearer token
+            config: Download configuration
+            rate_limiter: Rate limiter (default: 3 requests/second)
+            progress_callback: Progress callback function
+        """
+        if config is None:
+            config = DownloadConfig(
+                max_concurrent=3,
+                timeout_seconds=600,
+                chunk_size=8192,
+                max_retries=3
+            )
+        
+        if rate_limiter is None:
+            rate_limiter = RateLimiter(rate=3.0, burst=5)
+        
+        super().__init__(config, rate_limiter, progress_callback)
+        
+        self.bearer_token = bearer_token
+        
+        # Update headers with authorization
+        self.config.headers.update({
+            "Authorization": f"Bearer {bearer_token}",
+            "User-Agent": "BlackMarble/1.0"
+        })
+    
+    async def find_viirs_files(
+        self,
+        date: datetime,
+        tiles: List[str]
+    ) -> List[Dict[str, Any]]:
+        """
+        Find VIIRS VNP46A2 files for given date and tiles.
+        
+        Args:
+            date: Target date
+            tiles: List of tile IDs (e.g., ['h08v05', 'h09v05'])
+            
+        Returns:
+            List of file metadata dictionaries
+        """
+        # Convert date to day-of-year format required by NASA API
+        day_of_year = date.timetuple().tm_yday
+        year = date.year
+        
+        # Use the same API endpoint as the synchronous version
+        api_url = f"{self.BASE_URL}/api/v2/content/details/allData/5000/VNP46A2/{year}/{day_of_year}"
+        
+        self.logger.info(f"Querying NASA LAADS API: {api_url}")
+        
+        # Apply rate limiting
+        if self.rate_limiter:
+            await self.rate_limiter.acquire()
+        
+        async with self._session.get(api_url) as response:
+            response.raise_for_status()
+            data = await response.json()
+        
+        # Filter for requested tiles
+        files = []
+        if "content" in data:
+            for file_info in data["content"]:
+                filename = file_info.get("name", "")
+                # Check if file matches any requested tile
+                for tile in tiles:
+                    if f".{tile}." in filename:
+                        # Get the download link from the API response
+                        download_link = file_info.get("downloadsLink")
+                        if not download_link:
+                            self.logger.warning(f"No downloadsLink found for {filename}")
+                            continue
+                            
+                        files.append({
+                            "filename": filename,
+                            "url": download_link,
+                            "size": file_info.get("size", 0),
+                            "tile": tile,
+                            "date": date
+                        })
+                        break
+        
+        return files
+    
+    async def prepare_download(
+        self,
+        item: Dict[str, Any],
+        output_dir: Path
+    ) -> Tuple[str, Path]:
+        """
+        Prepare download URL and output path for VIIRS file.
+        
+        Args:
+            item: File metadata from find_viirs_files
+            output_dir: Base output directory
+            
+        Returns:
+            Tuple of (download_url, local_path)
+        """
+        # Organize by date and tile
+        date = item["date"]
+        date_dir = output_dir / date.strftime("%Y/%m/%d")
+        local_path = date_dir / item["filename"]
+        
+        return item["url"], local_path
+    
+    async def download_tiles_for_date(
+        self,
+        date: datetime,
+        tiles: List[str],
+        output_dir: Path,
+        layers: List[str] = ["Gap_Filled_DNB_BRDF-Corrected_NTL", 
+                             "Latest_High_Quality_Retrieval"]
+    ) -> Dict[str, List[Path]]:
+        """
+        Download VIIRS tiles for a specific date.
+        
+        Args:
+            date: Target date
+            tiles: List of tile IDs
+            output_dir: Output directory
+            layers: HDF5 layers to extract (default: NTL and quality)
+            
+        Returns:
+            Dictionary mapping layer names to list of file paths
+        """
+        logger.info(f"Searching for VIIRS files for {date} covering tiles: {tiles}")
+        
+        # Find files to download
+        try:
+            files = await self.find_viirs_files(date, tiles)
+        except Exception as e:
+            self.logger.error(f"Error finding VIIRS files: {e}")
+            raise
+        
+        if not files:
+            logger.warning(f"No VIIRS files found for {date}")
+            return {}
+        
+        logger.info(f"Found {len(files)} VIIRS files to download")
+        
+        # Download all files
+        results = await self.download_batch(files, output_dir)
+        
+        # Check for failures
+        failed = [r for r in results if r.status == DownloadStatus.FAILED]
+        if failed:
+            logger.error(f"{len(failed)} downloads failed")
+            for f in failed:
+                logger.error(f"  {f.local_path}: {f.error}")
+        
+        # Extract layers from HDF5 files
+        extracted_paths = {}
+        for layer in layers:
+            extracted_paths[layer] = []
+        
+        successful = [r for r in results if r.status == DownloadStatus.COMPLETED]
+        
+        for result in successful:
+            # Extract layers from HDF5
+            extracted = await self._extract_hdf5_layers_async(
+                result.local_path,
+                layers
+            )
+            
+            for item in extracted.items():
+                try:
+                    layer, path = item
+                    if path:
+                        extracted_paths[layer].append(path)
+                except ValueError as e:
+                    self.logger.error(f"Error unpacking extracted item: {item}")
+                    self.logger.error(f"Type: {type(item)}, Length: {len(item) if hasattr(item, '__len__') else 'N/A'}")
+                    raise ValueError(f"Failed to unpack extracted.items(): {e}. Item was: {item}")
+        
+        return extracted_paths
+    
+    async def _extract_hdf5_layers_async(
+        self,
+        hdf5_path: Path,
+        layers: List[str]
+    ) -> Dict[str, Optional[Path]]:
+        """
+        Extract specific layers from HDF5 file asynchronously.
+        
+        Args:
+            hdf5_path: Path to HDF5 file
+            layers: List of layer names to extract
+            
+        Returns:
+            Dictionary mapping layer names to extracted file paths
+        """
+        # Run extraction in thread pool since HDF5 operations are sync
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self._extract_hdf5_layers_sync,
+            hdf5_path,
+            layers
+        )
+    
+    def _extract_hdf5_layers_sync(
+        self,
+        hdf5_path: Path,
+        layers: List[str]
+    ) -> Dict[str, Optional[Path]]:
+        """Synchronous HDF5 extraction (runs in thread pool)"""
+        try:
+            # Import the synchronous extraction function from viirs.py
+            from .viirs import extract_viirs_layers
+            
+            # Use the existing, working extraction function
+            layer_files = extract_viirs_layers(
+                str(hdf5_path),
+                str(hdf5_path.parent)
+            )
+            
+            # Map the returned keys to the requested layer names
+            key_mapping = {
+                "Gap_Filled_DNB_BRDF-Corrected_NTL": "gap_filled_ntl",
+                "Latest_High_Quality_Retrieval": "quality_flag",
+                "DNB_At_Sensor_Radiance": "radiance",
+                "QF_Cloud_Mask": "cloud_mask"
+            }
+            
+            extracted = {}
+            for layer in layers:
+                if layer in key_mapping:
+                    key = key_mapping[layer]
+                    if key in layer_files:
+                        extracted[layer] = Path(layer_files[key])
+                    else:
+                        logger.warning(f"Layer {layer} not found in extracted files")
+                        extracted[layer] = None
+                else:
+                    logger.warning(f"Unknown layer requested: {layer}")
+                    extracted[layer] = None
+            
+            return extracted
+            
+        except Exception as e:
+            logger.error(f"Failed to extract layers from {hdf5_path}: {e}")
+            return {layer: None for layer in layers}
+
+
+async def download_viirs_async(
+    date: datetime,
+    bbox: Tuple[float, float, float, float],
+    earthdata_token: str,
+    output_dir: str = "./data/viirs",
+    show_progress: bool = True
+) -> Dict[str, List[Path]]:
+    """
+    High-level async function to download VIIRS data for a date and region.
+    
+    Args:
+        date: Target date
+        bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
+        earthdata_token: NASA Earthdata bearer token
+        output_dir: Output directory
+        show_progress: Show progress bar
+        
+    Returns:
+        Dictionary mapping layer names to list of file paths
+    """
+    from .viirs import get_tiles_for_bbox
+    
+    # Use the same tile calculation as synchronous version
+    tile_tuples = get_tiles_for_bbox(bbox)
+    
+    # Validate tile tuples
+    logger.info(f"get_tiles_for_bbox returned {len(tile_tuples)} tiles")
+    for i, tile in enumerate(tile_tuples):
+        if not isinstance(tile, tuple) or len(tile) != 2:
+            raise ValueError(
+                f"Invalid tile format at index {i}: {tile}. "
+                f"Expected tuple of (vertical, horizontal), got {type(tile)} with length {len(tile) if hasattr(tile, '__len__') else 'N/A'}"
+            )
+    
+    # Convert to h##v## format
+    try:
+        tiles = [f"h{h:02d}v{v:02d}" for v, h in tile_tuples]
+    except ValueError as e:
+        logger.error(f"Error unpacking tiles: {e}")
+        logger.error(f"tile_tuples = {tile_tuples}")
+        raise ValueError(f"Failed to unpack tiles from get_tiles_for_bbox: {e}")
+    
+    logger.info(f"Need {len(tiles)} VIIRS tiles for bbox: {tiles}")
+    
+    # Set up progress tracking
+    progress = None
+    if show_progress:
+        progress = DownloadProgressTracker(
+            total_files=len(tiles),
+            description="Downloading VIIRS"
+        )
+    
+    # Download with async downloader
+    async with AsyncVIIRSDownloader(
+        bearer_token=earthdata_token,
+        progress_callback=progress.update if progress else None
+    ) as downloader:
+        results = await downloader.download_tiles_for_date(
+            date=date,
+            tiles=tiles,
+            output_dir=Path(output_dir)
+        )
+    
+    if progress:
+        progress.finish()
+    
+    return results

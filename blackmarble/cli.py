@@ -33,8 +33,13 @@ def run(
         None,
         "--earthdata-token",
         "-t",
-        help="NASA Earthdata login token. If not provided, reads from EARTHDATA_TOKEN environment variable.",
+        help="NASA Earthdata token for VIIRS downloads. If not provided, reads from EARTHDATA_TOKEN environment variable.",
         envvar="EARTHDATA_TOKEN",
+    ),
+    use_async: bool = typer.Option(
+        True,
+        "--async/--no-async",
+        help="Use async downloads for better performance (default: True).",
     ),
     output_path: str = typer.Option(
         "black_marble_output.tif",
@@ -71,16 +76,17 @@ def run(
     - Cloud-optimized GeoTIFF output
     """
     
-    # Validate earthdata token
-    if not earthdata_token:
+    # Handle Earthdata token
+    if not earthdata_token and use_async:
         typer.echo(
-            "Error: Earthdata token is required. Provide via --earthdata-token or EARTHDATA_TOKEN environment variable.",
+            "Warning: No Earthdata token provided. VIIRS downloads will be skipped.\n"
+            "Provide token via --earthdata-token or set EARTHDATA_TOKEN environment variable.",
             err=True,
         )
-        raise typer.Exit(code=1)
     
-    # Set earthdata token as environment variable for the pipeline
-    os.environ["EARTHDATA_TOKEN"] = earthdata_token
+    # Set as environment variable for compatibility
+    if earthdata_token:
+        os.environ["EARTHDATA_TOKEN"] = earthdata_token
     
     # Convert lat/lon corners to bbox (min_lon, min_lat, max_lon, max_lat)
     min_lat = min(lat1, lat2)
@@ -143,11 +149,18 @@ def run(
     
     try:
         typer.echo("\nRunning pipeline...")
+        if use_async:
+            typer.echo("🚀 Using async downloads for maximum performance")
+        else:
+            typer.echo("🐌 Using sequential downloads (legacy mode)")
+            
         result = black_marble_pipeline(
             bbox=bbox,
             date=date,
             output_path=str(output_path_obj),
-            config=config
+            config=config,
+            use_async=use_async,
+            earthdata_token=earthdata_token
         )
         
         typer.echo("\n✅ Pipeline completed successfully!")

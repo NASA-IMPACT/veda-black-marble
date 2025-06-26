@@ -122,7 +122,7 @@ __all__ = [
     "normalize_to_range",
     "scale_landsat_bands",
     "scale_to_byte",
-    # Spatial functions (spatial.py)
+    # Spatial functions
     "align_rasters",
     "align_to_common_grid",
     "bounds_to_utm",

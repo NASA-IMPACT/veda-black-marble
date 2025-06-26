@@ -473,31 +473,18 @@ def extract_viirs_layers(
     
     # Define VNP46A2 layer structure with indices and output filenames
     # Based on NASA's standard VNP46A2 subdataset organization
+    # We only need gap-filled NTL - it already has complete coverage
     layer_config = {
-        'radiance': {
-            'index': 0,
-            'filename': f"{basename}_DNB_At_Sensor_Radiance.tif",
-            'mandatory': True,
-            'description': "Day/Night Band at-sensor radiance"
-        },
         'gap_filled_ntl': {
             'index': 2,
             'filename': f"{basename}_Gap_Filled_DNB_BRDF-Corrected_NTL.tif",
             'mandatory': True,
             'description': "Gap-filled BRDF-corrected nighttime lights (NASA pre-processed)"
         },
-        'quality_flag': {
-            'index': 3,  # Use Latest_High_Quality_Retrieval like bm.py
-            'filename': f"{basename}_Latest_High_Quality_Retrieval.tif", 
-            'mandatory': True,
-            'description': "Latest high quality retrieval flag (becomes 0/1 after resampling)"
-        },
-        'cloud_mask': {
-            'index': 5,  # QF_Cloud_Mask is actually at index 5
-            'filename': f"{basename}_QF_Cloud_Mask.tif",
-            'mandatory': False,
-            'description': "Cloud detection quality flags"
-        },
+        # Skip these layers - not needed with gap-filled product:
+        # 'radiance': index 0 - Raw radiance, not needed
+        # 'quality_flag': index 3 - Not needed, gap-filled already uses best quality pixels
+        # 'cloud_mask': index 5 - Not needed, gap-filled already handles clouds
     }
     
     extracted_files = {}
@@ -737,6 +724,27 @@ def _tile_fully_contains_bbox(
     )
 
 
+def coordinates_to_viirs_tile_string(lat: float, lon: float) -> str:
+    """Convert lat/lon to VIIRS tile ID string (e.g., h08v05).
+    
+    Args:
+        lat: Latitude
+        lon: Longitude
+        
+    Returns:
+        VIIRS tile ID string
+    """
+    # VIIRS uses a different tiling system than MODIS
+    # This is a simplified implementation
+    # In reality, you'd need the proper VIIRS tile grid
+    
+    # Approximate tile calculation
+    h = int((lon + 180) / 10)  # 36 tiles horizontally
+    v = int((90 - lat) / 10)   # 18 tiles vertically
+    
+    return f"h{h:02d}v{v:02d}"
+
+
 def download_vnp46a2_tiles(
     date: datetime,
     bbox: tuple[float, float, float, float],
@@ -814,8 +822,6 @@ def download_vnp46a2_tiles(
     
     # Initialize result lists
     result = {
-        'radiance': [],
-        'quality': [],
         'gap_filled_ntl': [],
         'metadata': []
     }
@@ -843,10 +849,6 @@ def download_vnp46a2_tiles(
             layer_files = extract_viirs_layers(hdf_path, effective_output_dir)
             
             # Add to result lists
-            if 'radiance' in layer_files:
-                result['radiance'].append(layer_files['radiance'])
-            if 'quality_flag' in layer_files:
-                result['quality'].append(layer_files['quality_flag'])
             if 'gap_filled_ntl' in layer_files:
                 result['gap_filled_ntl'].append(layer_files['gap_filled_ntl'])
             

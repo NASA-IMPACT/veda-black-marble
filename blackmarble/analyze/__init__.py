@@ -16,10 +16,8 @@ from .temporal import (
 )
 
 __all__ = [
-    # Indices functions (all used)
     "calculate_ndui",
     "calculate_ndvi", 
     "calculate_ndwi",
-    # Temporal functions (only one used)
     "create_landsat_median_composite",
 ]
