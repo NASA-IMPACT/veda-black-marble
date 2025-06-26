@@ -110,20 +110,6 @@ def fetch_road_network(
 
 
 
-def get_hierarchical_road_filters() -> dict[int, str]:
-    """Get default OSM filters for hierarchical road classification."""
-    return {
-        1: '["highway"~"primary_link|primary|secondary|secondary_link|tertiary|tertiary_link"]',
-        2: '["highway"~"motorway|motorway_link"]',
-        3: '["highway"~"residential"]',
-        4: '["highway"~"trunk|trunk_link"]',
-        5: '["highway"~"service|unclassified|road|busway"]',
-    }
-
-
-
-
-
 
 def calculate_utm_zone(lon: float, lat: float) -> tuple[int, Literal["north", "south"]]:
     """Calculate UTM zone and hemisphere for coordinates."""
@@ -191,84 +177,6 @@ def rasterize_road_shapes_with_crs(
         all_touched=all_touched,
         dtype=np.uint8
     )
-
-
-def create_road_raster_from_transform(
-    bbox: BBox,
-    transform: Transform,
-    crs: str | CRS,
-    shape: tuple[int, int],
-    buffer_meters: float = 30.0,
-    road_type_values: dict[str, int] | None = None
-) -> ArrayLike:
-    """Create road raster from transform and CRS."""
-    if road_type_values is None:
-        road_type_values = {
-            'motorway': 1, 'motorway_link': 1,
-            'primary': 2, 'primary_link': 2,
-            'secondary': 3, 'secondary_link': 3,
-            'tertiary': 4, 'tertiary_link': 4,
-            'residential': 5,
-            'service': 6, 'unclassified': 6, 'road': 6
-        }
-    
-    min_lon, min_lat, max_lon, max_lat = bbox
-    lon_center = (min_lon + max_lon) / 2
-    lat_center = (min_lat + max_lat) / 2
-    north, south, east, west = max_lat, min_lat, max_lon, min_lon
-    
-    height, width = shape
-    road_raster = np.zeros((height, width), dtype=np.uint8)
-    
-    for highway_type, raster_value in sorted(road_type_values.items(), key=lambda x: x[1], reverse=True):
-        road_filter = f'["highway"~"{highway_type}"]'
-        
-        try:
-            print(f"Downloading {highway_type} roads...")
-            graph = download_osm_roads(north, south, east, west, road_filter)
-            
-            if graph.number_of_edges() == 0:
-                print(f"No {highway_type} roads found")
-                continue
-            
-            line_shapes = graph_to_shapes(graph, buffer_distance=0.0)
-            
-            buffered_shapes = []
-            for shape_dict in line_shapes:
-                buffered_geom = buffer_roads_in_utm(
-                    geometry=shape_dict,
-                    buffer_meters=buffer_meters,
-                    lon_center=lon_center,
-                    lat_center=lat_center
-                )
-                buffered_shapes.append({'geometry': buffered_geom, 'value': raster_value})
-            
-            print(f"Created {len(buffered_shapes)} buffered {highway_type} shapes")
-            
-            road_type_raster = rasterize_road_shapes_with_crs(
-                shapes=buffered_shapes,
-                reference_transform=transform,
-                shape=shape,
-                src_crs="EPSG:4326",
-                dst_crs=crs,
-                all_touched=True
-            )
-            
-            mask = road_type_raster > 0
-            road_raster[mask] = road_type_raster[mask]
-            
-            pixels_added = np.sum(mask)
-            print(f"Rasterized {pixels_added} pixels for {highway_type}")
-            
-        except Exception as e:
-            print(f"Error processing {highway_type}: {e}")
-            continue
-    
-    total_pixels = np.sum(road_raster > 0)
-    coverage = (total_pixels / road_raster.size) * 100
-    print(f"\nTotal road coverage: {total_pixels} pixels ({coverage:.1f}%)")
-    
-    return road_raster
 
 
 def buffer_and_rasterize_roads(

@@ -127,16 +127,37 @@ def export_single_band(
 
 
 def export_multi_band(
-    bands: list[ArrayLike],
+    bands: dict[str, ArrayLike] | list[ArrayLike],
     output_path: str,
     transform: Transform,
     crs: CRS,
     band_names: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
-    compress: Literal["deflate", "lzw"] = "deflate"
+    compress: Literal["deflate", "lzw"] = "deflate",
+    nodata: float | None = None
 ) -> str:
-    """Export multi-band data as COG."""
-    data = np.stack(bands, axis=0)
+    """Export multi-band data as COG.
+    
+    Args:
+        bands: Either a dict mapping band names to arrays or a list of arrays
+        output_path: Output file path
+        transform: Affine transform
+        crs: Coordinate reference system
+        band_names: Band names (used if bands is a list)
+        metadata: Additional metadata
+        compress: Compression method
+        nodata: NoData value
+        
+    Returns:
+        Output file path
+    """
+    if isinstance(bands, dict):
+        band_names = list(bands.keys())
+        bands_list = list(bands.values())
+    else:
+        bands_list = bands
+    
+    data = np.stack(bands_list, axis=0)
     
     if metadata is None:
         metadata = {}
@@ -144,7 +165,7 @@ def export_multi_band(
         for i, name in enumerate(band_names):
             metadata[f"band_{i+1}_name"] = name
     
-    return create_cog(data, output_path, transform, crs, metadata, compress)
+    return create_cog(data, output_path, transform, crs, metadata, compress, nodata=nodata)
 
 
 def create_overviews(

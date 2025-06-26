@@ -8,52 +8,17 @@ This module handles data preprocessing tasks including:
 - File I/O operations
 """
 
-from .coordinates import (
-    calculate_ground_distance,
-    calculate_pixel_area,
-    calculate_transform,
-    create_crs_transformer,
-    get_crs_from_epsg,
-    reproject_geometry,
-    transform_bounds,
-    validate_crs_compatibility,
-)
-
+# Coordinates functions removed - entire coordinates.py was unused
 # IO functions removed - use rasterio directly
-
-from .quality import (
-    combine_masks,
-    compute_mask_statistics,
-    compute_quality_flags,
-    create_aerosol_mask,
-    create_cloud_mask,
-    create_quality_mask,
-    create_saturation_mask,
-    create_urban_mask,
-    create_viirs_quality_mask,
-    create_water_mask,
-    dilate_mask,
-)
-
-from .scaling import (
-    apply_viirs_floor_ceiling,
-    calculate_ntli,
-    detect_if_already_scaled,
-    normalize_to_range,
-    scale_landsat_bands,
-    scale_to_byte,
-)
+# Quality functions removed - entire quality.py was unused
+# Scaling functions removed - entire scaling.py was unused
 
 from .spatial import (
     align_rasters,
-    align_to_common_grid,
-    bounds_to_utm,
     convert_to_wgs84,
     crop_to_bounds,
-    mosaic_tiles,
     reproject_image,
     resample_image,
-    stack_arrays_with_padding,
 )
 
 from .diagnostic import (
@@ -65,65 +30,26 @@ from .landsat import (
 )
 
 from .landsat_qa import (
-    QALevel,
-    qa_mask,
-    composite_masked,
     create_landsat_cloud_mask,
-    decode_qa_pixel,
     print_qa_pixel_summary,
+    # Other functions are unused
 )
 
 
 
 __all__ = [
-    # Coordinate functions (coordinates.py)
-    "calculate_ground_distance",
-    "calculate_pixel_area", 
-    "calculate_transform",
-    "create_crs_transformer",
-    "get_crs_from_epsg",
-    "reproject_geometry",
-    "transform_bounds",
-    "validate_crs_compatibility",
-    # I/O functions removed - use rasterio/gdal directly
-    # Quality functions
-    "combine_masks",
-    "compute_mask_statistics",
-    "compute_quality_flags",
-    "create_aerosol_mask",
-    "create_cloud_mask",
-    "create_quality_mask",
-    "create_saturation_mask",
-    "create_urban_mask",
-    "create_viirs_quality_mask",
-    "create_water_mask",
-    "dilate_mask",
-    # Scaling functions
-    "apply_viirs_floor_ceiling",
-    "calculate_ntli",
-    "detect_if_already_scaled",
-    "normalize_to_range",
-    "scale_landsat_bands",
-    "scale_to_byte",
+    # All coordinate, quality, scaling, and landsat_qa functions removed - unused files deleted
     # Spatial functions
     "align_rasters",
-    "align_to_common_grid",
-    "bounds_to_utm",
     "convert_to_wgs84",
     "crop_to_bounds",
-    "mosaic_tiles",
     "reproject_image",
     "resample_image",
-    "stack_arrays_with_padding",
     # Diagnostic functions
     "save_diagnostic",
     # Landsat functions
     "process_landsat_date",
-    # Landsat QA functions
-    "QALevel",
-    "qa_mask",
-    "composite_masked",
+    # Landsat QA functions (only the used ones)
     "create_landsat_cloud_mask",
-    "decode_qa_pixel",
     "print_qa_pixel_summary",
 ]
