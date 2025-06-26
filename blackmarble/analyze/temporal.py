@@ -53,11 +53,16 @@ def create_landsat_median_composite(
     # Shape: (n_dates, height, width)
     stacked = np.stack(cropped_data, axis=0)
     
+    # Apply scaling to the raw DN values
+    # This converts from raw digital numbers to surface reflectance
+    scaled_stack = stacked * scale_factor + add_offset
+    
     # Compute median along time axis, ignoring NaN
     # nanmedian handles NaN values gracefully
-    composite = np.nanmedian(stacked, axis=0)
+    composite = np.nanmedian(scaled_stack, axis=0)
     
-    # Fill any remaining all-NaN pixels with 0
-    composite = np.nan_to_num(composite, nan=0.0)
+    # Keep NaN values for pixels with no valid observations
+    # This preserves the distinction between "no data" and "dark surface"
+    # The downstream code should handle NaN appropriately
     
     return composite

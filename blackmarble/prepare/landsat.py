@@ -9,7 +9,9 @@ from typing import Any, Literal
 import numpy as np
 import numpy.typing as npt
 
-from .io import load_with_rasterio, create_virtual_raster
+import rasterio
+from osgeo import gdal
+import tempfile
 from .spatial import crop_to_bounds
 from .landsat_qa import create_landsat_cloud_mask, print_qa_pixel_summary
 
@@ -61,13 +63,18 @@ def process_landsat_date(
             
             # Create VRT mosaic if multiple tiles
             if len(qa_files) > 1:
-                qa_vrt = create_virtual_raster(
-                    file_paths=qa_files,
-                    output_vrt="data/temp/qa_pixel_mosaic.vrt"
-                )
-                qa_data, qa_profile = load_with_rasterio(qa_vrt)
+                qa_vrt = "data/temp/qa_pixel_mosaic.vrt"
+                os.makedirs("data/temp", exist_ok=True)
+                vrt_ds = gdal.BuildVRT(qa_vrt, qa_files)
+                vrt_ds = None  # Close to write to disk
+                
+                with rasterio.open(qa_vrt) as src:
+                    qa_data = src.read(1)
+                    qa_profile = src.profile
             else:
-                qa_data, qa_profile = load_with_rasterio(qa_files[0])
+                with rasterio.open(qa_files[0]) as src:
+                    qa_data = src.read(1)
+                    qa_profile = src.profile
             
             # Debug: check data before cropping
             print(f"  QA data shape before crop: {qa_data.shape}")
@@ -162,13 +169,18 @@ def process_landsat_date(
         
         # Create VRT mosaic if multiple tiles
         if len(band_files) > 1:
-            band_vrt = create_virtual_raster(
-                file_paths=band_files,
-                output_vrt=f"data/temp/{band_name.lower()}_mosaic.vrt"
-            )
-            band_data, band_profile = load_with_rasterio(band_vrt)
+            band_vrt = f"data/temp/{band_name.lower()}_mosaic.vrt"
+            os.makedirs("data/temp", exist_ok=True)
+            vrt_ds = gdal.BuildVRT(band_vrt, band_files)
+            vrt_ds = None  # Close to write to disk
+            
+            with rasterio.open(band_vrt) as src:
+                band_data = src.read(1)
+                band_profile = src.profile
         else:
-            band_data, band_profile = load_with_rasterio(band_files[0])
+            with rasterio.open(band_files[0]) as src:
+                band_data = src.read(1)
+                band_profile = src.profile
         
         # Crop to bbox if specified
         if bbox:

@@ -13,7 +13,6 @@ from .landsat import (
 
 from .osm import (
     fetch_road_network,
-    roads_graph_to_shapes,
     buffer_and_rasterize_roads,
 )
 
@@ -34,7 +33,6 @@ __all__ = [
     "download_all_bands_for_date",
     # OSM functions (used by pipeline)
     "fetch_road_network",
-    "roads_graph_to_shapes",
     "buffer_and_rasterize_roads",
     # VIIRS functions (used by pipeline)
     "download_viirs_h5",

@@ -16,6 +16,8 @@ import os
 import numpy as np
 import numpy.typing as npt
 import logging
+import rasterio
+from osgeo import gdal
 
 from .config import PipelineConfig
 from . import acquire, prepare, analyze, enhance, export
@@ -225,13 +227,18 @@ def black_marble_pipeline(
             print("VIIRS tiles in mosaic:")
             for i, tile_path in enumerate(viirs_data['gap_filled_ntl']):
                 print(f"  {i+1}. {os.path.basename(tile_path)}")
-            viirs_ntl_vrt = prepare.create_virtual_raster(
-                file_paths=viirs_data['gap_filled_ntl'],
-                output_vrt="data/temp/viirs_gap_filled_ntl_mosaic.vrt"
-            )
-            viirs_ntl, viirs_profile = prepare.load_with_rasterio(viirs_ntl_vrt)
+            viirs_ntl_vrt = "data/temp/viirs_gap_filled_ntl_mosaic.vrt"
+            os.makedirs("data/temp", exist_ok=True)
+            vrt_ds = gdal.BuildVRT(viirs_ntl_vrt, viirs_data['gap_filled_ntl'])
+            vrt_ds = None  # Close to write to disk
+            
+            with rasterio.open(viirs_ntl_vrt) as src:
+                viirs_ntl = src.read(1)
+                viirs_profile = src.profile
         else:
-            viirs_ntl, viirs_profile = prepare.load_with_rasterio(viirs_data['gap_filled_ntl'][0])
+            with rasterio.open(viirs_data['gap_filled_ntl'][0]) as src:
+                viirs_ntl = src.read(1)
+                viirs_profile = src.profile
         
         # CRITICAL: Crop VIIRS to bounding box like bm.py does
         # This ensures we only process the area of interest, not entire tiles
@@ -276,13 +283,18 @@ def black_marble_pipeline(
                 print("VIIRS quality tiles in mosaic:")
                 for i, tile_path in enumerate(viirs_data['quality']):
                     print(f"  {i+1}. {os.path.basename(tile_path)}")
-                viirs_quality_vrt = prepare.create_virtual_raster(
-                    file_paths=viirs_data['quality'],
-                    output_vrt="data/temp/viirs_quality_mosaic.vrt"
-                )
-                quality_flag, quality_profile = prepare.load_with_rasterio(viirs_quality_vrt)
+                viirs_quality_vrt = "data/temp/viirs_quality_mosaic.vrt"
+                os.makedirs("data/temp", exist_ok=True)
+                vrt_ds = gdal.BuildVRT(viirs_quality_vrt, viirs_data['quality'])
+                vrt_ds = None  # Close to write to disk
+                
+                with rasterio.open(viirs_quality_vrt) as src:
+                    quality_flag = src.read(1)
+                    quality_profile = src.profile
             else:
-                quality_flag, quality_profile = prepare.load_with_rasterio(viirs_data['quality'][0])
+                with rasterio.open(viirs_data['quality'][0]) as src:
+                    quality_flag = src.read(1)
+                    quality_profile = src.profile
             
             # Crop to bounds
             quality_flag, quality_transform, _ = prepare.crop_to_bounds(
@@ -364,13 +376,18 @@ def black_marble_pipeline(
         print("Consider updating VIIRS processing to extract gap-filled data")
         # Process raw radiance data (simplified - no lunar correction)
         if len(viirs_data['radiance']) > 1:
-            viirs_radiance_vrt = prepare.create_virtual_raster(
-                file_paths=viirs_data['radiance'],
-                output_vrt="data/temp/viirs_radiance_mosaic.vrt"
-            )
-            viirs_radiance, viirs_profile = prepare.load_with_rasterio(viirs_radiance_vrt)
+            viirs_radiance_vrt = "data/temp/viirs_radiance_mosaic.vrt"
+            os.makedirs("data/temp", exist_ok=True)
+            vrt_ds = gdal.BuildVRT(viirs_radiance_vrt, viirs_data['radiance'])
+            vrt_ds = None  # Close to write to disk
+            
+            with rasterio.open(viirs_radiance_vrt) as src:
+                viirs_radiance = src.read(1)
+                viirs_profile = src.profile
         else:
-            viirs_radiance, viirs_profile = prepare.load_with_rasterio(viirs_data['radiance'][0])
+            with rasterio.open(viirs_data['radiance'][0]) as src:
+                viirs_radiance = src.read(1)
+                viirs_profile = src.profile
         
         # Crop and resample
         viirs_radiance, viirs_transform, _ = prepare.crop_to_bounds(

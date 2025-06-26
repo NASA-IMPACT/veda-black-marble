@@ -19,16 +19,7 @@ from .coordinates import (
     validate_crs_compatibility,
 )
 
-from .io import (
-    create_memory_efficient_reader,
-    create_virtual_raster,
-    detect_format,
-    load_with_gdal,
-    load_with_rasterio,
-    read_metadata,
-    setup_output_profile,
-    validate_raster_stack,
-)
+# IO functions removed - use rasterio directly
 
 from .quality import (
     combine_masks,
@@ -94,15 +85,7 @@ __all__ = [
     "reproject_geometry",
     "transform_bounds",
     "validate_crs_compatibility",
-    # I/O functions
-    "create_memory_efficient_reader",
-    "create_virtual_raster",
-    "detect_format",
-    "load_with_gdal",
-    "load_with_rasterio",
-    "read_metadata",
-    "setup_output_profile",
-    "validate_raster_stack",
+    # I/O functions removed - use rasterio/gdal directly
     # Quality functions
     "combine_masks",
     "compute_mask_statistics",

@@ -10,6 +10,8 @@ import os
 import logging
 import numpy as np
 import numpy.typing as npt
+import rasterio
+from osgeo import gdal
 
 from .config import PipelineConfig
 from . import acquire, prepare, analyze, enhance, export
@@ -127,13 +129,18 @@ def black_marble_pipeline_async(
             # Create VRT mosaic if multiple tiles
             if len(viirs_ntl_files) > 1:
                 print(f"Creating VRT mosaic for {len(viirs_ntl_files)} VIIRS tiles")
-                viirs_ntl_vrt = prepare.create_virtual_raster(
-                    file_paths=[str(f) for f in viirs_ntl_files],
-                    output_vrt=f"{data_dir}/temp/viirs_gap_filled_ntl_mosaic.vrt"
-                )
-                viirs_ntl, viirs_profile = prepare.load_with_rasterio(viirs_ntl_vrt)
+                viirs_ntl_vrt = f"{data_dir}/temp/viirs_gap_filled_ntl_mosaic.vrt"
+                os.makedirs(f"{data_dir}/temp", exist_ok=True)
+                vrt_ds = gdal.BuildVRT(viirs_ntl_vrt, [str(f) for f in viirs_ntl_files])
+                vrt_ds = None  # Close to write to disk
+                
+                with rasterio.open(viirs_ntl_vrt) as src:
+                    viirs_ntl = src.read(1)
+                    viirs_profile = src.profile
             else:
-                viirs_ntl, viirs_profile = prepare.load_with_rasterio(str(viirs_ntl_files[0]))
+                with rasterio.open(str(viirs_ntl_files[0])) as src:
+                    viirs_ntl = src.read(1)
+                    viirs_profile = src.profile
             
             # Crop VIIRS to bounding box
             print(f"Cropping VIIRS data to bbox: {bbox}")
@@ -174,13 +181,16 @@ def black_marble_pipeline_async(
                 
                 # Process quality files similarly
                 if len(viirs_quality_files) > 1:
-                    quality_vrt = prepare.create_virtual_raster(
-                        file_paths=[str(f) for f in viirs_quality_files],
-                        output_vrt=f"{data_dir}/temp/viirs_quality_mosaic.vrt"
-                    )
-                    quality_flag, _ = prepare.load_with_rasterio(quality_vrt)
+                    quality_vrt = f"{data_dir}/temp/viirs_quality_mosaic.vrt"
+                    os.makedirs(f"{data_dir}/temp", exist_ok=True)
+                    vrt_ds = gdal.BuildVRT(quality_vrt, [str(f) for f in viirs_quality_files])
+                    vrt_ds = None  # Close to write to disk
+                    
+                    with rasterio.open(quality_vrt) as src:
+                        quality_flag = src.read(1)
                 else:
-                    quality_flag, _ = prepare.load_with_rasterio(str(viirs_quality_files[0]))
+                    with rasterio.open(str(viirs_quality_files[0])) as src:
+                        quality_flag = src.read(1)
                 
                 # Crop and resample to match NTL
                 quality_flag, _, _ = prepare.crop_to_bounds(
@@ -711,6 +721,8 @@ def black_marble_pipeline_async(
         if compress_setting not in valid_compressions:
             compress_setting = "deflate"
         
+        # Note: ntl_colored is RGB uint8 data, can't use NaN as nodata
+        # The colormap application already handles NaN -> black mapping
         export.create_cog(
             data=ntl_colored,
             output_path=output_path,
@@ -720,6 +732,7 @@ def black_marble_pipeline_async(
             compress=cast(Literal["deflate", "lzw", "jpeg", "webp", "zstd"], compress_setting),
             tiled=config.export.tiled if config else True,
             overviews=config.export.overview_levels if config else [2, 4, 8, 16]
+            # No nodata for RGB imagery
         )
     
     # Generate auxiliary outputs if requested
@@ -760,7 +773,8 @@ def black_marble_pipeline_async(
                 output_path=output_path.replace(".tif", "_indices.tif"),
                 transform=reference_transform,
                 crs=target_crs,
-                compress=cast(Literal["deflate", "lzw"], compress_setting)
+                compress=cast(Literal["deflate", "lzw"], compress_setting),
+                nodata=np.nan  # Properly handle NaN values from masking
             )
     
     # Calculate basic statistics for the results
