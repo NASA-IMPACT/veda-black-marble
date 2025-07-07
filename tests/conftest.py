@@ -8,7 +8,6 @@ import tempfile
 from typing import Dict, Any
 
 
-
 @pytest.fixture
 def test_shape():
     """Default shape for test arrays."""
@@ -44,12 +43,12 @@ def temp_dir():
 def mock_s3_adapter():
     """Mock S3 adapter for testing."""
     from unittest.mock import Mock
-    
+
     adapter = Mock()
     adapter.anonymous = False
     adapter.upload_file.return_value = True
     adapter.download_file.return_value = True
-    
+
     return adapter
 
 
@@ -57,20 +56,20 @@ def mock_s3_adapter():
 def mock_raster_adapter():
     """Mock raster adapter for testing."""
     from unittest.mock import Mock
-    
+
     adapter = Mock()
     adapter.use_rasterio = True
-    
+
     # Mock read operation
     def mock_read(filepath, band=None):
         # Return random data of appropriate shape
         return np.random.rand(100, 100).astype(np.float32)
-    
+
     adapter.read = mock_read
-    
+
     # Mock write operation
     adapter.write.return_value = True
-    
+
     return adapter
 
 
@@ -78,7 +77,7 @@ def mock_raster_adapter():
 def pipeline_config(manhattan_bbox, test_date, temp_dir):
     """Default pipeline configuration for testing."""
     from blackmarble.config import PipelineConfig
-    
+
     output_path = str(temp_dir / "test_output.tif")
     return PipelineConfig.for_bm_parity(manhattan_bbox, test_date, output_path)
 
@@ -87,7 +86,7 @@ def pipeline_config(manhattan_bbox, test_date, temp_dir):
 def enhanced_pipeline_config(manhattan_bbox, test_date, temp_dir):
     """Enhanced pipeline configuration for testing."""
     from blackmarble.config import PipelineConfig
-    
+
     output_path = str(temp_dir / "test_enhanced.tif")
     return PipelineConfig.for_enhanced_quality(manhattan_bbox, test_date, output_path)
 
@@ -96,39 +95,34 @@ def enhanced_pipeline_config(manhattan_bbox, test_date, temp_dir):
 def mock_cog_generator():
     """Mock COG generator for testing."""
     from unittest.mock import Mock, MagicMock
-    from blackmarble.components.output import COGProfile
-    
+
+    # Create a mock COGProfile
+    COGProfile = Mock()
+    COGProfile.profile_name = "deflate"
+
     generator = Mock()
-    generator.profile = COGProfile(profile_name="deflate")
-    
+    generator.profile = COGProfile
+
     # Mock process method
     def mock_process(data, output_path, **kwargs):
         result = MagicMock()
         result.output_path = output_path
         result.success = True
         result.metadata = {
-            'bands': data.shape[0] if data.ndim == 3 else 1,
-            'dtype': str(data.dtype),
-            'shape': data.shape,
+            "bands": data.shape[0] if data.ndim == 3 else 1,
+            "dtype": str(data.dtype),
+            "shape": data.shape,
         }
         return result
-    
+
     generator.process = mock_process
-    
+
     return generator
 
 
 # Pytest configuration
 def pytest_configure(config):
     """Configure pytest with custom markers."""
-    config.addinivalue_line(
-        "markers", "integration: mark test as integration test"
-    )
-    config.addinivalue_line(
-        "markers", "slow: mark test as slow running"
-    )
-    config.addinivalue_line(
-        "markers", "requires_gdal: mark test as requiring GDAL"
-    )
-
-
+    config.addinivalue_line("markers", "integration: mark test as integration test")
+    config.addinivalue_line("markers", "slow: mark test as slow running")
+    config.addinivalue_line("markers", "requires_gdal: mark test as requiring GDAL")

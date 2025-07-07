@@ -27,7 +27,7 @@ def reproject_image(
     dst_shape: tuple[int, int] | None = None,
     dst_transform: Transform | None = None,
     resampling: Literal["nearest", "bilinear", "cubic", "average"] = "nearest",
-    nodata: float | None = None
+    nodata: float | None = None,
 ) -> tuple[ArrayLike, Transform, BBox]:
     """Reproject image data to target coordinate reference system.
 
@@ -79,11 +79,16 @@ def reproject_image(
             source_crs, target_crs, width, height, *source_bounds
         )
         if dst_shape is None:
-            dst_shape = (dst_height, dst_width)
+            if dst_height is not None and dst_width is not None:
+                dst_shape = (int(dst_height), int(dst_width))
+            else:
+                raise ValueError("Could not calculate destination shape")
     else:
         # Ensure dst_shape is set if it was None but dst_transform was provided
         if dst_shape is None:
-            raise ValueError("dst_shape must be provided when dst_transform is provided")
+            raise ValueError(
+                "dst_shape must be provided when dst_transform is provided"
+            )
 
     # Create output array
     assert dst_shape is not None  # Type checker hint
@@ -124,7 +129,7 @@ def resample_image(
     target_resolution: float | tuple[float, float] | None = None,
     target_shape: tuple[int, int] | None = None,
     resampling: Literal["nearest", "bilinear", "cubic", "average"] = "bilinear",
-    nodata: float | None = None
+    nodata: float | None = None,
 ) -> tuple[ArrayLike, Transform]:
     """Resample image data to target resolution.
 
@@ -142,11 +147,11 @@ def resample_image(
     """
     # Normalize resolutions to tuples
     source_resolution = (abs(src_transform.a), abs(src_transform.e))
-    
+
     if target_resolution is not None:
         if isinstance(target_resolution, (int, float)):
             target_resolution = (target_resolution, target_resolution)
-    
+
     # Map resampling methods
     resample_map = {
         "nearest": Resampling.nearest,
@@ -172,7 +177,7 @@ def resample_image(
         new_height = int(height * scale_factor)
         target_resolution = (
             source_resolution[0] / scale_factor,
-            source_resolution[1] / scale_factor
+            source_resolution[1] / scale_factor,
         )
     elif target_resolution is not None:
         # Target resolution provided
@@ -185,7 +190,7 @@ def resample_image(
         new_height, new_width = target_shape
         target_resolution = (
             source_resolution[0] * width / new_width,
-            source_resolution[1] * height / new_height
+            source_resolution[1] * height / new_height,
         )
     else:
         # No change needed
@@ -206,6 +211,7 @@ def resample_image(
 
     # Use MemoryFile for in-memory resampling
     from rasterio import MemoryFile
+
     profile = {
         "driver": "GTiff",
         "width": width,
@@ -238,7 +244,7 @@ def crop_to_bounds(
     src_transform: Transform,
     bounds: BBox,
     buffer_distance: float | None = None,
-    buffer_units: Literal["crs", "pixels"] = "crs"
+    buffer_units: Literal["crs", "pixels"] = "crs",
 ) -> tuple[ArrayLike, Transform, BBox]:
     """Crop raster data to specified spatial bounds.
 
@@ -256,7 +262,7 @@ def crop_to_bounds(
         # Use rasterio for exact cropping
         import rasterio
         from rasterio.windows import from_bounds
-        
+
         # Apply buffer to bounds
         min_x, min_y, max_x, max_y = bounds
         if buffer_distance is not None and buffer_distance > 0:
@@ -272,48 +278,48 @@ def crop_to_bounds(
                 min_y -= pixel_buffer_y
                 max_x += pixel_buffer_x
                 max_y += pixel_buffer_y
-        
+
         # Get window from bounds - rasterio handles fractional pixels
         window = from_bounds(min_x, min_y, max_x, max_y, src_transform)
-        
+
         # Round to integer pixels to match GDAL's projWin behavior
         col_off = round(window.col_off)
         row_off = round(window.row_off)
         width = round(window.width)
         height = round(window.height)
-        
+
         # Get data dimensions
         if data.ndim == 2:
             data_height, data_width = data.shape
         else:
             _, data_height, data_width = data.shape
-        
+
         # Ensure we don't exceed data bounds
         col_off = max(0, col_off)
         row_off = max(0, row_off)
         col_end = min(data_width, col_off + width)
         row_end = min(data_height, row_off + height)
-        
+
         # Crop the data
         if data.ndim == 2:
             cropped = data[row_off:row_end, col_off:col_end]
         else:
             cropped = data[:, row_off:row_end, col_off:col_end]
-        
+
         # Calculate the new transform
         new_transform: Affine = src_transform * Affine.translation(col_off, row_off)
-        
+
         # Calculate actual bounds of the cropped data
         actual_height, actual_width = cropped.shape[-2:]
         actual_bounds = (
             new_transform.c,  # west
             new_transform.f + new_transform.e * actual_height,  # south
             new_transform.c + new_transform.a * actual_width,  # east
-            new_transform.f   # north
+            new_transform.f,  # north
         )
-        
+
         return cropped, new_transform, actual_bounds
-        
+
     except ImportError:
         # Fallback if rasterio not available
         raise ImportError("Rasterio is required for crop_to_bounds")
@@ -325,7 +331,7 @@ def align_rasters(
     crs_list: list[str] | None = None,
     reference_idx: int = 0,
     resampling: Literal["nearest", "bilinear", "cubic"] = "nearest",
-    nodata: float | None = None
+    nodata: float | None = None,
 ) -> list[tuple[ArrayLike, Transform]]:
     """Align multiple rasters to a common grid and extent.
 
@@ -414,30 +420,22 @@ def align_rasters(
     return results
 
 
-
-
-
-
-
-
-
-
 def convert_to_wgs84(
     data: ArrayLike,
     src_transform: Transform,
     src_crs: CRS,
     bounds: BBox,
-    target_resolution: float | None = None
+    target_resolution: float | None = None,
 ) -> tuple[ArrayLike, Transform]:
     """Convert raster to WGS84 (EPSG:4326) projection.
-    
+
     Args:
         data: Input raster array
         src_transform: Source affine transform
         src_crs: Source CRS
         bounds: Geographic bounds for output
         target_resolution: Optional target resolution in degrees
-        
+
     Returns:
         Tuple of (wgs84_data, wgs84_transform)
     """
@@ -447,18 +445,16 @@ def convert_to_wgs84(
         src_transform=src_transform,
         src_crs=src_crs,
         dst_crs="EPSG:4326",
-        resampling="bilinear"
+        resampling="bilinear",
     )
-    
+
     # If target resolution specified, resample
     if target_resolution is not None:
         wgs84_data, wgs84_transform = resample_image(
             wgs84_data,
             src_transform=wgs84_transform,
             target_resolution=target_resolution,
-            resampling="bilinear"
+            resampling="bilinear",
         )
-    
+
     return wgs84_data, wgs84_transform
-
-

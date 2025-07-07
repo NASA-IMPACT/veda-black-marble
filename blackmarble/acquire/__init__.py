@@ -14,6 +14,12 @@ from .landsat import (
 from .osm import (
     fetch_road_network,
     buffer_and_rasterize_roads,
+    clear_osm_cache,
+    get_osm_cache_dir,
+)
+
+from .osm_fractional import (
+    buffer_and_rasterize_roads_fractional,
 )
 
 from .viirs import (
@@ -34,6 +40,9 @@ __all__ = [
     # OSM functions (used by pipeline)
     "fetch_road_network",
     "buffer_and_rasterize_roads",
+    "buffer_and_rasterize_roads_fractional",
+    "clear_osm_cache",
+    "get_osm_cache_dir",
     # VIIRS functions (used by pipeline)
     "download_viirs_h5",
     "download_vnp46a2_tiles",

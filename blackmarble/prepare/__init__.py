@@ -36,7 +36,6 @@ from .landsat_qa import (
 )
 
 
-
 __all__ = [
     # All coordinate, quality, scaling, and landsat_qa functions removed - unused files deleted
     # Spatial functions

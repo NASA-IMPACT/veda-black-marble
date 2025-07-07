@@ -12,15 +12,15 @@ def enhance_contrast(
     method: Literal["percentile", "minmax", "histogram", "adaptive"] = "percentile",
     percentiles: tuple[float, float] = (2, 98),
     output_range: tuple[float, float] = (0.0, 1.0),
-    clip_percentiles: tuple[float, float] | None = None  # For backward compatibility
+    clip_percentiles: tuple[float, float] | None = None,  # For backward compatibility
 ) -> ArrayLike:
     """Enhance image contrast."""
     # Handle backward compatibility
     if clip_percentiles is not None:
         percentiles = clip_percentiles
-    
+
     out_min, out_max = output_range
-    
+
     if method == "percentile":
         vmin, vmax = np.percentile(data[~np.isnan(data)], percentiles)
         enhanced = np.clip((data - vmin) / (vmax - vmin), 0, 1)
@@ -30,8 +30,8 @@ def enhance_contrast(
     else:
         # For histogram/adaptive, just return normalized data
         enhanced = data / np.nanmax(data) if np.nanmax(data) > 0 else data
-    
+
     # Scale to output range
     enhanced = enhanced * (out_max - out_min) + out_min
-    
+
     return enhanced

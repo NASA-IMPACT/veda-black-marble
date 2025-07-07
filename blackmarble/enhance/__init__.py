@@ -6,7 +6,7 @@ from .visualize import apply_inferno_colormap, create_false_color_composite
 
 __all__ = [
     "enhance_contrast",
-    "enhance_roads", 
+    "enhance_roads",
     "enhance_urban_features",
     "apply_inferno_colormap",
     "create_false_color_composite",

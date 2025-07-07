@@ -3,6 +3,7 @@
 This module provides analytical functions for:
 - Spectral indices calculation (NDVI, NDWI, NDUI)
 - Temporal compositing (median composite for Landsat)
+- Urban field computation from road networks
 """
 
 from .indices import (
@@ -15,9 +16,16 @@ from .temporal import (
     create_landsat_median_composite,
 )
 
+from .urban_fields import (
+    compute_urban_fields,
+    enhance_ntl_with_urban_field,
+)
+
 __all__ = [
     "calculate_ndui",
-    "calculate_ndvi", 
+    "calculate_ndvi",
     "calculate_ndwi",
     "create_landsat_median_composite",
+    "compute_urban_fields",
+    "enhance_ntl_with_urban_field",
 ]
