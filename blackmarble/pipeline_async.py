@@ -946,15 +946,13 @@ def black_marble_pipeline_async(
         from typing import Literal
 
         method_mapping: dict[
-            str, Literal["percentile", "minmax", "histogram", "adaptive"]
+            str, Literal["percentile", "minmax"]
         ] = {
             "linear": "minmax",
             "percentile": "percentile",
-            "adaptive": "adaptive",
-            "retinex": "histogram",  # Closest approximation
         }
         config_method = config.enhancement.contrast_method if config else "linear"
-        method: Literal["percentile", "minmax", "histogram", "adaptive"] = (
+        method: Literal["percentile", "minmax"] = (
             method_mapping.get(config_method, "percentile")
         )
 

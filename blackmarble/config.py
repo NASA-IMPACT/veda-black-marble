@@ -86,12 +86,6 @@ class AnalysisConfig:
     composite_method: Literal["median", "mean", "max", "percentile"] = "median"
     composite_percentile: int | None = None
     min_valid_observations: int = 1
-    use_scipy_fill_gaps: bool = False
-
-    # Scene merging
-    merge_blend_method: Literal["feather", "max", "min", "mean"] = "feather"
-    feather_distance: int = 10
-    use_scipy_feather: bool = False
 
     # OSM fractional road rasterization
     osm_fractional: bool = False  # Use fractional road rasterization
@@ -147,7 +141,7 @@ class EnhancementConfig:
     custom_road_factors: dict[int, float] | None = None
 
     # Contrast enhancement
-    contrast_method: Literal["linear", "percentile", "adaptive", "retinex"] = "linear"
+    contrast_method: Literal["linear", "percentile"] = "linear"
     contrast_percentiles: tuple[float, float] = (2.0, 98.0)
     contrast_output_range: tuple[float, float] = (0.0, 1.0)
 
@@ -267,8 +261,6 @@ class PipelineConfig:
             date=date,
             output_path=output_path,
             analysis=AnalysisConfig(
-                use_scipy_fill_gaps=True,
-                use_scipy_feather=True,
                 composite_method="median",
             ),
             enhancement=EnhancementConfig(

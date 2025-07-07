@@ -61,7 +61,6 @@ def test_pipeline_config_creation():
     # Test enhanced configuration
     enhanced_config = PipelineConfig.for_enhanced_quality(bbox, date, output_path)
     assert enhanced_config.enhancement.quality_mode == "enhanced"
-    assert enhanced_config.analysis.use_scipy_fill_gaps is True
     assert enhanced_config.export.generate_urban_mask is True
     assert enhanced_config.export.generate_indices_file is True
 
@@ -199,7 +198,6 @@ def test_pipeline_config_methods():
     # Test configuration copying/modification
     config2 = PipelineConfig.for_enhanced_quality(bbox, date, output_path)
     assert config.enhancement.quality_mode != config2.enhancement.quality_mode
-    assert config.analysis.use_scipy_fill_gaps != config2.analysis.use_scipy_fill_gaps
 
 
 def test_pipeline_parameter_validation():

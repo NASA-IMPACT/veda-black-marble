@@ -58,7 +58,6 @@ def test_pipeline_config_compatibility(sample_bbox, sample_date, temp_output_pat
         sample_bbox, sample_date, temp_output_path
     )
     assert enhanced_config.enhancement.quality_mode == "enhanced"
-    assert enhanced_config.analysis.use_scipy_fill_gaps is True
     assert enhanced_config.export.generate_urban_mask is True
 
     # # Test legacy config conversion

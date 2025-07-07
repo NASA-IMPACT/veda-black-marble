@@ -9,7 +9,7 @@ ArrayLike = npt.NDArray[Any]
 
 def enhance_contrast(
     data: ArrayLike,
-    method: Literal["percentile", "minmax", "histogram", "adaptive"] = "percentile",
+    method: Literal["percentile", "minmax"] = "percentile",
     percentiles: tuple[float, float] = (2, 98),
     output_range: tuple[float, float] = (0.0, 1.0),
     clip_percentiles: tuple[float, float] | None = None,  # For backward compatibility
@@ -24,12 +24,9 @@ def enhance_contrast(
     if method == "percentile":
         vmin, vmax = np.percentile(data[~np.isnan(data)], percentiles)
         enhanced = np.clip((data - vmin) / (vmax - vmin), 0, 1)
-    elif method == "minmax":
+    else:  # minmax
         vmin, vmax = np.nanmin(data), np.nanmax(data)
         enhanced = (data - vmin) / (vmax - vmin) if vmax > vmin else data
-    else:
-        # For histogram/adaptive, just return normalized data
-        enhanced = data / np.nanmax(data) if np.nanmax(data) > 0 else data
 
     # Scale to output range
     enhanced = enhanced * (out_max - out_min) + out_min
