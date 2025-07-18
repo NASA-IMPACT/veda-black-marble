@@ -122,11 +122,12 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
         try:
             import rasterio
-            from rasterio.env import Env
+            from rasterio.session import AWSSession
 
-            # Read metadata from GeoTIFF tags using GDAL virtual file system
-            with Env(AWS_NO_SIGN_REQUEST='YES', AWS_REQUEST_PAYER='requester'):
-                with rasterio.open(f"/vsis3/{self.BUCKET}/{band_key}") as src:
+            # Read metadata from GeoTIFF tags using rasterio's S3 support
+            aws_session = AWSSession(aws_unsigned=True, requester_pays=True)
+            with rasterio.Env(session=aws_session):
+                with rasterio.open(f"s3://{self.BUCKET}/{band_key}") as src:
                     # Try to get cloud cover from various metadata fields
                     tags = src.tags()
 
