@@ -24,10 +24,12 @@ repos:
 
       - id: autoflake
         name: autoflake
-        entry: uv run autoflake --remove-all-unused-imports --remove-unused-variables --exit-zero-even-if-changed
+        entry: uv run autoflake --remove-all-unused-imports --remove-unused-variables --check
         language: system
         types: [python]
         stages: [commit]
+        always_run: false
+        verbose: true
 
       - id: pyright
         name: pyright

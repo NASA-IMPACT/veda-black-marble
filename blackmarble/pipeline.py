@@ -286,101 +286,6 @@ def black_marble_pipeline(
         # by using the best available pixels from recent observations
         viirs_corrected = viirs_ntl
 
-        # OLD CODE - No longer needed with gap-filled product:
-        # Apply quality masking if available
-        if False and viirs_data.get("quality"):
-            # Create VRT mosaic for quality if we have multiple tiles
-            if len(viirs_data["quality"]) > 1:
-                print(
-                    f"Creating VRT mosaic for {len(viirs_data['quality'])} VIIRS quality tiles"
-                )
-                print("VIIRS quality tiles in mosaic:")
-                for i, tile_path in enumerate(viirs_data["quality"]):
-                    print(f"  {i + 1}. {os.path.basename(tile_path)}")
-                viirs_quality_vrt = "data/temp/viirs_quality_mosaic.vrt"
-                os.makedirs("data/temp", exist_ok=True)
-                vrt_ds = gdal.BuildVRT(viirs_quality_vrt, viirs_data["quality"])
-                vrt_ds = None  # Close to write to disk
-
-                with rasterio.open(viirs_quality_vrt) as src:
-                    quality_flag = src.read(1)
-                    quality_profile = src.profile
-            else:
-                with rasterio.open(viirs_data["quality"][0]) as src:
-                    quality_flag = src.read(1)
-                    quality_profile = src.profile
-
-            # Crop to bounds
-            quality_flag, quality_transform, _ = prepare.crop_to_bounds(
-                data=quality_flag,
-                src_transform=quality_profile["transform"],
-                bounds=bbox,
-            )
-            # Resample to match radiance resolution
-            quality_flag, quality_transform = prepare.resample_image(
-                data=quality_flag,
-                src_transform=quality_transform,
-                target_resolution=target_resolution,
-                resampling="nearest",  # Use nearest for quality flags
-            )
-            # Update profile
-            quality_profile["transform"] = quality_transform
-            quality_profile["height"] = quality_flag.shape[0]
-            quality_profile["width"] = quality_flag.shape[1]
-
-            # CRITICAL QUALITY FLAG FIX - USING CORRECT LAYER
-            # =================================================
-            #
-            # BM.PY USES Latest_High_Quality_Retrieval (HDF5 layer 3)
-            # --------------------------------------------------------
-            # We discovered that bm.py uses HDF5 subdataset index 3, which is
-            # "Latest_High_Quality_Retrieval", NOT "Mandatory_Quality_Flag" (index 4).
-            #
-            # This layer has simple 0-255 values:
-            #   0 = High quality retrieval
-            #   1 = Good quality retrieval
-            #   2+ = Lower quality or issues
-            #
-            # IMPORTANT FIX: We should accept both 0 and 1 as good quality
-            # The original implementation only accepted 0, which caused black
-            # regions where quality=1 (still good quality per NASA docs)
-            #
-            # No bit extraction needed - just use quality <= 1
-            quality_mask = (quality_flag <= 1).astype(float)
-
-            # DIAGNOSTIC: Print quality mask statistics
-            print(f"\nVIIRS Quality Mask Statistics (Latest_High_Quality_Retrieval):")
-            print(f"  Total pixels: {quality_flag.size}")
-            print(f"  Quality flag range: [{quality_flag.min()}, {quality_flag.max()}]")
-            print(f"  Unique quality values: {len(np.unique(quality_flag))}")
-            if len(np.unique(quality_flag)) <= 10:
-                print(f"  Quality values: {np.unique(quality_flag)}")
-            print(
-                f"  Pixels with quality<=1 (high/good): {quality_mask.sum()} ({quality_mask.sum() / quality_mask.size * 100:.1f}%)"
-            )
-            print(f"  Non-zero VIIRS values before mask: {(viirs_ntl > 0).sum()}")
-            print(
-                f"  Non-zero VIIRS values after mask: {(viirs_ntl * quality_mask > 0).sum()}"
-            )
-
-            # Apply quality mask to gap-filled NTL
-            viirs_corrected = viirs_ntl * quality_mask
-
-            # Save diagnostic output if requested
-            if config and getattr(config, "save_diagnostics", False):
-                prepare.save_diagnostic(
-                    viirs_corrected,
-                    viirs_profile,
-                    "data/diagnostics/viirs_quality_masked.tif",
-                    "VIIRS gap-filled NTL after quality masking",
-                )
-        else:
-            # No quality masking available, use gap-filled NTL as-is
-            viirs_corrected = viirs_ntl
-            print(
-                "Warning: No quality data available, using gap-filled NTL without masking"
-            )
-
         # OLD CODE (commented out):
         # viirs_corrected = prepare.apply_viirs_floor_ceiling(
         #     ntl_data=viirs_scaled,
@@ -448,12 +353,7 @@ def black_marble_pipeline(
     target_resolution = 30.0  # 30 meters for Landsat
 
     # Print projection info clearly
-    if False:
-        print(f"Target projection: {target_crs}")
-        print(
-            f"Area center is in UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'} (used for road buffering)"
-        )
-    else:
+    if config and config.verbose:
         print(
             f"Using projection: {target_crs} (UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'})"
         )

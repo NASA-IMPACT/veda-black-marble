@@ -211,6 +211,8 @@ def download_landsat_band(
     aws_credentials: dict[str, str] | None = None,
 ) -> str:
     """Download a specific Landsat band from AWS."""
+    # AWS credentials reserved for future authenticated access
+    _ = aws_credentials  # Currently unused, kept for API compatibility
     scene_name = scene_dir.rstrip("/").split("/")[-1]
 
     if band in ("QA_PIXEL", "QA_RADSAT", "QA_AEROSOL"):

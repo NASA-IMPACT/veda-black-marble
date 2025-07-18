@@ -10,7 +10,7 @@ import numpy as np
 import rasterio
 import rasterio.features
 from rasterio.crs import CRS
-from rasterio.warp import transform_geom, transform_bounds
+from rasterio.warp import transform_geom
 from shapely.geometry import shape, mapping
 from shapely.geometry import mapping as geom_to_dict
 from shapely.ops import transform

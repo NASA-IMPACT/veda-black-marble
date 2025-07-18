@@ -174,6 +174,9 @@ def download_vnp46a2_tiles(
     cache_dir: str | None = None,
 ) -> dict[str, list[str]]:
     """Download all VNP46A2 tiles for a date and bounding box."""
+    # Product parameter reserved for future multi-product support
+    _ = product  # Currently unused, kept for API compatibility
+    
     # Get token
     if not earthdata_token:
         earthdata_token = os.environ.get("EARTHDATA_TOKEN")

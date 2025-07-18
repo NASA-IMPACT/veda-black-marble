@@ -114,6 +114,8 @@ class AsyncDownloaderBase(ABC):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit"""
+        # Exception info is handled by the context manager protocol
+        _ = (exc_type, exc_val, exc_tb)  # Mark as intentionally unused
         if self._session:
             await self._session.close()
 
