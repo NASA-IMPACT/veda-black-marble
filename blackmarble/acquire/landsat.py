@@ -318,7 +318,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         # Mark as in progress and notify callback
         result.status = DownloadStatus.IN_PROGRESS
         if self.progress_callback:
-            self.progress_callback(result)
+            await self.progress_callback(result)
 
         try:
             async with self._semaphore:
@@ -347,7 +347,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
                         # Notify callback of completion
                         if self.progress_callback:
-                            self.progress_callback(result)
+                            await self.progress_callback(result)
 
                     except Exception:
                         if temp_path.exists():
@@ -361,7 +361,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
             # Notify callback of failure
             if self.progress_callback:
-                self.progress_callback(result)
+                await self.progress_callback(result)
 
             # Retry logic would go here
             raise
