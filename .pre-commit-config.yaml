@@ -13,7 +13,7 @@ repos:
         entry: uv run ruff check --exit-zero
         language: system
         types: [python]
-        stages: [commit]
+        stages: [pre-commit]
 
       - id: isort
         name: isort
@@ -27,7 +27,7 @@ repos:
         entry: uv run autoflake --remove-all-unused-imports --remove-unused-variables --check
         language: system
         types: [python]
-        stages: [commit]
+        stages: [pre-commit]
         always_run: false
         verbose: true
 
@@ -36,7 +36,7 @@ repos:
         entry: uv run pyright
         language: system
         pass_filenames: false     # project-wide run
-        stages: [commit]
+        stages: [pre-commit]
         # do not block:
         always_run: true
         verbose: true
