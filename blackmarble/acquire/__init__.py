@@ -8,7 +8,7 @@ This module handles fetching data from various sources:
 
 from .async_orchestrator import DownloadPlan, DownloadResults, download_all_data_sync
 from .landsat import download_all_bands_for_date, filter_landsat_scenes
-from .osm import buffer_and_rasterize_roads, clear_osm_cache, fetch_road_network, get_osm_cache_dir
+from .osm import buffer_and_rasterize_roads, clear_osm_cache, fetch_road_network
 from .osm_fractional import buffer_and_rasterize_roads_fractional
 from .viirs import download_viirs_h5, download_vnp46a2_tiles
 
@@ -21,7 +21,6 @@ __all__ = [
     "buffer_and_rasterize_roads",
     "buffer_and_rasterize_roads_fractional",
     "clear_osm_cache",
-    "get_osm_cache_dir",
     # VIIRS functions (used by pipeline)
     "download_viirs_h5",
     "download_vnp46a2_tiles",

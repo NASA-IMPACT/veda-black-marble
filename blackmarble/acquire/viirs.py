@@ -236,7 +236,3 @@ def download_vnp46a2_tiles(
     return downloaded_files
 
 
-def coordinates_to_viirs_tile_string(lat: float, lon: float) -> str:
-    """Convert coordinates to VIIRS tile string (e.g., 'h06v05')."""
-    v, h = coordinates_to_viirs_tile(lat, lon)
-    return f"h{h:02d}v{v:02d}"

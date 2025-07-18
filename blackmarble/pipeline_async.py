@@ -1024,12 +1024,12 @@ def black_marble_pipeline_async(
         if compress_setting not in valid_single_compressions:
             compress_setting = "deflate"
 
-        export.export_single_band(
+        export.create_cog(
             data=urban_mask.astype(np.uint8),
             output_path=output_path.replace(".tif", "_urban_mask.tif"),
             transform=reference_transform,
             crs=target_crs,
-            band_name="urban_mask",
+            metadata={"band_name": "urban_mask"},
             compress=compress_setting,  # type: ignore[arg-type]
         )
 
@@ -1049,11 +1049,21 @@ def black_marble_pipeline_async(
             if compress_setting not in valid_multi_compressions:
                 compress_setting = "deflate"
 
-            export.export_multi_band(
-                bands=indices_dict,
+            # Stack bands and create metadata
+            band_names = list(indices_dict.keys())
+            bands_list = list(indices_dict.values())
+            data = np.stack(bands_list, axis=0)
+
+            metadata = {}
+            for i, name in enumerate(band_names):
+                metadata[f"band_{i + 1}_name"] = name
+
+            export.create_cog(
+                data=data,
                 output_path=output_path.replace(".tif", "_indices.tif"),
                 transform=reference_transform,
                 crs=target_crs,
+                metadata=metadata,
                 compress=compress_setting,  # type: ignore[arg-type]
                 nodata=np.nan,  # Properly handle NaN values from masking
             )

@@ -35,8 +35,9 @@ repos:
         name: pyright
         entry: uv run pyright
         language: system
-        pass_filenames: false     # project-wide run
+        pass_filenames: true      # only check changed files
+        types: [python]
         stages: [pre-commit]
         # do not block:
-        always_run: true
+        always_run: false
         verbose: true

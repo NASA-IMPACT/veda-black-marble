@@ -237,32 +237,6 @@ def download_landsat_band(
         raise
 
 
-def get_wrs_tiles_for_bbox(
-    min_lat: float,
-    max_lat: float,
-    min_lon: float,
-    max_lon: float,
-    wrs_polygons: list[tuple[shapely.geometry.Polygon, int, int]] | None = None,
-) -> list[dict[str, int]]:
-    """Find all WRS-2 path/row tiles intersecting a bounding box."""
-    if wrs_polygons is None:
-        wrs_polygons = load_wrs_shapefile()
-
-    bbox = shapely.geometry.box(min_lon, min_lat, max_lon, max_lat)
-
-    results = []
-    seen = set()
-
-    for polygon, path, row in wrs_polygons:
-        if polygon.intersects(bbox):
-            key = (path, row)
-            if key not in seen:
-                seen.add(key)
-                results.append({"path": path, "row": row})
-
-    print(f"Found {len(results)} WRS tiles covering bounding box")
-    return results
-
 
 def get_landsat_band_metadata(file_path: str) -> dict[str, Any]:
     """Extract metadata from a Landsat band file."""

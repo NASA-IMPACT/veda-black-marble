@@ -102,14 +102,11 @@ def rasterize_shapes(
     return mask
 
 
-def get_osm_cache_dir() -> Path:
-    """Get the OSM cache directory path."""
-    return Path("data/osm_cache")
 
 
 def clear_osm_cache() -> None:
     """Clear all cached OSM data."""
-    cache_dir = get_osm_cache_dir()
+    cache_dir = Path("data/osm_cache")
     if cache_dir.exists():
         import shutil
 
@@ -124,7 +121,7 @@ def get_osm_cache_path(bbox: BBox, network_type: str, custom_filter: str | None)
     params_hash = hashlib.md5(params_str.encode()).hexdigest()[:12]
 
     # Create cache directory
-    cache_dir = get_osm_cache_dir()
+    cache_dir = Path("data/osm_cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate filename with bbox info for readability
