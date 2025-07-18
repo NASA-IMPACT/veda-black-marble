@@ -67,8 +67,7 @@ def process_landsat_date(
                 os.makedirs("data/temp", exist_ok=True)
                 # Allow projection differences for areas spanning UTM zones
                 vrt_options = gdal.BuildVRTOptions(allowProjectionDifference=True)
-                vrt_ds = gdal.BuildVRT(qa_vrt, qa_files, options=vrt_options)
-                vrt_ds = None  # Close to write to disk
+                gdal.BuildVRT(qa_vrt, qa_files, options=vrt_options)
 
                 with rasterio.open(qa_vrt) as src:
                     qa_data = src.read(1)
@@ -184,8 +183,7 @@ def process_landsat_date(
             os.makedirs("data/temp", exist_ok=True)
             # Allow projection differences for areas spanning UTM zones
             vrt_options = gdal.BuildVRTOptions(allowProjectionDifference=True)
-            vrt_ds = gdal.BuildVRT(band_vrt, band_files, options=vrt_options)
-            vrt_ds = None  # Close to write to disk
+            gdal.BuildVRT(band_vrt, band_files, options=vrt_options)
 
             # For many tiles, read in chunks to avoid memory issues
             if len(band_files) > 10:

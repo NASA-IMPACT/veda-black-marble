@@ -257,7 +257,7 @@ def crop_to_bounds(
     """
     try:
         # Use rasterio for exact cropping
-        import rasterio
+        import rasterio  # noqa: F401
         from rasterio.windows import from_bounds
 
         # Apply buffer to bounds

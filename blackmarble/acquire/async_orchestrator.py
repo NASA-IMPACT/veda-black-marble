@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .async_base import DownloadProgressTracker
+# from .async_base import DownloadProgressTracker  # Currently unused
 from .async_landsat import download_landsat_async
 from .async_viirs_functional import download_viirs_for_pipeline
 
@@ -167,12 +167,12 @@ class AsyncDownloadOrchestrator:
         start_time = time.time()
         results = DownloadResults()
 
-        # Estimate total files for progress
-        estimated_files = (
-            3  # VIIRS tiles (estimate)
-            + len(plan.landsat_dates) * len(plan.landsat_bands) * 2  # Landsat
-            + 1  # OSM
-        )
+        # Estimate total files for progress (currently unused)
+        # estimated_files = (
+        #     3  # VIIRS tiles (estimate)
+        #     + len(plan.landsat_dates) * len(plan.landsat_bands) * 2  # Landsat
+        #     + 1  # OSM
+        # )
 
         if progress_callback:
             progress_callback(f"Starting downloads for {len(plan.landsat_dates)} dates...")
@@ -202,12 +202,6 @@ class AsyncDownloadOrchestrator:
 
         # Execute all downloads concurrently
         logger.info(f"Starting concurrent downloads: {', '.join(task_names)}")
-
-        if self.show_progress:
-            # Create a combined progress tracker
-            progress = DownloadProgressTracker(
-                total_files=estimated_files, description="Downloading all data"
-            )
 
         # Run all tasks
         task_results = await asyncio.gather(*tasks, return_exceptions=True)

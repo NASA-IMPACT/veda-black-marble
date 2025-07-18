@@ -1,7 +1,15 @@
 {
-  "timestamp": "2025-07-18T16:48:27Z",
+  "timestamp": "2025-07-18T17:00:01Z",
   "tool": "vulture",
-  "num_items": 0,
-  "total_confidence": 0,
-  "by_file": {}
+  "num_items": 1,
+  "total_confidence": 80,
+  "by_file": {
+    "blackmarble/acquire/async_base.py": [
+      {
+        "path": "blackmarble/acquire/async_base.py",
+        "line": 115,
+        "message": "unused variable 'args' (100% confidence, 1 line)"
+      }
+    ]
+  }
 }

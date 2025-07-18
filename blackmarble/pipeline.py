@@ -232,8 +232,7 @@ def black_marble_pipeline(
                 print(f"  {i + 1}. {os.path.basename(tile_path)}")
             viirs_ntl_vrt = "data/temp/viirs_gap_filled_ntl_mosaic.vrt"
             os.makedirs("data/temp", exist_ok=True)
-            vrt_ds = gdal.BuildVRT(viirs_ntl_vrt, viirs_data["gap_filled_ntl"])
-            vrt_ds = None  # Close to write to disk
+            gdal.BuildVRT(viirs_ntl_vrt, viirs_data["gap_filled_ntl"])
 
             with rasterio.open(viirs_ntl_vrt) as src:
                 viirs_ntl = src.read(1)
@@ -298,8 +297,7 @@ def black_marble_pipeline(
         if len(viirs_data["radiance"]) > 1:
             viirs_radiance_vrt = "data/temp/viirs_radiance_mosaic.vrt"
             os.makedirs("data/temp", exist_ok=True)
-            vrt_ds = gdal.BuildVRT(viirs_radiance_vrt, viirs_data["radiance"])
-            vrt_ds = None  # Close to write to disk
+            gdal.BuildVRT(viirs_radiance_vrt, viirs_data["radiance"])
 
             with rasterio.open(viirs_radiance_vrt) as src:
                 viirs_radiance = src.read(1)
@@ -351,7 +349,7 @@ def black_marble_pipeline(
     landsat_reprojected = {}
     reference_transform = None
     reference_shape = None
-    reference_bbox = None
+    # reference_bbox = None  # Currently unused
 
     for band_name, (data, profile) in landsat_bands.items():
         reprojected, new_transform, new_bbox = prepare.reproject_image(
@@ -367,7 +365,7 @@ def black_marble_pipeline(
         if reference_transform is None:
             reference_transform = new_transform
             reference_shape = reprojected.shape
-            reference_bbox = new_bbox
+            # reference_bbox = new_bbox  # Currently unused
 
     # Reproject VIIRS to target CRS first
     viirs_reprojected = None
@@ -662,30 +660,29 @@ def black_marble_pipeline(
             )
 
     # 2. Enhance road networks in the NTL data
-    ntl_roads_enhanced = None
-    if ntl_enhanced is not None and roads_rasterized is not None:
-        ntl_roads_enhanced = enhance.enhance_roads(
-            data=ntl_enhanced,
-            road_mask=roads_rasterized,
-            major_factor=config.enhancement.road_major_factor if config else 1.3,
-            minor_factor=config.enhancement.road_minor_factor if config else 1.1,
-            custom_factors=config.enhancement.custom_road_factors if config else None,
-        )
-    else:
-        ntl_roads_enhanced = ntl_enhanced
+    # Note: Road enhancement currently unused in pipeline since urban enhancement is disabled
+    # ntl_roads_enhanced = None
+    # if ntl_enhanced is not None and roads_rasterized is not None:
+    #     ntl_roads_enhanced = enhance.enhance_roads(
+    #         data=ntl_enhanced,
+    #         road_mask=roads_rasterized,
+    #         major_factor=config.enhancement.road_major_factor if config else 1.3,
+    #         minor_factor=config.enhancement.road_minor_factor if config else 1.1,
+    #         custom_factors=config.enhancement.custom_road_factors if config else None,
+    #     )
+    # else:
+    #     ntl_roads_enhanced = ntl_enhanced
 
     # 3. Enhance urban features
-    ntl_urban_enhanced = None
-    if ntl_roads_enhanced is not None and urban_mask is not None:
-        ntl_urban_enhanced = enhance.enhance_urban_features(
-            ntl_data=ntl_roads_enhanced,
-            urban_mask=urban_mask,
-            road_mask=roads_rasterized,
-            enhancement_factor=1.2,
-            road_factor=1.1,
-        )
-    else:
-        ntl_urban_enhanced = ntl_roads_enhanced
+    # Note: Urban enhancement currently unused in pipeline
+    # if ntl_roads_enhanced is not None and urban_mask is not None:
+    #     ntl_urban_enhanced = enhance.enhance_urban_features(
+    #         ntl_data=ntl_roads_enhanced,
+    #         urban_mask=urban_mask,
+    #         road_mask=roads_rasterized,
+    #         enhancement_factor=1.2,
+    #         road_factor=1.1,
+    #     )
 
     # 4. Apply color mapping for visualization
     # CRITICAL FIX: Use NDUI for colormap like bm.py does, not NTL
@@ -726,15 +723,15 @@ def black_marble_pipeline(
             )
 
     # 5. Create false color composite for context (optional)
-    landsat_viz = None
-    if "B5" in landsat_reprojected and "B4" in landsat_reprojected and "B3" in landsat_reprojected:
-        landsat_viz = enhance.create_false_color_composite(
-            red_channel=landsat_reprojected["B5"],  # NIR in red
-            green_channel=landsat_reprojected["B4"],  # Red in green
-            blue_channel=landsat_reprojected["B3"],  # Green in blue
-            contrast_enhance=True,
-            gamma=None,  # Use default gamma
-        )
+    # landsat_viz = None  # Currently unused
+    # if "B5" in landsat_reprojected and "B4" in landsat_reprojected and "B3" in landsat_reprojected:
+    #     landsat_viz = enhance.create_false_color_composite(
+    #         red_channel=landsat_reprojected["B5"],  # NIR in red
+    #         green_channel=landsat_reprojected["B4"],  # Red in green
+    #         blue_channel=landsat_reprojected["B3"],  # Green in blue
+    #         contrast_enhance=True,
+    #         gamma=None,  # Use default gamma
+    #     )
 
     # ==================== EXPORT PHASE ====================
     # Generate final outputs in various formats

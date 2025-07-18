@@ -112,10 +112,8 @@ class AsyncDownloaderBase(ABC):
         self._session = ClientSession(timeout=timeout, headers=self.config.headers)
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, *args):
         """Async context manager exit"""
-        # Exception info is handled by the context manager protocol
-        _ = (exc_type, exc_val, exc_tb)  # Mark as intentionally unused
         if self._session:
             await self._session.close()
 
@@ -131,7 +129,6 @@ class AsyncDownloaderBase(ABC):
         Returns:
             Tuple of (download_url, local_path)
         """
-        pass
 
     async def download_file(self, url: str, output_path: Path, **kwargs) -> DownloadResult:
         """
