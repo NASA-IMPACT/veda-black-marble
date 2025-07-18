@@ -1,65 +1,7 @@
 {
-  "timestamp": "2025-07-18T16:26:29Z",
+  "timestamp": "2025-07-18T16:48:27Z",
   "tool": "vulture",
-  "num_items": 9,
-  "total_confidence": 720,
-  "by_file": {
-    "blackmarble/acquire/async_base.py": [
-      {
-        "path": "blackmarble/acquire/async_base.py",
-        "line": 115,
-        "message": "unused variable 'exc_tb' (100% confidence, 1 line)"
-      },
-      {
-        "path": "blackmarble/acquire/async_base.py",
-        "line": 115,
-        "message": "unused variable 'exc_type' (100% confidence, 1 line)"
-      },
-      {
-        "path": "blackmarble/acquire/async_base.py",
-        "line": 115,
-        "message": "unused variable 'exc_val' (100% confidence, 1 line)"
-      }
-    ],
-    "blackmarble/acquire/landsat.py": [
-      {
-        "path": "blackmarble/acquire/landsat.py",
-        "line": 211,
-        "message": "unused variable 'aws_credentials' (100% confidence, 1 line)"
-      }
-    ],
-    "blackmarble/acquire/osm.py": [
-      {
-        "path": "blackmarble/acquire/osm.py",
-        "line": 13,
-        "message": "unused import 'transform_bounds' (90% confidence, 1 line)"
-      }
-    ],
-    "blackmarble/acquire/viirs.py": [
-      {
-        "path": "blackmarble/acquire/viirs.py",
-        "line": 170,
-        "message": "unused variable 'product' (100% confidence, 1 line)"
-      }
-    ],
-    "blackmarble/pipeline.py": [
-      {
-        "path": "blackmarble/pipeline.py",
-        "line": 451,
-        "message": "unsatisfiable 'if' condition (100% confidence, 4 lines)"
-      },
-      {
-        "path": "blackmarble/pipeline.py",
-        "line": 291,
-        "message": "unsatisfiable 'if' condition (100% confidence, 85 lines)"
-      }
-    ],
-    "blackmarble/pipeline_async.py": [
-      {
-        "path": "blackmarble/pipeline_async.py",
-        "line": 187,
-        "message": "unsatisfiable 'if' condition (100% confidence, 58 lines)"
-      }
-    ]
-  }
+  "num_items": 0,
+  "total_confidence": 0,
+  "by_file": {}
 }
