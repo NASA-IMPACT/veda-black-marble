@@ -181,7 +181,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         Returns:
             List of scene metadata
         """
-        from .landsat import get_wrs_tiles_for_bbox_tuple
+        from .wrs_utils import get_wrs_tiles_for_bbox_tuple
 
         # Get ALL WRS tiles that intersect with the bbox
         tile_dicts = get_wrs_tiles_for_bbox_tuple(bbox)
@@ -410,7 +410,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         return band_paths
 
 
-async def download_landsat_async(
+async def download_landsat(
     dates: list[datetime],
     bbox: tuple[float, float, float, float],
     bands: list[str],
@@ -612,5 +612,3 @@ def filter_landsat_scenes(
 
     return None
 
-# Legacy name aliases for compatibility
-download_all_bands_for_date = download_landsat_async

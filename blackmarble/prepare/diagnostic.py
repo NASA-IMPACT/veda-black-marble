@@ -48,9 +48,22 @@ def save_diagnostic(
         if crs is not None:
             profile["crs"] = crs
     else:
-        # Update profile for single band
-        profile = profile.copy()
-        profile.update({"driver": "GTiff", "count": 1, "dtype": data.dtype, "compress": "lzw"})
+        # Handle case where profile is None
+        if profile is None:
+            profile = {
+                "driver": "GTiff",
+                "height": data.shape[0],
+                "width": data.shape[1],
+                "count": 1,
+                "dtype": data.dtype,
+                "compress": "lzw",
+            }
+            if crs is not None:
+                profile["crs"] = crs
+        else:
+            # Update profile for single band
+            profile = profile.copy()
+            profile.update({"driver": "GTiff", "count": 1, "dtype": data.dtype, "compress": "lzw"})
 
         # Ensure height and width are set
         if "height" not in profile or profile["height"] is None:

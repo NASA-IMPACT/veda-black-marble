@@ -11,11 +11,12 @@ from pathlib import Path
 
 import aiofiles
 import aiohttp
+from osgeo import gdal
 
 logger = logging.getLogger(__name__)
 
 
-async def download_viirs_h5_async(
+async def download_viirs_h5(
     session: aiohttp.ClientSession,
     earthdata_token: str,
     year: int,
@@ -189,7 +190,7 @@ async def download_viirs_tiles_async(
         logger.error(f"bbox type: {type(bbox)}, content: {bbox}")
         raise
 
-    from .viirs import extract_viirs_layers, get_tiles_for_bbox
+    # These functions are now defined in this same module
 
     # Get tiles that cover the bbox
     logger.debug("Calling get_tiles_for_bbox...")
@@ -265,7 +266,7 @@ async def download_viirs_tiles_async(
                 continue
 
             # Create download task
-            task = download_viirs_h5_async(
+            task = download_viirs_h5(
                 session=session,
                 earthdata_token=earthdata_token,
                 year=year,
@@ -333,7 +334,7 @@ def _add_layer_files_to_result(result: dict[str, list[str]], layer_files: dict[s
         result["gap_filled_ntl"].append(layer_files["gap_filled_ntl"])
 
 
-async def download_viirs_for_pipeline(
+async def download_viirs(
     date: datetime,
     bbox: tuple[float, float, float, float],
     earthdata_token: str,
@@ -393,6 +394,95 @@ async def download_viirs_for_pipeline(
 
     return result
 
-# Legacy name aliases for compatibility
-download_vnp46a2_tiles = download_viirs_for_pipeline
-download_viirs_h5 = download_viirs_h5_async
+
+def coordinates_to_viirs_tile(lat: float, lon: float) -> tuple[int, int]:
+    """Convert lat/lon to VIIRS tile indices."""
+    vertical_tile = max(0, min(17, int((90 - lat) / 10)))
+    horizontal_tile = max(0, min(35, int((lon + 180) / 10)))
+    return vertical_tile, horizontal_tile
+
+
+def get_tiles_for_bbox(
+    bbox: tuple[float, float, float, float], overlap: float = 0.0
+) -> list[tuple[int, int]]:
+    """Get VIIRS tiles covering a bounding box."""
+    min_lon, min_lat, max_lon, max_lat = bbox
+
+    # Expand bounds if overlap requested
+    if overlap > 0:
+        min_lon -= overlap
+        min_lat -= overlap
+        max_lon += overlap
+        max_lat += overlap
+
+    # Get corner tiles
+    v_min, h_min = coordinates_to_viirs_tile(max_lat, min_lon)
+    v_max, h_max = coordinates_to_viirs_tile(min_lat, max_lon)
+
+    # Generate all tiles in range
+    tiles = []
+    for v in range(v_min, v_max + 1):
+        for h in range(h_min, h_max + 1):
+            if 0 <= v <= 17 and 0 <= h <= 35:
+                tiles.append((v, h))
+
+    return tiles
+
+
+def convert_viirs_hdf_to_tiff(hdf_file: str, output_file: str, layer: int = 0) -> str:
+    """Convert VIIRS HDF5 layer to GeoTIFF."""
+    # Open HDF
+    hdf_dataset = gdal.Open(hdf_file, gdal.GA_ReadOnly)
+    if not hdf_dataset:
+        raise ValueError(f"Could not open HDF5 file: {hdf_file}")
+
+    # Get subdatasets
+    subdatasets = hdf_dataset.GetSubDatasets()
+    if layer >= len(subdatasets):
+        raise ValueError(f"Layer {layer} not found. File has {len(subdatasets)} layers")
+
+    # Open subdataset
+    subdataset_name = subdatasets[layer][0]
+    layer_dataset = gdal.Open(subdataset_name, gdal.GA_ReadOnly)
+
+    # Get tile metadata
+    metadata = layer_dataset.GetMetadata_Dict()
+    horizontal_tile = int(metadata.get("HorizontalTileNumber", 0))
+    vertical_tile = int(metadata.get("VerticalTileNumber", 0))
+
+    # Calculate bounds (10x10 degree tiles)
+    west = (10 * horizontal_tile) - 180
+    north = 90 - (10 * vertical_tile)
+    east = west + 10
+    south = north - 10
+
+    logger.debug(f"Converting tile h{horizontal_tile:02d}v{vertical_tile:02d}")
+
+    # Create output with proper georeferencing
+    translate_options = gdal.TranslateOptions(
+        format="GTiff",
+        outputSRS="EPSG:4326",
+        outputBounds=[west, south, east, north],
+        creationOptions=["COMPRESS=DEFLATE", "PREDICTOR=2", "TILED=YES"],
+    )
+
+    gdal.Translate(output_file, layer_dataset, options=translate_options)
+
+    return output_file
+
+
+def extract_viirs_layers(hdf_file: str, output_dir: str = ".") -> dict[str, str]:
+    """Extract gap-filled NTL layer from VIIRS HDF5."""
+    basename = os.path.splitext(os.path.basename(hdf_file))[0]
+    os.makedirs(output_dir, exist_ok=True)
+
+    # We only need gap-filled NTL (layer 2)
+    output_path = os.path.join(output_dir, f"{basename}_Gap_Filled_DNB_BRDF-Corrected_NTL.tif")
+
+    try:
+        convert_viirs_hdf_to_tiff(hdf_file, output_path, layer=2)
+        logger.info(f"Extracted gap_filled_ntl: {output_path}")
+        return {"gap_filled_ntl": output_path}
+    except Exception as e:
+        raise RuntimeError(f"Could not extract gap-filled NTL layer: {e}")
+

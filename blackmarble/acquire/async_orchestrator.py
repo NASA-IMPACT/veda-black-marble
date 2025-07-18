@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 # from .async_base import DownloadProgressTracker  # Currently unused
-from .landsat import download_landsat_async
-from .viirs import download_viirs_for_pipeline
+from .landsat import download_landsat
+from .viirs import download_viirs
 
 logger = logging.getLogger(__name__)
 
@@ -260,7 +260,7 @@ class AsyncDownloadOrchestrator:
         logger.debug(f"Earthdata token: {token_info}")
 
         try:
-            result = await download_viirs_for_pipeline(
+            result = await download_viirs(
                 date=plan.primary_date,
                 bbox=plan.bbox,
                 earthdata_token=self.earthdata_token or "",  # Provide empty string if None
@@ -280,7 +280,7 @@ class AsyncDownloadOrchestrator:
         """Download Landsat data for all dates"""
         logger.info(f"Downloading Landsat data for {len(plan.landsat_dates)} dates")
 
-        return await download_landsat_async(
+        return await download_landsat(
             dates=plan.landsat_dates,
             bbox=plan.bbox,
             bands=plan.landsat_bands,
