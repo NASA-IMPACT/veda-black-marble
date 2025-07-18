@@ -78,7 +78,8 @@ def test_pipeline_config_creation():
     # # Verify key legacy compatibility values
     # assert legacy_dict['viirs']['floor'] == basic_config.analysis.ntl_floor
     # assert legacy_dict['ndui']['floor'] == basic_config.analysis.ndui_floor
-    # assert legacy_dict['landsat']['band_scale_factor'] == basic_config.preparation.landsat_scale_factor
+    # assert (legacy_dict['landsat']['band_scale_factor'] ==
+    #         basic_config.preparation.landsat_scale_factor)
 
 
 def test_pipeline_config_validation():
@@ -106,7 +107,8 @@ def test_pipeline_config_validation():
     config = PipelineConfig.for_bm_parity(bbox, date, output_path)
     config.min_valid_pixel_percentage = 150.0
     # Validation removed
-    pass  # with pytest.raises(ValueError, match="min_valid_pixel_percentage must be between 0 and 100"):
+    pass  # with pytest.raises(ValueError,
+    #             match="min_valid_pixel_percentage must be between 0 and 100"):
     #     config.validate()
 
     # Test invalid resolution
@@ -281,9 +283,7 @@ def test_default_config_functions():
     # from blackmarble.config import get_default_config, get_enhanced_config
     # These functions were removed
 
-    bbox = (-74.05, 40.69, -73.95, 40.79)
-    date = datetime(2023, 9, 15)
-    output_path = "/tmp/test.tif"
+    datetime(2023, 9, 15)
 
     # Test default config function - functions were removed
     pytest.skip("get_default_config and get_enhanced_config functions were removed")

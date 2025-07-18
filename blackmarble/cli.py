@@ -26,7 +26,8 @@ def run(
         None,
         "--earthdata-token",
         "-t",
-        help="NASA Earthdata token for VIIRS downloads. If not provided, reads from EARTHDATA_TOKEN environment variable.",
+        help="NASA Earthdata token for VIIRS downloads. "
+        "If not provided, reads from EARTHDATA_TOKEN environment variable.",
         envvar="EARTHDATA_TOKEN",
     ),
     use_async: bool = typer.Option(
@@ -65,7 +66,8 @@ def run(
     ntl_enhancement: str = typer.Option(
         "hybrid",
         "--ntl-enhancement",
-        help="NTL enhancement method: 'hybrid' (urban field with dynamic scaling), 'multiplicative' (urban field), 'additive' (urban field), or 'legacy' (direct burn-in).",
+        help="NTL enhancement method: 'hybrid' (urban field with dynamic scaling), "
+        "'multiplicative' (urban field), 'additive' (urban field), or 'legacy' (direct burn-in).",
     ),
 ):
     """
@@ -130,7 +132,8 @@ def run(
         )
     else:
         typer.echo(
-            f"Error: Unknown config preset '{config_preset}'. Use 'default', 'high_quality', or 'fast'.",
+            f"Error: Unknown config preset '{config_preset}'. "
+            f"Use 'default', 'high_quality', or 'fast'.",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -164,7 +167,8 @@ def run(
     valid_enhancements = ["hybrid", "additive", "multiplicative", "legacy"]
     if ntl_enhancement not in valid_enhancements:
         typer.echo(
-            f"Error: Invalid NTL enhancement '{ntl_enhancement}'. Must be one of: {', '.join(valid_enhancements)}",
+            f"Error: Invalid NTL enhancement '{ntl_enhancement}'. "
+            f"Must be one of: {', '.join(valid_enhancements)}",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -190,7 +194,8 @@ def run(
     typer.echo(f"  Date: {date.strftime('%Y-%m-%d')}")
     typer.echo(f"  Config Preset: {config_preset}")
     typer.echo(
-        f"  Road Rasterization: {'Fractional (5x5)' if fractional_roads else 'Binary (hierarchical)'}"
+        f"  Road Rasterization: "
+        f"{'Fractional (5x5)' if fractional_roads else 'Binary (hierarchical)'}"
     )
     typer.echo(f"  NTL Enhancement: {ntl_enhancement}")
     typer.echo(f"  Output Path: {output_path_obj}")

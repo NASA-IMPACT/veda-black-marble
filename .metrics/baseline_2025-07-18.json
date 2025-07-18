@@ -1,32 +1,22 @@
 {
-  "timestamp": "2025-07-18T17:00:01Z",
+  "timestamp": "2025-07-18T17:39:15Z",
   "tools": {
     "vulture": {
-      "timestamp": "2025-07-18T17:00:01Z",
+      "timestamp": "2025-07-18T17:39:15Z",
       "tool": "vulture",
-      "num_items": 1,
-      "total_confidence": 80,
-      "by_file": {
-        "blackmarble/acquire/async_base.py": [
-          {
-            "path": "blackmarble/acquire/async_base.py",
-            "line": 115,
-            "message": "unused variable 'args' (100% confidence, 1 line)"
-          }
-        ]
-      }
+      "num_items": 0,
+      "total_confidence": 0,
+      "by_file": {}
     },
     "ruff": {
-      "timestamp": "2025-07-18T17:00:01Z",
+      "timestamp": "2025-07-18T17:39:15Z",
       "tool": "ruff",
-      "issue_count": 36,
-      "rule_counts": {
-        "E501": 36
-      }
+      "issue_count": 0,
+      "rule_counts": {}
     }
   },
   "summary": {
-    "total_issues": 37,
+    "total_issues": 0,
     "tools_run": 2
   }
 }

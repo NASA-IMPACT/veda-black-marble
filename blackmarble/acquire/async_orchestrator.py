@@ -256,9 +256,8 @@ class AsyncDownloadOrchestrator:
         """Download VIIRS data"""
         logger.info(f"Downloading VIIRS data for {plan.primary_date}")
         logger.debug(f"Plan bbox: {plan.bbox}")
-        logger.debug(
-            f"Earthdata token: {'***' + self.earthdata_token[-4:] if self.earthdata_token else 'None'}"
-        )
+        token_info = '***' + self.earthdata_token[-4:] if self.earthdata_token else 'None'
+        logger.debug(f"Earthdata token: {token_info}")
 
         try:
             result = await download_viirs_for_pipeline(

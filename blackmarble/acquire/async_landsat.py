@@ -261,7 +261,8 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         logger.info(
             f"Found {len(scenes)} Landsat scenes matching criteria "
             f"(cloud cover <= {cloud_cover_max}%). "
-            f"Checked {scenes_checked} scenes, filtered {scenes_filtered_by_cloud} due to cloud cover."
+            f"Checked {scenes_checked} scenes, "
+            f"filtered {scenes_filtered_by_cloud} due to cloud cover."
         )
         return scenes
 

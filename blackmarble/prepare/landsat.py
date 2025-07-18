@@ -261,7 +261,8 @@ def process_landsat_date(
                 print(f"    Cropped mask shape: {cloud_mask_cropped.shape}")
             else:
                 print(
-                    f"  {band_name} after masking: {clear_pixels / total_pixels * 100:.1f}% valid pixels"
+                    f"  {band_name} after masking: "
+                    f"{clear_pixels / total_pixels * 100:.1f}% valid pixels"
                 )
         else:
             masked_data = band_data

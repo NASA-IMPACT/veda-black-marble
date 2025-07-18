@@ -1,8 +1,6 @@
 {
-  "timestamp": "2025-07-18T17:00:01Z",
+  "timestamp": "2025-07-18T17:39:15Z",
   "tool": "ruff",
-  "issue_count": 36,
-  "rule_counts": {
-    "E501": 36
-  }
+  "issue_count": 0,
+  "rule_counts": {}
 }

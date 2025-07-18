@@ -191,7 +191,8 @@ def fetch_road_network(
                         graph.add_edge(u, v, **edge_attrs)
 
                 print(
-                    f"Loaded {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges from cache"
+                    f"Loaded {graph.number_of_nodes()} nodes, "
+                    f"{graph.number_of_edges()} edges from cache"
                 )
                 return graph
             except Exception as e:

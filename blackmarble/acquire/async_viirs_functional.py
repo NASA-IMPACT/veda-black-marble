@@ -182,7 +182,8 @@ async def download_viirs_tiles_async(
         # Validate bbox unpacking
         min_lon, min_lat, max_lon, max_lat = bbox
         logger.debug(
-            f"Bbox unpacked: min_lon={min_lon}, min_lat={min_lat}, max_lon={max_lon}, max_lat={max_lat}"
+            f"Bbox unpacked: min_lon={min_lon}, min_lat={min_lat}, "
+            f"max_lon={max_lon}, max_lat={max_lat}"
         )
     except ValueError as e:
         logger.error(f"FOUND UNPACKING ERROR IN BBOX: {e}")
@@ -298,8 +299,11 @@ async def download_viirs_tiles_async(
                 except ValueError as e:
                     logger.error(f"Error unpacking download_tasks[{i}]: {e}")
                     logger.error(f"download_tasks[{i}] = {download_tasks[i]}")
+                    has_len = hasattr(download_tasks[i], '__len__')
+                    length = len(download_tasks[i]) if has_len else 'N/A'
                     logger.error(
-                        f"Type: {type(download_tasks[i])}, Length: {len(download_tasks[i]) if hasattr(download_tasks[i], '__len__') else 'N/A'}"
+                        f"Type: {type(download_tasks[i])}, "
+                        f"Length: {length}"
                     )
                     raise ValueError(f"Failed to unpack download_tasks[{i}]: {e}")
 

@@ -378,7 +378,8 @@ def download_tiles_for_band(
         if not scene_dir:
             if ignore_missing:
                 print(
-                    f"Warning: No data found for tile P{p:03d}R{r:03d} on {year}-{month}-{day}. Skipping."
+                    f"Warning: No data found for tile P{p:03d}R{r:03d} "
+                    f"on {year}-{month}-{day}. Skipping."
                 )
                 continue
             else:

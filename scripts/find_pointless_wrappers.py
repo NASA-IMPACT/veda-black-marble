@@ -8,7 +8,6 @@ A wrapper is considered pointless if it:
 """
 import ast
 import pathlib
-from typing import Dict, List
 
 
 def analyze_function(node: ast.FunctionDef) -> dict:
@@ -48,7 +47,7 @@ def find_wrappers_in_file(filepath: pathlib.Path) -> list[dict]:
     try:
         with open(filepath) as f:
             tree = ast.parse(f.read(), filename=str(filepath))
-    except:
+    except (SyntaxError, OSError):
         return []
 
     wrappers = []

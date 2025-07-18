@@ -112,7 +112,7 @@ class AsyncDownloaderBase(ABC):
         self._session = ClientSession(timeout=timeout, headers=self.config.headers)
         return self
 
-    async def __aexit__(self, *args):
+    async def __aexit__(self, _exc_type, _exc_val, _exc_tb):
         """Async context manager exit"""
         if self._session:
             await self._session.close()

@@ -276,8 +276,10 @@ def black_marble_pipeline(
         # OLD CODE (commented out):
         # viirs_corrected = prepare.apply_viirs_floor_ceiling(
         #     ntl_data=viirs_scaled,
-        #     floor_value=config.analysis.ntl_floor if hasattr(config, 'analysis') else (config.viirs.floor if hasattr(config, 'viirs') else 0.1),
-        #     ceiling_value=config.analysis.ntl_ceiling if hasattr(config, 'analysis') else (config.viirs.ceiling if hasattr(config, 'viirs') else 10.0)
+        #     floor_value=config.analysis.ntl_floor if hasattr(config, 'analysis') else \
+        #                 (config.viirs.floor if hasattr(config, 'viirs') else 0.1),
+        #     ceiling_value=config.analysis.ntl_ceiling if hasattr(config, 'analysis') else \
+        #                   (config.viirs.ceiling if hasattr(config, 'viirs') else 10.0)
         # )
 
         # Save diagnostic output if requested
@@ -341,7 +343,8 @@ def black_marble_pipeline(
     # Print projection info clearly
     if config and config.verbose:
         print(
-            f"Using projection: {target_crs} (UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'})"
+            f"Using projection: {target_crs} "
+            f"(UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'})"
         )
 
     # Reproject Landsat bands
@@ -410,7 +413,8 @@ def black_marble_pipeline(
 
             print(f"Aligned VIIRS shape: {viirs_reprojected.shape}")
             print(
-                f"Aligned VIIRS non-zero pixels: {(viirs_reprojected > 0).sum()} ({(viirs_reprojected > 0).sum() / viirs_reprojected.size * 100:.1f}%)"
+                f"Aligned VIIRS non-zero pixels: {(viirs_reprojected > 0).sum()} "
+                f"({(viirs_reprojected > 0).sum() / viirs_reprojected.size * 100:.1f}%)"
             )
 
             # Save diagnostic output if requested
@@ -544,7 +548,8 @@ def black_marble_pipeline(
         enhanced_pixels = np.sum(enhancement > 0)
         if enhanced_pixels > 0:
             print(
-                f"  Enhanced {enhanced_pixels} pixels ({enhanced_pixels / ntl_composite.size * 100:.1f}%)"
+                f"  Enhanced {enhanced_pixels} pixels "
+                f"({enhanced_pixels / ntl_composite.size * 100:.1f}%)"
             )
             print(f"  Major roads (1.3x): {np.sum(major_roads_mask)} pixels")
             print(f"  Minor roads (1.1x): {np.sum(minor_roads_mask)} pixels")
@@ -581,11 +586,13 @@ def black_marble_pipeline(
         print("\nBefore NDUI Calculation:")
         print(f"  NTL composite shape: {ntl_composite.shape}")
         print(
-            f"  NTL non-zero pixels: {(ntl_composite > 0).sum()} ({(ntl_composite > 0).sum() / ntl_composite.size * 100:.1f}%)"
+            f"  NTL non-zero pixels: {(ntl_composite > 0).sum()} "
+            f"({(ntl_composite > 0).sum() / ntl_composite.size * 100:.1f}%)"
         )
         print(f"  NTL range: [{np.nanmin(ntl_composite):.3f}, {np.nanmax(ntl_composite):.3f}]")
         print(
-            f"  NDVI non-NaN pixels: {(~np.isnan(ndvi)).sum()} ({(~np.isnan(ndvi)).sum() / ndvi.size * 100:.1f}%)"
+            f"  NDVI non-NaN pixels: {(~np.isnan(ndvi)).sum()} "
+            f"({(~np.isnan(ndvi)).sum() / ndvi.size * 100:.1f}%)"
         )
         print(f"  NDVI range: [{np.nanmin(ndvi):.3f}, {np.nanmax(ndvi):.3f}]")
 
@@ -606,7 +613,8 @@ def black_marble_pipeline(
         # DIAGNOSTIC: Print NDUI statistics
         print("\nAfter NDUI Calculation:")
         print(
-            f"  NDUI non-zero pixels: {(ndui > 0).sum()} ({(ndui > 0).sum() / ndui.size * 100:.1f}%)"
+            f"  NDUI non-zero pixels: {(ndui > 0).sum()} "
+            f"({(ndui > 0).sum() / ndui.size * 100:.1f}%)"
         )
         print(f"  NDUI range: [{np.nanmin(ndui):.3f}, {np.nanmax(ndui):.3f}]")
 
@@ -723,7 +731,8 @@ def black_marble_pipeline(
 
     # 5. Create false color composite for context (optional)
     # landsat_viz = None  # Currently unused
-    # if "B5" in landsat_reprojected and "B4" in landsat_reprojected and "B3" in landsat_reprojected:
+    # if ("B5" in landsat_reprojected and "B4" in landsat_reprojected and
+    #     "B3" in landsat_reprojected):
     #     landsat_viz = enhance.create_false_color_composite(
     #         red_channel=landsat_reprojected["B5"],  # NIR in red
     #         green_channel=landsat_reprojected["B4"],  # Red in green

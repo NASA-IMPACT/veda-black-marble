@@ -207,7 +207,8 @@ def black_marble_pipeline_async(
     target_resolution_landsat = 30.0  # 30 meters for Landsat
 
     print(
-        f"Using projection: {target_crs} (UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'})"
+        f"Using projection: {target_crs} "
+        f"(UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'})"
     )
 
     # Process Landsat data
@@ -252,7 +253,8 @@ def black_marble_pipeline_async(
     for idx, target_date in enumerate(sorted(landsat_files_by_date.keys())):
         # Log memory usage
         print(
-            f"\nProcessing Landsat for {target_date.strftime('%Y-%m-%d')} (date {idx + 1}/{len(landsat_files_by_date)})"
+            f"\nProcessing Landsat for {target_date.strftime('%Y-%m-%d')} "
+            f"(date {idx + 1}/{len(landsat_files_by_date)})"
         )
         if monitor_memory and process is not None:
             memory_gb = process.memory_info().rss / 1024 / 1024 / 1024
@@ -397,7 +399,8 @@ def black_marble_pipeline_async(
 
             print(f"Aligned VIIRS shape: {viirs_reprojected.shape}")
             print(
-                f"Aligned VIIRS non-zero pixels: {(viirs_reprojected > 0).sum()} ({(viirs_reprojected > 0).sum() / viirs_reprojected.size * 100:.1f}%)"
+                f"Aligned VIIRS non-zero pixels: {(viirs_reprojected > 0).sum()} "
+                f"({(viirs_reprojected > 0).sum() / viirs_reprojected.size * 100:.1f}%)"
             )
 
     # Rasterize roads to match grid
@@ -429,11 +432,14 @@ def black_marble_pipeline_async(
             # Print statistics
             road_pixels = np.sum(roads_fractional > 0)
             print(
-                f"Rasterized {road_pixels} pixels with roads ({road_pixels / roads_fractional.size * 100:.2f}%)"
+                f"Rasterized {road_pixels} pixels with roads "
+                f"({road_pixels / roads_fractional.size * 100:.2f}%)"
             )
             if road_pixels > 0:
                 print(
-                    f"Fractional coverage range: {roads_fractional[roads_fractional > 0].min():.3f} to {roads_fractional.max():.3f}"
+                    f"Fractional coverage range: "
+                    f"{roads_fractional[roads_fractional > 0].min():.3f} to "
+                    f"{roads_fractional.max():.3f}"
                 )
                 print(
                     f"Mean fractional coverage: {roads_fractional[roads_fractional > 0].mean():.3f}"
@@ -468,7 +474,8 @@ def black_marble_pipeline_async(
             # Print statistics
             road_pixels = np.sum(roads_rasterized > 0)
             print(
-                f"Rasterized {road_pixels} pixels ({road_pixels / roads_rasterized.size * 100:.2f}%)"
+                f"Rasterized {road_pixels} pixels "
+                f"({road_pixels / roads_rasterized.size * 100:.2f}%)"
             )
 
             # Save diagnostic output if requested
@@ -560,7 +567,8 @@ def black_marble_pipeline_async(
             print(f"  - Max urban field: {urban_field.max():.3f}")
             print(f"  - Mean urban field (where > 0): {urban_field[urban_field > 0].mean():.3f}")
             print(
-                f"  - Urban pixels: {np.sum(urban_field > 0)} ({np.sum(urban_field > 0) / urban_field.size * 100:.1f}%)"
+                f"  - Urban pixels: {np.sum(urban_field > 0)} "
+                f"({np.sum(urban_field > 0) / urban_field.size * 100:.1f}%)"
             )
 
             # Save urban field diagnostic
@@ -702,7 +710,8 @@ def black_marble_pipeline_async(
             enhanced_pixels = np.sum(enhancement > 0)
             if enhanced_pixels > 0:
                 print(
-                    f"  Enhanced {enhanced_pixels} pixels ({enhanced_pixels / ntl_composite.size * 100:.1f}%)"
+                    f"  Enhanced {enhanced_pixels} pixels "
+                    f"({enhanced_pixels / ntl_composite.size * 100:.1f}%)"
                 )
                 # Show appropriate statistics based on road type
                 if roads_rasterized is not None and not (
@@ -733,7 +742,8 @@ def black_marble_pipeline_async(
                             else 0
                         )
                         print(
-                            f"  Road coverage: {coverage_pixels} pixels with avg {avg_coverage:.1%} coverage"
+                            f"  Road coverage: {coverage_pixels} pixels "
+                            f"with avg {avg_coverage:.1%} coverage"
                         )
                 print(f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}")
 
@@ -767,11 +777,13 @@ def black_marble_pipeline_async(
         print("\nBefore NDUI Calculation:")
         print(f"  NTL composite shape: {ntl_composite.shape}")
         print(
-            f"  NTL non-zero pixels: {(ntl_composite > 0).sum()} ({(ntl_composite > 0).sum() / ntl_composite.size * 100:.1f}%)"
+            f"  NTL non-zero pixels: {(ntl_composite > 0).sum()} "
+            f"({(ntl_composite > 0).sum() / ntl_composite.size * 100:.1f}%)"
         )
         print(f"  NTL range: [{np.nanmin(ntl_composite):.3f}, {np.nanmax(ntl_composite):.3f}]")
         print(
-            f"  NDVI non-NaN pixels: {(~np.isnan(ndvi)).sum()} ({(~np.isnan(ndvi)).sum() / ndvi.size * 100:.1f}%)"
+            f"  NDVI non-NaN pixels: {(~np.isnan(ndvi)).sum()} "
+            f"({(~np.isnan(ndvi)).sum() / ndvi.size * 100:.1f}%)"
         )
         print(f"  NDVI range: [{np.nanmin(ndvi):.3f}, {np.nanmax(ndvi):.3f}]")
 
@@ -792,7 +804,8 @@ def black_marble_pipeline_async(
         # DIAGNOSTIC: Print NDUI statistics
         print("\nAfter NDUI Calculation:")
         print(
-            f"  NDUI non-zero pixels: {(ndui > 0).sum()} ({(ndui > 0).sum() / ndui.size * 100:.1f}%)"
+            f"  NDUI non-zero pixels: {(ndui > 0).sum()} "
+            f"({(ndui > 0).sum() / ndui.size * 100:.1f}%)"
         )
         print(f"  NDUI range: [{np.nanmin(ndui):.3f}, {np.nanmax(ndui):.3f}]")
 

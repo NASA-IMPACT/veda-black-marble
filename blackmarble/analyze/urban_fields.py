@@ -158,10 +158,12 @@ def enhance_ntl_with_urban_field(
         print(f"  - NTL range after: [{result.min():.1f}, {result.max():.1f}]")
         print(f"  - Max enhancement factor: {max_enhancement_factor:.3f}")
         print(
-            f"  - Enhancement factors range: [{enhancement_factor.min():.3f}, {enhancement_factor.max():.3f}]"
+            f"  - Enhancement factors range: "
+            f"[{enhancement_factor.min():.3f}, {enhancement_factor.max():.3f}]"
         )
         print(
-            f"  - Pixels enhanced: {np.sum(enhancement_factor > 1.001)} ({np.sum(enhancement_factor > 1.001) / enhancement_factor.size * 100:.1f}%)"
+            f"  - Pixels enhanced: {np.sum(enhancement_factor > 1.001)} "
+            f"({np.sum(enhancement_factor > 1.001) / enhancement_factor.size * 100:.1f}%)"
         )
 
         return result
