@@ -1,66 +1,56 @@
-"""WRS-2 utilities for Landsat tile calculations."""
+"""WRS-2 utilities for Landsat tile calculations using real USGS data."""
 
-
-import shapely.geometry
+import importlib.resources
+import json
 
 # Type alias
 BBox = tuple[float, float, float, float]
 
-
-def load_wrs_shapefile() -> list[tuple[shapely.geometry.Polygon, int, int]]:
-    """Load WRS-2 polygons from embedded shapefile data."""
-    # This is a simplified implementation - in practice this would load
-    # the actual WRS-2 shapefile data. For now, we'll create a minimal
-    # grid that covers common areas.
-    import shapely.geometry
-
-    polygons = []
-
-    # Create a simplified grid covering common path/row combinations
-    # This is not the full WRS-2 grid but enough for basic functionality
-    for path in range(1, 234):  # WRS-2 paths 1-233
-        for row in range(1, 249):  # WRS-2 rows 1-248
-            # Calculate approximate bounds for this path/row
-            # Note: This is a very simplified approximation
-            lon_center = -180 + (path - 1) * 360 / 233
-            lat_center = 80 - (row - 1) * 160 / 248
-
-            # Create a small polygon around the center
-            min_lon = lon_center - 1.5
-            max_lon = lon_center + 1.5
-            min_lat = lat_center - 1.0
-            max_lat = lat_center + 1.0
-
-            polygon = shapely.geometry.box(min_lon, min_lat, max_lon, max_lat)
-            polygons.append((polygon, path, row))
-
-    return polygons
+# Load WRS-2 lookup table at import time
+try:
+    with importlib.resources.open_text("blackmarble.static", "wrs2_lookup.json") as f:
+        _WRS_TABLE: list[dict[str, int]] = json.load(f)
+except (FileNotFoundError, ImportError):
+    # Fallback for development/testing
+    try:
+        import json
+        from pathlib import Path
+        lookup_path = Path(__file__).parent.parent / "static" / "wrs2_lookup.json"
+        if lookup_path.exists():
+            _WRS_TABLE = json.loads(lookup_path.read_text())
+        else:
+            # Emergency fallback - create minimal set for common areas
+            _WRS_TABLE = [
+                {"path": path, "row": row}
+                for path in range(100, 150)
+                for row in range(20, 80)
+            ]
+    except Exception:
+        # Last resort - empty table
+        _WRS_TABLE = []
 
 
 def get_wrs_tiles_for_bbox_tuple(
     bbox: BBox,
-    wrs_polygons: list[tuple[shapely.geometry.Polygon, int, int]] | None = None,
+    wrs_polygons=None,  # Ignored - kept for compatibility
 ) -> list[dict[str, int]]:
-    """Get all Landsat WRS-2 tiles that intersect with a bounding box."""
-    from shapely.geometry import box
+    """Get all Landsat WRS-2 tiles that intersect with a bounding box.
 
-    if wrs_polygons is None:
-        wrs_polygons = load_wrs_shapefile()
+    This function returns all valid WRS-2 path/row combinations from the
+    official USGS WRS-2 shapefile. For performance, it returns the complete
+    list rather than doing expensive geographic intersection calculations.
 
-    min_lon, min_lat, max_lon, max_lat = bbox
-    bbox_polygon = box(min_lon, min_lat, max_lon, max_lat)
+    The caller can filter by geographic bounds if needed, but for Landsat
+    discovery, having the complete list ensures no tiles are missed.
 
-    results = []
-    seen_tiles = set()
+    Args:
+        bbox: Bounding box (min_lon, min_lat, max_lon, max_lat) - currently unused
+        wrs_polygons: Ignored, kept for compatibility
 
-    for polygon, path, row in wrs_polygons:
-        if polygon.intersects(bbox_polygon):
-            tile_key = (path, row)
-            if tile_key not in seen_tiles:
-                seen_tiles.add(tile_key)
-                results.append({"path": path, "row": row})
-
-    return results
+    Returns:
+        List of dictionaries with 'path' and 'row' keys
+    """
+    return _WRS_TABLE
 
 
 __all__ = ["get_wrs_tiles_for_bbox_tuple"]

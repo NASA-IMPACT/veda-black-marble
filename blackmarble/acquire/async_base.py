@@ -307,29 +307,28 @@ class DownloadProgressTracker:
         self.failed = 0
         self.in_progress = 0
         self.description = description
-        self._lock = asyncio.Lock()
+        self._lock = None  # No longer needed for sync method
 
-    async def update(self, result: DownloadResult):
+    def update(self, result: DownloadResult):
         """Update progress based on download result"""
-        async with self._lock:
-            if result.status == DownloadStatus.IN_PROGRESS:
-                self.in_progress += 1
-            elif result.status == DownloadStatus.COMPLETED:
-                self.completed += 1
-                self.in_progress = max(0, self.in_progress - 1)
-            elif result.status == DownloadStatus.FAILED:
-                self.failed += 1
-                self.in_progress = max(0, self.in_progress - 1)
+        if result.status == DownloadStatus.IN_PROGRESS:
+            self.in_progress += 1
+        elif result.status == DownloadStatus.COMPLETED:
+            self.completed += 1
+            self.in_progress = max(0, self.in_progress - 1)
+        elif result.status == DownloadStatus.FAILED:
+            self.failed += 1
+            self.in_progress = max(0, self.in_progress - 1)
 
-            # Print progress (could be replaced with tqdm or rich)
-            print(
-                f"\r{self.description}: "
-                f"{self.completed}/{self.total} completed, "
-                f"{self.failed} failed, "
-                f"{self.in_progress} in progress",
-                end="",
-                flush=True,
-            )
+        # Print progress (could be replaced with tqdm or rich)
+        print(
+            f"\r{self.description}: "
+            f"{self.completed}/{self.total} completed, "
+            f"{self.failed} failed, "
+            f"{self.in_progress} in progress",
+            end="",
+            flush=True,
+        )
 
     def finish(self):
         """Print final summary"""
