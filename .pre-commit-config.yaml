@@ -1,3 +1,6 @@
+# Skip pre-commit during rebase
+default_stages: [commit]
+
 repos:
   - repo: local
     hooks:
@@ -13,7 +16,7 @@ repos:
         entry: uv run ruff check --exit-zero
         language: system
         types: [python]
-        stages: [pre-commit]
+        stages: [commit]
 
       - id: isort
         name: isort
@@ -27,7 +30,7 @@ repos:
         entry: uv run autoflake --remove-all-unused-imports --remove-unused-variables --check
         language: system
         types: [python]
-        stages: [pre-commit]
+        stages: [commit]
         always_run: false
         verbose: true
 
@@ -37,7 +40,7 @@ repos:
         language: system
         pass_filenames: true      # only check changed files
         types: [python]
-        stages: [pre-commit]
+        stages: [commit]
         # do not block:
         always_run: false
         verbose: true
