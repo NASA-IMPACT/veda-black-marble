@@ -50,6 +50,14 @@ dev = [
   "pytest>=8.3.5",
   "pyright>=1.1.402",
   "psutil>=7.0.0",
+  "black==23.12.1",
+  "isort==5.13.2",
+  "ruff==0.3.5",
+  "vulture==2.7",
+  "autoflake==2.2.0",
+  "types-requests",
+  "radon>=6.0.1",
+  "interrogate>=1.5.0",
 ]
 
 [tool.pytest.ini_options]
@@ -59,3 +67,57 @@ testpaths = ["tests"]
 [tool.pyright]
 # Docker utility files may have dependencies not available during type checking
 exclude = ["docker/"]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+reportMissingImports = "warning"
+reportMissingTypeStubs = "warning"
+reportUnknownParameterType = "error"
+reportUnknownArgumentType = "error"
+reportUnknownVariableType = "error"
+reportUnknownMemberType = "error"
+reportUntypedFunctionDecorator = "error"
+reportUntypedClassDecorator = "error"
+
+# ───────────────────────────────────────────────────────────────
+# Code Quality Tools Configuration
+# ───────────────────────────────────────────────────────────────
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+exclude = '''
+/(
+    \.git
+  | \.pytest_cache
+  | \.metrics
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+float_to_top = true
+skip_gitignore = true
+
+[tool.ruff]
+select = ["F","I","E","W","UP"]          # basic correctness & pyupgrade
+ignore = []                              # none ignored; we just won't fail yet
+line-length = 100
+target-version = "py311"
+
+# Pyright is configured in the existing [tool.pyright] section above
+# We'll use pyright instead of mypy for type checking
+
+[tool.vulture]
+min_confidence = 80
+sort_by_size = true
+exclude = ["tests/*", "notebooks/*", "scripts/*", "docker/*"]
+
+[tool.autoflake]
+remove-all-unused-imports = true
+remove-unused-variables = true
+ignore-init-module-imports = true
+in-place = false         # never rewrite in baseline phase
+exclude = "**/__init__.py"

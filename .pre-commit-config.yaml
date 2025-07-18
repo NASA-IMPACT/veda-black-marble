@@ -1,0 +1,40 @@
+repos:
+  - repo: local
+    hooks:
+      - id: black
+        name: black
+        entry: uv run black
+        language: system
+        types: [python]
+        stages: [manual]          # run with `pre-commit run black -a` only
+
+      - id: ruff
+        name: ruff
+        entry: uv run ruff check --exit-zero
+        language: system
+        types: [python]
+        stages: [commit]
+
+      - id: isort
+        name: isort
+        entry: uv run isort
+        language: system
+        types: [python]
+        stages: [manual]
+
+      - id: autoflake
+        name: autoflake
+        entry: uv run autoflake --remove-all-unused-imports --remove-unused-variables --exit-zero-even-if-changed
+        language: system
+        types: [python]
+        stages: [commit]
+
+      - id: pyright
+        name: pyright
+        entry: uv run pyright
+        language: system
+        pass_filenames: false     # project-wide run
+        stages: [commit]
+        # do not block:
+        always_run: true
+        verbose: true
