@@ -1,19 +1,13 @@
-"""Target pipeline structure showing the ideal flow of Black Marble processing.
+"""Pipeline for Black Marble processing using async I/O.
 
-This file demonstrates the clear progression through:
-1. Acquire - Get the data we need
-2. Prepare - Process and quality check the data
-3. Analyze - Calculate indices and composites
-4. Enhance - Improve visual quality and add features
-5. Export - Generate final outputs
-
-Each phase builds on the previous one in a clear, readable flow.
+This pipeline uses async I/O for all data acquisition operations
+for maximum performance.
 """
 
 import logging
 import os
 from datetime import datetime
-from typing import Any, Literal, cast
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -22,7 +16,6 @@ from osgeo import gdal
 
 from . import acquire, analyze, enhance, export, prepare
 from .config import PipelineConfig
-from .pipeline_async import black_marble_pipeline_async
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -31,85 +24,199 @@ BBox = tuple[float, float, float, float]
 logger = logging.getLogger(__name__)
 
 
-def black_marble_pipeline(
+async def black_marble_pipeline(
     bbox: BBox,
     date: datetime,
     output_path: str,
     config: PipelineConfig | None = None,
-    use_async: bool = True,
     earthdata_token: str | None = None,
 ) -> dict[str, Any]:
-    """Main Black Marble processing pipeline.
+    """Main Black Marble processing pipeline using async I/O.
 
-    By default, uses async downloads for maximum performance. Set use_async=False
-    to use the original sequential download approach.
+    This pipeline uses async I/O for all data acquisition operations
+    to maximize download performance.
 
     Args:
         bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
         date: Target date for processing
         output_path: Where to save the final output
         config: Optional configuration overrides
-        use_async: Use async downloads (default: True)
         earthdata_token: NASA Earthdata token (or set EARTHDATA_TOKEN env var)
 
     Returns:
         Dictionary with results and metadata
     """
-    # Default to async pipeline for better performance
-    if use_async:
-        logger.info("Using async pipeline with front-loaded downloads")
-        return black_marble_pipeline_async(
-            bbox=bbox,
-            date=date,
-            output_path=output_path,
-            config=config,
-            earthdata_token=earthdata_token,
+
+    # ==================== SETUP PHASE ====================
+    print("🚀 Starting Black Marble pipeline with async downloads")
+
+    # Get Earthdata token from parameter or environment
+    if earthdata_token is None:
+        earthdata_token = os.environ.get("EARTHDATA_TOKEN")
+        if not earthdata_token:
+            logger.warning(
+                "No Earthdata token provided. Set EARTHDATA_TOKEN environment variable "
+                "or pass earthdata_token parameter. VIIRS downloads will be skipped."
+            )
+
+    # Get configuration values
+    composite_months = config.acquisition.composite_months if config else 12
+    data_dir = "./data"  # Use default data directory
+
+    # ==================== ASYNC DOWNLOAD PHASE ====================
+    # Download ALL data upfront using async I/O
+
+    print(f"\n📥 Downloading all data for {composite_months + 1} dates...")
+    print(f"   Target date: {date.strftime('%Y-%m-%d')}")
+    print(f"   Bounding box: {bbox}")
+
+    # Create download plan and orchestrator
+    from .acquire.async_orchestrator import AsyncDownloadOrchestrator, DownloadPlan
+
+    plan = DownloadPlan.from_pipeline_config(bbox, date, config)
+    orchestrator = AsyncDownloadOrchestrator(earthdata_token=earthdata_token, show_progress=True)
+
+    # Run async downloads
+    download_results = await orchestrator.download_all(plan)
+
+    print("\n✅ Downloads complete!")
+    print(download_results.summary())
+
+    # Check for critical failures
+    if not download_results.viirs_data and earthdata_token:
+        logger.error("VIIRS downloads failed - cannot continue without nighttime lights data")
+        print("❌ Pipeline failed: VIIRS data is required but download failed")
+        print("   Please check your EARTHDATA_TOKEN and network connection")
+        # Check if there were specific download errors
+        viirs_errors = [err for err in download_results.failed_downloads if "VIIRS" in err]
+        if viirs_errors:
+            print(f"   Error details: {viirs_errors[0]}")
+        raise RuntimeError(
+            "VIIRS download failed - pipeline cannot continue without nighttime lights data"
         )
 
-    # Original sequential pipeline
-    logger.info("Using sequential pipeline (legacy mode)")
-
-    # ==================== ACQUIRE PHASE ====================
-    # Get all the data we need from various sources
-
-    # 1. Setup for Landsat acquisition
-    # Get number of months for compositing from config
-    composite_months = getattr(config, "composite_history_months", 12) if config else 12
-
-    # Get cache directory from config if enabled
-    cache_dir = (
-        getattr(config, "cache_dir", None)
-        if config and getattr(config, "cache_downloads", False)
-        else None
-    )
-
-    # 2. Acquire VIIRS nighttime lights data
-    viirs_data = acquire.download_vnp46a2_tiles(
-        date=date,
-        bbox=bbox,
-        output_dir="./data/viirs",
-        skip_existing=True,
-        cache_dir=cache_dir,
-    )
-
-    # 3. Acquire OpenStreetMap road network
-    # Note: fetch_road_network uses custom_filter for road types
-    road_types = ["motorway", "trunk", "primary", "secondary"]
-    custom_filter = f'["highway"~"{"_link|".join(road_types)}"]' if road_types else None
-
-    road_network = acquire.fetch_road_network(
-        bbox=bbox, network_type="all", custom_filter=custom_filter
-    )
+    if not download_results.landsat_data:
+        logger.warning(
+            "No Landsat data downloaded - pipeline will create a minimal output with OSM data only"
+        )
+        print("⚠️  No Landsat data available - creating minimal output with available data")
 
     # ==================== PREPARE PHASE ====================
     # Process raw data into analysis-ready format
 
-    # Ensure temp directory exists for VRTs
-    os.makedirs("data/temp", exist_ok=True)
+    print("\n🔧 Processing downloaded data...")
 
-    # 1. Process Landsat data date-by-date with QA masking
-    # This ensures QA masks are applied before temporal compositing
-    print("Processing Landsat data with date-by-date QA masking")
+    # Ensure temp directory exists for VRTs
+    os.makedirs(f"{data_dir}/temp", exist_ok=True)
+
+    # Extract downloaded data
+    viirs_files = download_results.viirs_data
+    landsat_files_by_date = download_results.landsat_data
+    road_network = download_results.osm_data
+
+    # Process VIIRS data (if available)
+    viirs_corrected = None
+    viirs_profile = None
+    viirs_transform = None
+
+    if viirs_files:
+        print("\n📊 Processing VIIRS nighttime lights...")
+        print(f"VIIRS files keys: {list(viirs_files.keys())}")
+        for key, files in viirs_files.items():
+            print(f"  {key}: {len(files)} files")
+
+        # Check if we have the expected layers - match sync pipeline names
+        viirs_ntl_files = viirs_files.get("gap_filled_ntl", [])
+        viirs_quality_files = viirs_files.get("quality", [])
+
+        if not viirs_ntl_files:
+            print("⚠️  No VIIRS NTL files found - skipping VIIRS processing")
+        else:
+            # Create VRT mosaic if multiple tiles
+            if len(viirs_ntl_files) > 1:
+                print(f"Creating VRT mosaic for {len(viirs_ntl_files)} VIIRS tiles")
+                viirs_ntl_vrt = f"{data_dir}/temp/viirs_gap_filled_ntl_mosaic.vrt"
+                os.makedirs(f"{data_dir}/temp", exist_ok=True)
+                vrt_ds = gdal.BuildVRT(viirs_ntl_vrt, [str(f) for f in viirs_ntl_files])
+                vrt_ds = None  # Close to write to disk
+
+                with rasterio.open(viirs_ntl_vrt) as src:
+                    viirs_ntl = src.read(1)
+                    viirs_profile = src.profile
+            else:
+                with rasterio.open(str(viirs_ntl_files[0])) as src:
+                    viirs_ntl = src.read(1)
+                    viirs_profile = src.profile
+
+            # Crop VIIRS to bounding box
+            print(f"Cropping VIIRS data to bbox: {bbox}")
+            viirs_ntl, viirs_transform, _ = prepare.crop_to_bounds(
+                data=viirs_ntl, src_transform=viirs_profile["transform"], bounds=bbox
+            )
+
+            # Resample to finer resolution
+            target_resolution = 0.00011111111  # ~12 meters
+            viirs_ntl, viirs_transform = prepare.resample_image(
+                data=viirs_ntl,
+                src_transform=viirs_transform,
+                target_resolution=target_resolution,
+                resampling="bilinear",
+            )
+
+            # Update profile
+            viirs_profile["transform"] = viirs_transform
+            viirs_profile["height"] = viirs_ntl.shape[0]
+            viirs_profile["width"] = viirs_ntl.shape[1]
+
+            # Save diagnostic output if requested
+            if config and getattr(config, "save_diagnostics", False):
+                prepare.save_diagnostic(
+                    viirs_ntl,
+                    viirs_profile,
+                    "data/diagnostics/viirs_resampled.tif",
+                    "VIIRS resampled to target resolution",
+                )
+
+            # The gap-filled product already incorporates quality filtering
+            # by using the best available pixels from recent observations
+            viirs_corrected = viirs_ntl
+
+        # Save final VIIRS data
+        if config and getattr(config, "save_diagnostics", False) and viirs_profile is not None:
+            if viirs_corrected is not None:
+                prepare.save_diagnostic(
+                    viirs_corrected,
+                    viirs_profile,
+                    "data/diagnostics/viirs_final.tif",
+                    "VIIRS final (gap-filled NTL)",
+                )
+
+    # Set default resolution and profile for case when VIIRS is not available
+    target_resolution = 0.00011111111  # ~12 meters
+    if viirs_corrected is None:
+        print("⚠️  No VIIRS data - using Landsat as reference")
+        # We'll set the reference profile from the first Landsat scene
+
+    # Determine appropriate UTM zone for the area (like sync pipeline)
+    center_lon = (bbox[0] + bbox[2]) / 2
+    center_lat = (bbox[1] + bbox[3]) / 2
+
+    # Calculate UTM zone
+    utm_zone = int((center_lon + 180) / 6) + 1
+    hemisphere = "north" if center_lat >= 0 else "south"
+    epsg_code = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
+
+    # Use configured CRS or default to UTM for accurate local analysis
+    target_crs = f"EPSG:{epsg_code}"  # Use calculated UTM zone
+    target_resolution_landsat = 30.0  # 30 meters for Landsat
+
+    print(
+        f"Using projection: {target_crs} "
+        f"(UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'})"
+    )
+
+    # Process Landsat data
+    print("\n🛰️ Processing Landsat data...")
 
     # Get scale factors from config
     scale_factor = (
@@ -124,252 +231,145 @@ def black_marble_pipeline(
         config.preparation.qa_dilation_radius if config and hasattr(config, "preparation") else 3
     )
 
-    # Initialize stacks for each band
+    # Initialize band stacks
     band_stacks = {"B2": [], "B3": [], "B4": [], "B5": []}
     reference_profile = None
 
-    # Track downloaded files for metadata
+    # Track all landsat files for metadata
     all_landsat_files = {"B2": [], "B3": [], "B4": [], "B5": []}
 
-    # Calculate total number of dates to process
-    num_dates = composite_months + 1  # Primary date + historical dates
+    # Add memory monitoring if available
+    monitor_memory = False
+    process = None
+    try:
+        import psutil
 
-    # Process each date independently
-    for date_idx in range(num_dates):
-        if date_idx == 0:
-            # Primary date
-            target_date = date
-            print(f"\nProcessing primary date: {target_date.strftime('%Y-%m-%d')}")
-        else:
-            # Historical date
-            from datetime import timedelta
+        process = psutil.Process()
+        monitor_memory = True
+    except ImportError:
+        monitor_memory = False
+        print("Note: Install psutil for memory monitoring (pip install psutil)")
 
-            target_date = date - timedelta(days=date_idx * 30)
-            print(f"\nProcessing historical date {date_idx}: {target_date.strftime('%Y-%m-%d')}")
+    # Original in-memory processing
+    print(f"\n💾 Processing {len(landsat_files_by_date)} Landsat dates")
 
-        # Download all bands for this specific date
-        try:
-            bands_data = acquire.download_all_bands_for_date(
-                year=target_date.year,
-                month=target_date.month,
-                day=target_date.day,
-                bbox=bbox,
-                bands=[2, 3, 4, 5, "QA_PIXEL"],
-                cache_dir=cache_dir,
-                ignore_missing=(date_idx > 0),  # Only ignore missing for historical dates
-            )
+    # Process each date's Landsat data
+    for idx, target_date in enumerate(sorted(landsat_files_by_date.keys())):
+        # Log memory usage
+        print(
+            f"\nProcessing Landsat for {target_date.strftime('%Y-%m-%d')} "
+            f"(date {idx + 1}/{len(landsat_files_by_date)})"
+        )
+        if monitor_memory and process is not None:
+            memory_gb = process.memory_info().rss / 1024 / 1024 / 1024
+            print(f"  Current memory usage: {memory_gb:.1f} GB")
 
-            # Process this date's data with QA masking
-            processed_data = prepare.process_landsat_date(
-                bands_data=bands_data,
-                bbox=bbox,
-                apply_qa_mask=True,
-                dilate_pixels=dilate_pixels,
-                cloud_strategy="moderate",  # Use bit-based moderate strategy
-            )
+        date_files = landsat_files_by_date[target_date]
 
-            # Add masked data to stacks and track files
-            for band_name in ["B2", "B3", "B4", "B5"]:
-                if band_name in processed_data:
-                    masked_data, profile = processed_data[band_name]
-                    band_stacks[band_name].append(masked_data)
+        # Skip if we don't have all bands
+        if not all(band in date_files for band in ["B2", "B3", "B4", "B5", "QA_PIXEL"]):
+            print("  Skipping - missing bands")
+            continue
 
-                    # Store first profile as reference
-                    if reference_profile is None:
-                        reference_profile = profile
+        # Convert paths to tuple format expected by process_landsat_date
+        # Format is: (band_files, qa_pixel_files, qa_radsat_files, qa_aerosol_files)
+        bands_data = {}
+        for band, paths in date_files.items():
+            if paths:
+                # All bands use the same format - files go in first position
+                bands_data[band] = ([str(p) for p in paths], [], [], [])
+
+        # Process this date's data
+        processed_data = prepare.process_landsat_date(
+            bands_data=bands_data,
+            bbox=bbox,
+            apply_qa_mask=True,
+            dilate_pixels=dilate_pixels,
+            cloud_strategy="moderate",
+        )
+
+        # Add to stacks
+        for band_name in ["B2", "B3", "B4", "B5"]:
+            if band_name in processed_data:
+                masked_data, profile = processed_data[band_name]
+                band_stacks[band_name].append(masked_data)
+
+                if reference_profile is None:
+                    reference_profile = profile
 
                 # Track downloaded files for metadata
                 if band_name in bands_data:
                     band_files, _, _, _ = bands_data[band_name]
                     all_landsat_files[band_name].extend(band_files)
 
-        except Exception as e:
-            if date_idx > 0:  # Historical date
-                print(f"  Warning: Could not process date {target_date.strftime('%Y-%m-%d')}: {e}")
-                continue
-            else:  # Primary date
-                raise
-
-    # Create temporal composites from the masked stacks
-    landsat_bands = {}
-    landsat_profiles = {}
-
-    for band_name, stack in band_stacks.items():
-        if stack:
-            print(f"\nCreating temporal composite for {band_name} from {len(stack)} dates")
-
-            # Create median composite from pre-masked data
-            composite_data = analyze.create_landsat_median_composite(
-                stack, scale_factor=scale_factor, add_offset=add_offset
-            )
-
-            landsat_bands[band_name] = (composite_data, reference_profile)
-            landsat_profiles[band_name] = reference_profile
-
+        # Log memory after processing date
+        if monitor_memory and process is not None and any(band_stacks.values()):
+            memory_gb = process.memory_info().rss / 1024 / 1024 / 1024
+            total_arrays = sum(len(stack) for stack in band_stacks.values())
             print(
-                f"  Created composite for {band_name}: shape={composite_data.shape}, "
-                f"coverage={(composite_data > 0).sum() / composite_data.size * 100:.1f}%"
+                f"  Memory after date: {memory_gb:.1f} GB (total arrays in memory: {total_arrays})"
             )
-        else:
-            print(f"  Warning: No data found for {band_name}")
 
-    # Note: QA masking has already been applied during date-by-date processing
-    # No need for separate QA compositing or post-processing masking
+    # Create temporal composites
+    print("\n⏳ Creating Landsat temporal composites...")
 
-    # 3. Process VIIRS nighttime lights
-    # Load VIIRS gap-filled BRDF-corrected NTL data
-    viirs_corrected = None
-    viirs_profile = None
-    # Use gap-filled NTL if available, fall back to radiance if not
-    if viirs_data and viirs_data.get("gap_filled_ntl"):
-        # Create VRT mosaic if we have multiple VIIRS tiles
-        if len(viirs_data["gap_filled_ntl"]) > 1:
-            n_tiles = len(viirs_data['gap_filled_ntl'])
-            print(f"Creating VRT mosaic for {n_tiles} VIIRS gap-filled NTL tiles")
-            print("VIIRS tiles in mosaic:")
-            for i, tile_path in enumerate(viirs_data["gap_filled_ntl"]):
-                print(f"  {i + 1}. {os.path.basename(tile_path)}")
-            viirs_ntl_vrt = "data/temp/viirs_gap_filled_ntl_mosaic.vrt"
-            os.makedirs("data/temp", exist_ok=True)
-            gdal.BuildVRT(viirs_ntl_vrt, viirs_data["gap_filled_ntl"])
+    if not any(band_stacks.values()):
+        print("⚠️  No valid Landsat data found - skipping index calculations")
+        landsat_reprojected = {}
+    else:
+        # Create median composites from the masked stacks
+        landsat_bands = {}
+        landsat_profiles = {}
 
-            with rasterio.open(viirs_ntl_vrt) as src:
-                viirs_ntl = src.read(1)
-                viirs_profile = src.profile
-        else:
-            with rasterio.open(viirs_data["gap_filled_ntl"][0]) as src:
-                viirs_ntl = src.read(1)
-                viirs_profile = src.profile
+        for band_name, stack in band_stacks.items():
+            if stack:
+                print(f"  Creating temporal composite for {band_name} from {len(stack)} dates")
 
-        # CRITICAL: Crop VIIRS to bounding box like bm.py does
-        # This ensures we only process the area of interest, not entire tiles
-        print(f"\nCropping VIIRS data to bbox: {bbox}")
-        print(f"  VIIRS data shape before crop: {viirs_ntl.shape}")
-        viirs_ntl, viirs_transform, _ = prepare.crop_to_bounds(
-            data=viirs_ntl, src_transform=viirs_profile["transform"], bounds=bbox
-        )
-        print(f"  VIIRS data shape after crop: {viirs_ntl.shape}")
+                # Create median composite from pre-masked data with scaling
+                composite = analyze.create_landsat_median_composite(
+                    stack, scale_factor=scale_factor, add_offset=add_offset
+                )
 
-        # CRITICAL: Resample to finer resolution like bm.py (scale = 0.00011111111)
-        # This fills gaps through bilinear interpolation
-        target_resolution = 0.00011111111  # ~12 meters, matching bm.py
-        viirs_ntl, viirs_transform = prepare.resample_image(
-            data=viirs_ntl,
-            src_transform=viirs_transform,
-            target_resolution=target_resolution,
-            resampling="bilinear",
-        )
+                landsat_bands[band_name] = (composite, reference_profile)
+                landsat_profiles[band_name] = reference_profile
 
-        # Update profile with new shape and transform
-        viirs_profile["transform"] = viirs_transform
-        viirs_profile["height"] = viirs_ntl.shape[0]
-        viirs_profile["width"] = viirs_ntl.shape[1]
+                print(
+                    f"  Created composite for {band_name}: shape={composite.shape}, "
+                    f"coverage={(composite > 0).sum() / composite.size * 100:.1f}%"
+                )
+            else:
+                print(f"  Warning: No data found for {band_name}")
 
-        # Gap-filled NTL is already BRDF-corrected by NASA
-        # No need for nodata handling or lunar correction
-        # Values are in nW/cm²/sr units
-
-        # The gap-filled product already incorporates quality filtering
-        # by using the best available pixels from recent observations
-        viirs_corrected = viirs_ntl
-
-        # OLD CODE (commented out):
-        # viirs_corrected = prepare.apply_viirs_floor_ceiling(
-        #     ntl_data=viirs_scaled,
-        #     floor_value=config.analysis.ntl_floor if hasattr(config, 'analysis') else \
-        #                 (config.viirs.floor if hasattr(config, 'viirs') else 0.1),
-        #     ceiling_value=config.analysis.ntl_ceiling if hasattr(config, 'analysis') else \
-        #                   (config.viirs.ceiling if hasattr(config, 'viirs') else 10.0)
-        # )
-
-        # Save diagnostic output if requested
-        if config and getattr(config, "save_diagnostics", False):
-            prepare.save_diagnostic(
-                viirs_corrected,
-                viirs_profile,
-                "data/diagnostics/viirs_final.tif",
-                "VIIRS final (gap-filled NTL)",
-            )
-    elif viirs_data and viirs_data.get("radiance"):
-        # Fallback: Use raw radiance if gap-filled NTL not available
-        print("Warning: Gap-filled NTL not available, falling back to raw radiance")
-        print("Consider updating VIIRS processing to extract gap-filled data")
-        # Process raw radiance data (simplified - no lunar correction)
-        if len(viirs_data["radiance"]) > 1:
-            viirs_radiance_vrt = "data/temp/viirs_radiance_mosaic.vrt"
-            os.makedirs("data/temp", exist_ok=True)
-            gdal.BuildVRT(viirs_radiance_vrt, viirs_data["radiance"])
-
-            with rasterio.open(viirs_radiance_vrt) as src:
-                viirs_radiance = src.read(1)
-                viirs_profile = src.profile
-        else:
-            with rasterio.open(viirs_data["radiance"][0]) as src:
-                viirs_radiance = src.read(1)
-                viirs_profile = src.profile
-
-        # Crop and resample
-        viirs_radiance, viirs_transform, _ = prepare.crop_to_bounds(
-            data=viirs_radiance, src_transform=viirs_profile["transform"], bounds=bbox
-        )
-        viirs_radiance, viirs_transform = prepare.resample_image(
-            data=viirs_radiance,
-            src_transform=viirs_transform,
-            target_resolution=0.00011111111,
-            resampling="bilinear",
-        )
-        viirs_profile["transform"] = viirs_transform
-        viirs_profile["height"] = viirs_radiance.shape[0]
-        viirs_profile["width"] = viirs_radiance.shape[1]
-
-        # Basic nodata handling
-        viirs_radiance = np.where(viirs_radiance > 65530, 0, viirs_radiance)
-        viirs_corrected = viirs_radiance
-
-    # 4. Reproject everything to common grid
-    # Determine appropriate UTM zone for the area
-    center_lon = (bbox[0] + bbox[2]) / 2
-    center_lat = (bbox[1] + bbox[3]) / 2
-
-    # Calculate UTM zone (simplified - assumes northern hemisphere)
-    utm_zone = int((center_lon + 180) / 6) + 1
-    hemisphere = "north" if center_lat >= 0 else "south"
-    epsg_code = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
-
-    # Use configured CRS or default to UTM for accurate local analysis
-    target_crs = f"EPSG:{epsg_code}"  # Use calculated UTM zone
-    target_resolution = 30.0  # 30 meters for Landsat
-
-    # Print projection info clearly
-    if config and config.verbose:
-        print(
-            f"Using projection: {target_crs} "
-            f"(UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'})"
-        )
-
-    # Reproject Landsat bands
-    landsat_reprojected = {}
+    # Reproject Landsat bands to target CRS (UTM) - common for both VRT and in-memory
     reference_transform = None
     reference_shape = None
-    # reference_bbox = None  # Currently unused
+    reference_bbox = None
 
-    for band_name, (data, profile) in landsat_bands.items():
-        reprojected, new_transform, new_bbox = prepare.reproject_image(
-            data=data,
-            src_transform=profile["transform"],
-            src_crs=profile["crs"],
-            dst_crs=target_crs,
-            resampling="bilinear",  # Use bilinear for smoother results
-        )
-        landsat_reprojected[band_name] = reprojected
+    landsat_bands = locals().get("landsat_bands", {})
+    if landsat_bands:
+        print("\n🗺️  Reprojecting Landsat to target CRS...")
+        landsat_reprojected = {}
 
-        # Store reference transform and shape from first band
-        if reference_transform is None:
-            reference_transform = new_transform
-            reference_shape = reprojected.shape
-            # reference_bbox = new_bbox  # Currently unused
+        for band_name, (data, profile) in landsat_bands.items():
+            reprojected, new_transform, new_bbox = prepare.reproject_image(
+                data=data,
+                src_transform=profile["transform"],
+                src_crs=profile["crs"],
+                dst_crs=target_crs,
+                resampling="bilinear",  # Use bilinear for smoother results
+            )
+            landsat_reprojected[band_name] = reprojected
 
-    # Reproject VIIRS to target CRS first
+            # Store reference transform and shape from first band
+            if reference_transform is None:
+                reference_transform = new_transform
+                reference_shape = reprojected.shape
+                reference_bbox = new_bbox
+    else:
+        # No Landsat data available
+        landsat_reprojected = {}
+
+    # Reproject VIIRS to target CRS first (like sync pipeline)
     viirs_reprojected = None
     viirs_transform = None
     if viirs_corrected is not None and viirs_profile is not None:
@@ -378,23 +378,13 @@ def black_marble_pipeline(
             src_transform=viirs_profile["transform"],
             src_crs=viirs_profile["crs"],
             dst_crs=target_crs,
-            resampling="bilinear",  # Use bilinear like bm.py for smoother results
+            resampling="bilinear",  # Use bilinear like sync pipeline
         )
 
         # Align VIIRS to Landsat grid for consistent processing
         if reference_transform is not None and reference_shape is not None:
             print(f"VIIRS shape before alignment: {viirs_reprojected.shape}")
             print(f"Reference Landsat shape: {reference_shape}")
-
-            # Save pre-alignment for diagnostics
-            if config and getattr(config, "save_diagnostics", False):
-                prepare.save_diagnostic(
-                    viirs_reprojected,
-                    viirs_transform,
-                    "data/diagnostics/viirs_before_align.tif",
-                    "VIIRS before alignment",
-                    crs=target_crs,
-                )
 
             # Use the first Landsat band as reference
             reference_band = landsat_reprojected[list(landsat_reprojected.keys())[0]]
@@ -417,67 +407,114 @@ def black_marble_pipeline(
                 f"({(viirs_reprojected > 0).sum() / viirs_reprojected.size * 100:.1f}%)"
             )
 
-            # Save diagnostic output if requested
-            if config and getattr(config, "save_diagnostics", False):
-                prepare.save_diagnostic(
-                    viirs_reprojected,
-                    reference_transform,
-                    "data/diagnostics/viirs_aligned.tif",
-                    "VIIRS aligned to Landsat grid",
-                    crs=target_crs,
-                )
-
     # Rasterize roads to match grid
     roads_rasterized = None
     if road_network is not None and reference_shape is not None and reference_transform is not None:
-        # Use the new CRS-aware road rasterization
-        # This handles meter-based buffering via UTM internally
-        buffer_meters = 30.0  # Buffer roads by 30 meters (default in osm.py)
+        # Use the new CRS-aware road rasterization (like sync pipeline)
+        # Use 30m buffer to match default in osm.py - 5.5m was too small
+        buffer_meters = 30.0  # Buffer roads by 30 meters
 
         print(f"Road buffering: {buffer_meters:.1f} meters (applied in UTM)")
         print(f"Rasterizing to: {target_crs}")
         print(f"Road network has {len(road_network.nodes)} nodes, {len(road_network.edges)} edges")
 
-        # Use the new function that buffers and rasterizes with CRS support
-        roads_rasterized = acquire.buffer_and_rasterize_roads(
-            graph=road_network,
-            bbox=bbox,
-            transform=reference_transform,
-            crs=target_crs,
-            shape=(reference_shape[0], reference_shape[1]),
-            buffer_meters=buffer_meters,
-            hierarchical=True,  # Use hierarchical road classification
-        )
-
-        # Print statistics
-        road_pixels = np.sum(roads_rasterized > 0)
-        print(f"Rasterized {road_pixels} pixels ({road_pixels / roads_rasterized.size * 100:.2f}%)")
-
-        # Save diagnostic output if requested
-        if config and getattr(config, "save_diagnostics", False):
-            # Convert road raster to float for saving
-            road_diagnostic = roads_rasterized.astype(np.float32)
-            prepare.save_diagnostic(
-                road_diagnostic,
-                reference_transform,
-                "data/diagnostics/roads_rasterized.tif",
-                "Rasterized road network",
+        # Use fractional or binary road rasterization based on config
+        if config and config.analysis.osm_fractional:
+            # NEW: Fractional rasterization
+            print("  Using fractional road rasterization (5x5 sub-pixels)")
+            roads_fractional = acquire.buffer_and_rasterize_roads_fractional(
+                graph=road_network,
+                bbox=bbox,
+                transform=reference_transform,
                 crs=target_crs,
+                shape=(reference_shape[0], reference_shape[1]),
+                buffer_meters=buffer_meters,
+                sub_pixels=config.analysis.osm_sub_pixels,
+                hierarchical=False,  # Not supported for fractional
             )
 
-    # ==================== ANALYZE PHASE ====================
-    # Calculate indices and create composites
+            # Print statistics
+            road_pixels = np.sum(roads_fractional > 0)
+            print(
+                f"Rasterized {road_pixels} pixels with roads "
+                f"({road_pixels / roads_fractional.size * 100:.2f}%)"
+            )
+            if road_pixels > 0:
+                print(
+                    f"Fractional coverage range: "
+                    f"{roads_fractional[roads_fractional > 0].min():.3f} to "
+                    f"{roads_fractional.max():.3f}"
+                )
+                print(
+                    f"Mean fractional coverage: {roads_fractional[roads_fractional > 0].mean():.3f}"
+                )
+            else:
+                print("⚠️  WARNING: No roads were rasterized! Check buffer size and CRS.")
 
-    # 1. Calculate spectral indices
+            # Save diagnostic
+            if getattr(config, "save_diagnostics", False):
+                prepare.save_diagnostic(
+                    roads_fractional,
+                    reference_transform,
+                    "data/diagnostics/roads_fractional.tif",
+                    "Fractional road coverage (0.0-1.0)",
+                    crs=target_crs,
+                )
+
+            # For compatibility, create a placeholder for roads_rasterized
+            roads_rasterized = None
+        else:
+            # LEGACY: Binary hierarchical rasterization
+            roads_rasterized = acquire.buffer_and_rasterize_roads(
+                graph=road_network,
+                bbox=bbox,
+                transform=reference_transform,
+                crs=target_crs,
+                shape=(reference_shape[0], reference_shape[1]),
+                buffer_meters=buffer_meters,
+                hierarchical=True,  # Use hierarchical road classification
+            )
+
+            # Print statistics
+            road_pixels = np.sum(roads_rasterized > 0)
+            print(
+                f"Rasterized {road_pixels} pixels "
+                f"({road_pixels / roads_rasterized.size * 100:.2f}%)"
+            )
+
+            # Save diagnostic output if requested
+            if config and getattr(config, "save_diagnostics", False):
+                road_diagnostic = roads_rasterized.astype(np.float32)
+                prepare.save_diagnostic(
+                    road_diagnostic,
+                    reference_transform,
+                    "data/diagnostics/roads_rasterized.tif",
+                    "Rasterized road network",
+                    crs=target_crs,
+                )
+
+            # For compatibility
+            roads_fractional = None
+    else:
+        # No road network data
+        print("  No road network data available")
+        if reference_shape is not None:
+            roads_rasterized = np.zeros(reference_shape, dtype="uint8")
+            roads_fractional = np.zeros(reference_shape, dtype="float32")
+        else:
+            roads_rasterized = np.zeros((100, 100), dtype="uint8")
+            roads_fractional = np.zeros((100, 100), dtype="float32")
+
+    # ==================== ANALYZE PHASE ====================
+    print("\n📈 Calculating indices...")
+
+    # Calculate spectral indices
     ndvi = None
     ndwi = None
 
+    # Use the reprojected data (already in UTM)
     if "B5" in landsat_reprojected and "B4" in landsat_reprojected:
-        ndvi = analyze.calculate_ndvi(
-            nir=landsat_reprojected["B5"],
-            red=landsat_reprojected["B4"],
-            # Use default epsilon=1e-4 for better stability
-        )
+        ndvi = analyze.calculate_ndvi(nir=landsat_reprojected["B5"], red=landsat_reprojected["B4"])
 
         # Save diagnostic output if requested
         if config and getattr(config, "save_diagnostics", False) and ndvi is not None:
@@ -491,9 +528,7 @@ def black_marble_pipeline(
 
     if "B3" in landsat_reprojected and "B5" in landsat_reprojected:
         ndwi = analyze.calculate_ndwi(
-            green=landsat_reprojected["B3"],
-            nir=landsat_reprojected["B5"],
-            # Use default epsilon=1e-4 for better stability
+            green=landsat_reprojected["B3"], nir=landsat_reprojected["B5"]
         )
 
         # Save diagnostic output if requested
@@ -506,69 +541,229 @@ def black_marble_pipeline(
                 crs=target_crs,
             )
 
-    # 2. For now, we only have single date VIIRS, so no temporal compositing
-    # In a full implementation, we'd download multiple dates and composite them
+    # For now, we only have single date VIIRS, so no temporal compositing
     ntl_composite = viirs_reprojected if viirs_reprojected is not None else None
-
-    # Save fine-resolution VIIRS as diagnostic output
-    if config and getattr(config, "save_diagnostics", False) and ntl_composite is not None:
-        prepare.save_diagnostic(
-            ntl_composite,
-            viirs_transform,
-            "data/diagnostics/viirs_final.tif",
-            "Final processed VIIRS at fine resolution",
-            crs=target_crs,
-        )
 
     # ENHANCE NTL WITH ROADS (before NDUI calculation)
     # This is the correct place to apply road enhancement - to the NTL data itself,
     # not to the derived NDUI index
-    if ntl_composite is not None and roads_rasterized is not None:
-        print("\n🛣️  Enhancing NTL with road data")
+    if ntl_composite is not None:
+        enhancement_approach = config.analysis.ntl_enhancement_approach if config else "urban_field"
 
-        # Legacy binary enhancement
-        # Major roads (1, 4): factor 1.3
-        # Minor roads (2, 3, 5, 6): factor 1.1
-        ntl_enhanced = ntl_composite.copy()
+        if (
+            enhancement_approach == "urban_field"
+            and config
+            and config.analysis.osm_fractional
+            and roads_fractional is not None
+        ):
+            # URBAN FIELD ENHANCEMENT with fractional roads
+            print("\n🌃 Enhancing NTL with urban fields (fractional roads)")
 
-        # Apply enhancement based on road type
-        major_roads_mask = (roads_rasterized == 1) | (roads_rasterized == 4)
-        minor_roads_mask = (
-            (roads_rasterized == 2)
-            | (roads_rasterized == 3)
-            | (roads_rasterized == 5)
-            | (roads_rasterized == 6)
-        )
-
-        ntl_enhanced = np.where(major_roads_mask, ntl_composite * 1.3, ntl_enhanced)
-        ntl_enhanced = np.where(minor_roads_mask, ntl_composite * 1.1, ntl_enhanced)
-
-        # Log statistics
-        enhancement = ntl_enhanced - ntl_composite
-        enhanced_pixels = np.sum(enhancement > 0)
-        if enhanced_pixels > 0:
-            print(
-                f"  Enhanced {enhanced_pixels} pixels "
-                f"({enhanced_pixels / ntl_composite.size * 100:.1f}%)"
+            # Compute multi-scale urban fields
+            urban_field = analyze.compute_urban_fields(
+                road_fraction=roads_fractional,
+                sigmas=config.analysis.urban_field_sigmas,
+                weights=config.analysis.urban_field_weights,
             )
-            print(f"  Major roads (1.3x): {np.sum(major_roads_mask)} pixels")
-            print(f"  Minor roads (1.1x): {np.sum(minor_roads_mask)} pixels")
+
+            # DEBUG: Print urban field statistics
+            print("\n🏙️ URBAN FIELD STATS:")
+            print(f"  - Max urban field: {urban_field.max():.3f}")
+            print(f"  - Mean urban field (where > 0): {urban_field[urban_field > 0].mean():.3f}")
+            print(
+                f"  - Urban pixels: {np.sum(urban_field > 0)} "
+                f"({np.sum(urban_field > 0) / urban_field.size * 100:.1f}%)"
+            )
+
+            # Save urban field diagnostic
+            if getattr(config, "save_diagnostics", False):
+                prepare.save_diagnostic(
+                    urban_field,
+                    reference_transform,
+                    "data/diagnostics/urban_field.tif",
+                    "Multi-scale urban density field",
+                    crs=target_crs,
+                )
+
+            # Enhance NTL
+            ntl_enhanced = analyze.enhance_ntl_with_urban_field(
+                ntl=ntl_composite,
+                urban_field=urban_field,
+                enhancement_mode=config.analysis.ntl_enhancement_mode,
+                multiplicative_factor=config.analysis.enhancement_multiplicative_factor,
+                additive_factor=config.analysis.enhancement_additive_factor,
+                hybrid_expected_scale=config.analysis.enhancement_hybrid_expected_scale,
+                hybrid_expected_sqrt_scale=config.analysis.enhancement_hybrid_expected_sqrt_scale,
+                hybrid_application_factor=config.analysis.enhancement_hybrid_application_factor,
+            )
+
+            # Calculate enhancement
+            enhancement = ntl_enhanced - ntl_composite
+
+            # Save before/after comparison
+            if getattr(config, "save_diagnostics", False):
+                prepare.save_diagnostic(
+                    enhancement,
+                    reference_transform,
+                    "data/diagnostics/ntl_enhancement.tif",
+                    "NTL enhancement from urban fields",
+                    crs=target_crs,
+                )
+
+            ntl_composite = ntl_enhanced
+            enhanced_pixels = np.sum(enhancement > 0)
             if enhanced_pixels > 0:
+                print(f"  Enhanced {enhanced_pixels} pixels")
+                print(f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}")
+            else:
+                print("  No pixels enhanced (no roads with sufficient density)")
+
+        elif (
+            enhancement_approach == "urban_field"
+            and roads_rasterized is not None
+            and not (config and config.analysis.osm_fractional)
+        ):
+            # Urban field approach but only binary roads available - convert to pseudo-fractional
+            print("\n🌃 Enhancing NTL with urban fields (binary roads converted to fractional)")
+
+            # Convert binary road mask to fractional (0 or 1)
+            roads_fractional_pseudo = roads_rasterized.astype(np.float32)
+            roads_fractional_pseudo[roads_fractional_pseudo > 0] = 1.0
+
+            # Compute urban fields from pseudo-fractional roads
+            urban_field = analyze.compute_urban_fields(
+                road_fraction=roads_fractional_pseudo,
+                sigmas=config.analysis.urban_field_sigmas if config else [2.0, 5.0, 10.0],
+                weights=config.analysis.urban_field_weights if config else [0.5, 0.3, 0.2],
+            )
+
+            # Enhance NTL
+            ntl_enhanced = analyze.enhance_ntl_with_urban_field(
+                ntl=ntl_composite,
+                urban_field=urban_field,
+                enhancement_mode=config.analysis.ntl_enhancement_mode if config else "hybrid",
+                multiplicative_factor=config.analysis.enhancement_multiplicative_factor
+                if config
+                else 0.3,
+                additive_factor=config.analysis.enhancement_additive_factor if config else 0.02,
+                hybrid_expected_scale=config.analysis.enhancement_hybrid_expected_scale
+                if config
+                else 0.2,
+                hybrid_expected_sqrt_scale=config.analysis.enhancement_hybrid_expected_sqrt_scale
+                if config
+                else 0.1,
+                hybrid_application_factor=config.analysis.enhancement_hybrid_application_factor
+                if config
+                else 1.0,
+            )
+
+            enhancement = ntl_enhanced - ntl_composite
+            ntl_composite = ntl_enhanced
+            enhanced_pixels = np.sum(enhancement > 0)
+            if enhanced_pixels > 0:
+                print(f"  Enhanced {enhanced_pixels} pixels")
                 print(f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}")
 
-        # Save enhancement diagnostic
-        if config and getattr(config, "save_diagnostics", False):
-            prepare.save_diagnostic(
-                enhancement,
-                reference_transform,
-                "data/diagnostics/ntl_road_enhancement.tif",
-                "NTL enhancement from roads (binary)",
-                crs=target_crs,
-            )
+        elif enhancement_approach == "legacy_burn" and (
+            roads_rasterized is not None or roads_fractional is not None
+        ):
+            # LEGACY BURN-IN ENHANCEMENT
+            print("\n🛣️  Enhancing NTL with road data (legacy burn-in)")
 
-        ntl_composite = ntl_enhanced
+            major_factor = config.analysis.legacy_major_road_factor if config else 1.3
+            minor_factor = config.analysis.legacy_minor_road_factor if config else 1.1
 
-    # 3. Calculate urban index combining NTL and vegetation
+            if roads_fractional is not None and config and config.analysis.osm_fractional:
+                # Use fractional roads for burn-in
+                print("  Using fractional road coverage for burn-in")
+                ntl_enhanced = ntl_composite.copy()
+
+                # The fractional value represents the percentage of pixel covered by roads
+                # Apply enhancement proportionally
+                # For pixels with roads, enhance by: 1 + (factor - 1) * coverage
+                # This gives smooth transitions: 0% coverage = 1x, 100% coverage = factor
+                # roads_fractional is always a numpy array with float values
+                # Simple fractional coverage (0-1), use average of factors
+                avg_factor = (major_factor + minor_factor) / 2
+                enhancement_factor = 1 + (avg_factor - 1) * roads_fractional
+                ntl_enhanced = ntl_composite * enhancement_factor
+
+            else:
+                # Use binary roads
+                print("  Using binary road mask for burn-in")
+                ntl_enhanced = ntl_composite.copy()
+
+                # Apply enhancement based on road type
+                major_roads_mask = (roads_rasterized == 1) | (roads_rasterized == 4)
+                minor_roads_mask = (
+                    (roads_rasterized == 2)
+                    | (roads_rasterized == 3)
+                    | (roads_rasterized == 5)
+                    | (roads_rasterized == 6)
+                )
+
+                ntl_enhanced = np.where(
+                    major_roads_mask, ntl_composite * major_factor, ntl_enhanced
+                )
+                ntl_enhanced = np.where(
+                    minor_roads_mask, ntl_composite * minor_factor, ntl_enhanced
+                )
+
+            # Log statistics
+            enhancement = ntl_enhanced - ntl_composite
+            enhanced_pixels = np.sum(enhancement > 0)
+            if enhanced_pixels > 0:
+                print(
+                    f"  Enhanced {enhanced_pixels} pixels "
+                    f"({enhanced_pixels / ntl_composite.size * 100:.1f}%)"
+                )
+                # Show appropriate statistics based on road type
+                if roads_rasterized is not None and not (
+                    roads_fractional is not None and config and config.analysis.osm_fractional
+                ):
+                    # Binary roads - show road type breakdown
+                    # Calculate masks for statistics
+                    major_roads_mask_stats = (roads_rasterized == 1) | (roads_rasterized == 4)
+                    minor_roads_mask_stats = (
+                        (roads_rasterized == 2)
+                        | (roads_rasterized == 3)
+                        | (roads_rasterized == 5)
+                        | (roads_rasterized == 6)
+                    )
+                    print(
+                        f"  Major roads ({major_factor}x): {np.sum(major_roads_mask_stats)} pixels"
+                    )
+                    print(
+                        f"  Minor roads ({minor_factor}x): {np.sum(minor_roads_mask_stats)} pixels"
+                    )
+                else:
+                    # Fractional roads - show coverage statistics
+                    if roads_fractional is not None:
+                        coverage_pixels = np.sum(roads_fractional > 0)
+                        avg_coverage = (
+                            np.mean(roads_fractional[roads_fractional > 0])
+                            if coverage_pixels > 0
+                            else 0
+                        )
+                        print(
+                            f"  Road coverage: {coverage_pixels} pixels "
+                            f"with avg {avg_coverage:.1%} coverage"
+                        )
+                print(f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}")
+
+            # Save enhancement diagnostic
+            if config and getattr(config, "save_diagnostics", False):
+                prepare.save_diagnostic(
+                    enhancement,
+                    reference_transform,
+                    "data/diagnostics/ntl_road_enhancement.tif",
+                    "NTL enhancement from roads (binary)",
+                    crs=target_crs,
+                )
+
+            ntl_composite = ntl_enhanced
+
+    # Calculate urban index combining NTL and vegetation
     ndui = None
     if ntl_composite is not None and ndvi is not None:
         # Verify shapes match before calculating NDUI
@@ -628,20 +823,20 @@ def black_marble_pipeline(
                 crs=target_crs,
             )
 
-    # 4. Skip composite index - we'll use NDUI directly like bm.py
-    # The urban mask is essentially where NDUI is high
+    # Create urban mask
     urban_mask = None
     if ndui is not None:
-        # Create a simple threshold mask for other processing needs
         urban_mask = ndui > 0.3  # Reasonable threshold for urban areas
 
     # ==================== ENHANCE PHASE ====================
-    # Improve visual quality and highlight features
+    print("\n✨ Enhancing results...")
 
-    # 1. Enhance contrast for better visualization
+    # Enhance contrast for better visualization
     ntl_enhanced = None
     if ntl_composite is not None:
         # Map config contrast method to valid options
+        from typing import Literal
+
         method_mapping: dict[str, Literal["percentile", "minmax"]] = {
             "linear": "minmax",
             "percentile": "percentile",
@@ -666,35 +861,34 @@ def black_marble_pipeline(
                 crs=target_crs,
             )
 
-    # 2. Enhance road networks in the NTL data
-    # Note: Road enhancement currently unused in pipeline since urban enhancement is disabled
-    # ntl_roads_enhanced = None
-    # if ntl_enhanced is not None and roads_rasterized is not None:
-    #     ntl_roads_enhanced = enhance.enhance_roads(
-    #         data=ntl_enhanced,
-    #         road_mask=roads_rasterized,
-    #         major_factor=config.enhancement.road_major_factor if config else 1.3,
-    #         minor_factor=config.enhancement.road_minor_factor if config else 1.1,
-    #         custom_factors=config.enhancement.custom_road_factors if config else None,
-    #     )
-    # else:
-    #     ntl_roads_enhanced = ntl_enhanced
+    # Enhance road networks in the NTL data
+    ntl_roads_enhanced = None
+    if ntl_enhanced is not None and roads_rasterized is not None:
+        ntl_roads_enhanced = enhance.enhance_roads(
+            data=ntl_enhanced,
+            road_mask=roads_rasterized,
+            major_factor=config.enhancement.road_major_factor if config else 1.3,
+            minor_factor=config.enhancement.road_minor_factor if config else 1.1,
+            custom_factors=config.enhancement.custom_road_factors if config else None,
+        )
+    else:
+        ntl_roads_enhanced = ntl_enhanced
 
-    # 3. Enhance urban features
-    # Note: Urban enhancement currently unused in pipeline
-    # if ntl_roads_enhanced is not None and urban_mask is not None:
-    #     ntl_urban_enhanced = enhance.enhance_urban_features(
-    #         ntl_data=ntl_roads_enhanced,
-    #         urban_mask=urban_mask,
-    #         road_mask=roads_rasterized,
-    #         enhancement_factor=1.2,
-    #         road_factor=1.1,
-    #     )
+    # Enhance urban features
+    ntl_urban_enhanced = None
+    if ntl_roads_enhanced is not None and urban_mask is not None:
+        ntl_urban_enhanced = enhance.enhance_urban_features(
+            ntl_data=ntl_roads_enhanced,
+            urban_mask=urban_mask,
+            road_mask=roads_rasterized,
+            enhancement_factor=1.2,
+            road_factor=1.1,
+        )
+    else:
+        ntl_urban_enhanced = ntl_roads_enhanced
 
-    # 4. Apply color mapping for visualization
-    # CRITICAL FIX: Use NDUI for colormap like bm.py does, not NTL
-    # The old bm.py applies colormap to NDUI (urban development index)
-    # which combines nighttime lights with vegetation info for better results
+    # Apply color mapping for visualization
+    # CRITICAL FIX: Use NDUI for colormap like sync pipeline, not NTL
     ntl_colored = None
     if ndui is not None:
         # DIAGNOSTIC: Print data before colormap
@@ -705,7 +899,7 @@ def black_marble_pipeline(
         print(f"  Data type: {ndui.dtype}")
 
         # Apply inferno colormap to NDUI with appropriate scale range
-        # Use 0.3-0.8 range to focus on urban areas (matching bm.py behavior)
+        # Use 0.3-0.8 range to focus on urban areas (matching sync pipeline)
         ntl_colored = enhance.apply_inferno_colormap(
             data=ndui,
             scale_range=(0.3, 0.8),  # Focus colormap on urban range for better contrast
@@ -729,22 +923,21 @@ def black_marble_pipeline(
                 crs=target_crs,
             )
 
-    # 5. Create false color composite for context (optional)
-    # landsat_viz = None  # Currently unused
-    # if ("B5" in landsat_reprojected and "B4" in landsat_reprojected and
-    #     "B3" in landsat_reprojected):
-    #     landsat_viz = enhance.create_false_color_composite(
-    #         red_channel=landsat_reprojected["B5"],  # NIR in red
-    #         green_channel=landsat_reprojected["B4"],  # Red in green
-    #         blue_channel=landsat_reprojected["B3"],  # Green in blue
-    #         contrast_enhance=True,
-    #         gamma=None,  # Use default gamma
-    #     )
+    # Create false color composite for context (optional)
+    landsat_viz = None
+    if "B5" in landsat_reprojected and "B4" in landsat_reprojected and "B3" in landsat_reprojected:
+        landsat_viz = enhance.create_false_color_composite(
+            red_channel=landsat_reprojected["B5"],  # NIR in red
+            green_channel=landsat_reprojected["B4"],  # Red in green
+            blue_channel=landsat_reprojected["B3"],  # Green in blue
+            contrast_enhance=True,
+            gamma=None,  # Use default gamma
+        )
 
     # ==================== EXPORT PHASE ====================
-    # Generate final outputs in various formats
+    print("\n💾 Exporting results...")
 
-    # 1. Validate output before saving
+    # Validate output before saving
     validation_results = {"valid": True, "errors": []}
     if ntl_colored is not None and reference_transform is not None:
         validation_results = export.validate_for_cog(
@@ -759,7 +952,8 @@ def black_marble_pipeline(
         if not validation_results["valid"]:
             print(f"Warning: Output validation failed: {validation_results['errors']}")
 
-    # 2. Generate metadata
+    # Generate metadata
+    road_types = ["motorway", "trunk", "primary", "secondary"]
     metadata = export.create_metadata(
         data_sources={
             "landsat": {
@@ -772,7 +966,7 @@ def black_marble_pipeline(
                 "processing_level": "L2SP",
             },
             "viirs": {
-                "files": viirs_data.get("radiance", []) if viirs_data else [],
+                "files": viirs_files.get("gap_filled_ntl", []) if viirs_files else [],
                 "date_range": f"{date.strftime('%Y-%m-%d')}",
                 "sensor": "VIIRS",
                 "product": "VNP46A2",
@@ -795,29 +989,33 @@ def black_marble_pipeline(
         date_processed=datetime.now(),
         bbox=bbox,
         crs=target_crs,
-        resolution=target_resolution,
+        resolution=target_resolution_landsat,
     )
 
-    # 3. Create Cloud-Optimized GeoTIFF
+    # Create Cloud-Optimized GeoTIFF
     if ntl_colored is not None and reference_transform is not None:
         # Get compression setting with proper type casting
+
         compress_setting = config.export.compress if config else "deflate"
         valid_compressions: set[str] = {"deflate", "lzw", "jpeg", "webp", "zstd"}
         if compress_setting not in valid_compressions:
             compress_setting = "deflate"
 
+        # Note: ntl_colored is RGB uint8 data, can't use NaN as nodata
+        # The colormap application already handles NaN -> black mapping
         export.create_cog(
             data=ntl_colored,
             output_path=output_path,
             transform=reference_transform,
             crs=target_crs,
             metadata=metadata,
-            compress=cast(Literal["deflate", "lzw", "jpeg", "webp", "zstd"], compress_setting),
+            compress=compress_setting,  # type: ignore[arg-type]
             tiled=config.export.tiled if config else True,
             overviews=config.export.overview_levels if config else [2, 4, 8, 16],
+            # No nodata for RGB imagery
         )
 
-    # 4. Generate auxiliary outputs if requested
+    # Generate auxiliary outputs if requested
     if (
         config
         and config.export.generate_urban_mask
@@ -836,7 +1034,7 @@ def black_marble_pipeline(
             transform=reference_transform,
             crs=target_crs,
             metadata={"band_name": "urban_mask"},
-            compress=cast(Literal["deflate", "lzw"], compress_setting),
+            compress=compress_setting,  # type: ignore[arg-type]
         )
 
     if config and config.export.generate_indices_file and reference_transform is not None:
@@ -870,7 +1068,8 @@ def black_marble_pipeline(
                 transform=reference_transform,
                 crs=target_crs,
                 metadata=metadata,
-                compress=cast(Literal["deflate", "lzw"], compress_setting),
+                compress=compress_setting,  # type: ignore[arg-type]
+                nodata=np.nan,  # Properly handle NaN values from masking
             )
 
     # Calculate basic statistics for the results
@@ -900,24 +1099,8 @@ def black_marble_pipeline(
         "statistics": statistics,
     }
 
-
-if __name__ == "__main__":
-    # Example usage showing the complete flow
-    from .config import PipelineConfig
-
-    # Create config using for_bm_parity method
-    config = PipelineConfig.for_bm_parity(
-        bbox=(-74.05, 40.69, -73.95, 40.79),  # Manhattan
-        date=datetime(2023, 9, 15),
-        output_path="data/outputs/manhattan_black_marble.tif",
-    )
-
-    result = black_marble_pipeline(
-        bbox=config.bbox,
-        date=config.date,
-        output_path=config.output_path,
-        config=config,
-    )
-
-    print(f"Processing complete: {result['output_path']}")
-    print(f"Urban area: {result['statistics']['urban_area_km2']} km²")
+# Sync wrapper for CLI convenience
+def black_marble_pipeline_sync(**kwargs):
+    """Synchronous wrapper for the async pipeline."""
+    import asyncio
+    return asyncio.run(black_marble_pipeline(**kwargs))

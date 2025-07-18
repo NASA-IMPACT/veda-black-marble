@@ -1,132 +1,569 @@
-"""Landsat data acquisition and tile selection.
+"""Landsat data acquisition from AWS S3 using async I/O."""
 
-This module provides a pure functional API for Landsat data acquisition,
-handling WRS-2 tile selection, S3 downloads, and metadata extraction.
-All functions are stateless and testable, replacing the legacy LandsatUtil class.
-"""
-
-import collections
-import os
-import tempfile
-from datetime import datetime
-from importlib.resources import files
+import asyncio
+import logging
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
-import boto3
-import fiona
-import numpy.typing as npt
-import rasterio
-import shapely.geometry
-from shapely.geometry import Point, shape
+import aioboto3
+from botocore.config import Config
 
-# Global cache for S3 directory listings to improve performance
-_DIR_CACHE: collections.OrderedDict[str, list[dict[str, str]]] = collections.OrderedDict()
-_MAX_CACHE_SIZE = 100
+from .async_base import (
+    AsyncDownloaderBase,
+    DownloadConfig,
+    DownloadProgressTracker,
+    DownloadResult,
+    DownloadStatus,
+    RateLimiter,
+)
 
-# Type aliases
-BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
-ArrayLike = npt.NDArray[Any]
+logger = logging.getLogger(__name__)
 
 
-def load_wrs_shapefile(
-    shapefile_path: str | None = None,
-) -> list[tuple[shapely.geometry.Polygon, int, int]]:
-    """Load WRS-2 path/row polygons from shapefile."""
-    if shapefile_path is None:
-        shapefile_path = str(
-            files("blackmarble").joinpath("data", "WRS2_descending_0", "WRS2_descending.shp")
+class AsyncLandsatDownloader(AsyncDownloaderBase):
+    """Async downloader for Landsat Collection 2 data from AWS S3"""
+
+    # S3 bucket and structure
+    BUCKET = "usgs-landsat"
+    COLLECTION = "collection02"
+    LEVEL = "level-2"
+
+    # Band mapping
+    BAND_MAPPING = {
+        "B1": "SR_B1.TIF",
+        "B2": "SR_B2.TIF",
+        "B3": "SR_B3.TIF",
+        "B4": "SR_B4.TIF",
+        "B5": "SR_B5.TIF",
+        "B6": "SR_B6.TIF",
+        "B7": "SR_B7.TIF",
+        "QA_PIXEL": "QA_PIXEL.TIF",
+    }
+
+    def __init__(
+        self,
+        aws_unsigned: bool = True,
+        config: DownloadConfig | None = None,
+        rate_limiter: RateLimiter | None = None,
+        progress_callback=None,
+    ):
+        """
+        Args:
+            aws_unsigned: Use unsigned S3 access (public data)
+            config: Download configuration
+            rate_limiter: Rate limiter
+            progress_callback: Progress callback function
+        """
+        # Set up default config with S3-specific settings
+        if config is None:
+            config = DownloadConfig(
+                max_concurrent=10,  # S3 can handle more
+                timeout_seconds=300,
+                chunk_size=1024 * 1024,  # 1MB chunks
+                max_retries=3,
+            )
+
+        super().__init__(config, rate_limiter, progress_callback)
+
+        # S3 configuration
+        self.aws_unsigned = aws_unsigned
+        # Don't use UNSIGNED config - just use default boto3 client
+        self.s3_config = Config(retries={"max_attempts": 0})  # We handle retries ourselves
+
+        # Cache for S3 directory listings
+        self._listing_cache = {}
+
+    async def list_s3_objects(self, prefix: str, delimiter: str = "/") -> dict[str, Any]:
+        """
+        List S3 objects with caching.
+
+        Args:
+            prefix: S3 prefix to list
+            delimiter: Delimiter for grouping
+
+        Returns:
+            S3 list response
+        """
+        cache_key = f"{prefix}:{delimiter}"
+
+        if cache_key in self._listing_cache:
+            return self._listing_cache[cache_key]
+
+        # Create default session (will use AWS credentials if available, or anonymous)
+        session = aioboto3.Session()
+        async with session.client("s3", config=self.s3_config) as s3:  # type: ignore
+            try:
+                response = await s3.list_objects_v2(
+                    Bucket=self.BUCKET,
+                    Prefix=prefix,
+                    Delimiter=delimiter,
+                    RequestPayer="requester",  # Required for USGS Landsat bucket
+                )
+                self._listing_cache[cache_key] = response
+                return response
+            except Exception as e:
+                logger.error(f"Failed to list S3 objects at {prefix}: {e}")
+                return {"CommonPrefixes": [], "Contents": []}
+
+    async def get_scene_cloud_cover(self, scene_prefix: str, scene_id: str) -> float:
+        """
+        Get cloud cover percentage from scene MTL metadata.
+
+        Args:
+            scene_prefix: S3 prefix for the scene
+            scene_id: Scene identifier
+
+        Returns:
+            Cloud cover percentage (0-100)
+        """
+        # MTL file S3 key
+        mtl_key = f"{scene_prefix}{scene_id}_MTL.txt"
+
+        try:
+            # Download MTL metadata to memory
+            session = aioboto3.Session()
+            async with session.client("s3", config=self.s3_config) as s3:  # type: ignore
+                response = await s3.get_object(
+                    Bucket=self.BUCKET, Key=mtl_key, RequestPayer="requester"
+                )
+
+                # Read MTL content
+                mtl_content = await response["Body"].read()
+                mtl_text = mtl_content.decode("utf-8")
+
+                # Parse cloud cover from MTL
+                # Look for IMAGE_ATTRIBUTES_GROUP and CLOUD_COVER_LAND
+                cloud_cover = 100.0  # Default to high if not found
+
+                for line in mtl_text.split("\n"):
+                    if "CLOUD_COVER_LAND" in line:
+                        # Format: CLOUD_COVER_LAND = 12.34
+                        parts = line.split("=")
+                        if len(parts) == 2:
+                            try:
+                                cloud_cover = float(parts[1].strip())
+                                break
+                            except ValueError:
+                                pass
+                    elif "CLOUD_COVER" in line and "CLOUD_COVER_LAND" not in line:
+                        # Fallback to general cloud cover if land-specific not found
+                        parts = line.split("=")
+                        if len(parts) == 2:
+                            try:
+                                cloud_cover = float(parts[1].strip())
+                            except ValueError:
+                                pass
+
+                return cloud_cover
+
+        except Exception as e:
+            logger.warning(f"Failed to get cloud cover for {scene_id}: {e}")
+            # Return a conservative estimate if we can't get metadata
+            return 50.0
+
+    async def find_landsat_scenes(
+        self,
+        year: int,
+        bbox: tuple[float, float, float, float],
+        date_range: tuple[datetime, datetime] | None = None,
+        cloud_cover_max: float = 20.0,
+    ) -> list[dict[str, Any]]:
+        """
+        Find Landsat scenes for given criteria.
+
+        Args:
+            year: Year to search
+            bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
+            date_range: Optional date range filter
+            cloud_cover_max: Maximum cloud cover percentage
+
+        Returns:
+            List of scene metadata
+        """
+        from .landsat import get_wrs_tiles_for_bbox_tuple
+
+        # Get ALL WRS tiles that intersect with the bbox
+        tile_dicts = get_wrs_tiles_for_bbox_tuple(bbox)
+        tiles = [f"{t['path']:03d}{t['row']:03d}" for t in tile_dicts]
+
+        logger.info(f"Searching Landsat scenes for tiles: {tiles}")
+
+        # Search for scenes
+        scenes = []
+        scenes_checked = 0
+        scenes_filtered_by_cloud = 0
+        sensor_prefix = f"{self.COLLECTION}/{self.LEVEL}/standard/oli-tirs/{year}/"
+
+        # List all paths for the year
+        response = await self.list_s3_objects(sensor_prefix)
+
+        for prefix_info in response.get("CommonPrefixes", []):
+            path_prefix = prefix_info["Prefix"]
+            path_num = int(path_prefix.split("/")[-2])
+
+            # Check if any of our tiles are in this path
+            relevant_tiles = [t for t in tiles if int(t[:3]) == path_num]
+            if not relevant_tiles:
+                continue
+
+            # List rows in this path
+            row_response = await self.list_s3_objects(path_prefix)
+
+            for row_info in row_response.get("CommonPrefixes", []):
+                row_prefix = row_info["Prefix"]
+                row_num = int(row_prefix.split("/")[-2])
+
+                # Check if this path/row matches our tiles
+                current_tile = f"{path_num:03d}{row_num:03d}"
+                if current_tile not in relevant_tiles:
+                    continue
+
+                # List scenes in this path/row
+                scene_response = await self.list_s3_objects(row_prefix)
+
+                # Process scenes with cloud cover check
+                for scene_info in scene_response.get("CommonPrefixes", []):
+                    scene_prefix = scene_info["Prefix"]
+                    scene_id = scene_prefix.split("/")[-2]
+
+                    # Parse scene metadata from ID
+                    scene_date = datetime.strptime(scene_id.split("_")[3], "%Y%m%d")
+
+                    # Apply date filter
+                    if date_range:
+                        if scene_date < date_range[0] or scene_date > date_range[1]:
+                            continue
+
+                    scenes_checked += 1
+
+                    # Get actual cloud cover from MTL metadata
+                    cloud_cover = await self.get_scene_cloud_cover(scene_prefix, scene_id)
+
+                    # Only add scene if it passes cloud cover filter
+                    if cloud_cover <= cloud_cover_max:
+                        scenes.append(
+                            {
+                                "scene_id": scene_id,
+                                "path": path_num,
+                                "row": row_num,
+                                "date": scene_date,
+                                "s3_prefix": scene_prefix,
+                                "cloud_cover": cloud_cover,
+                            }
+                        )
+                    else:
+                        scenes_filtered_by_cloud += 1
+                        logger.debug(
+                            f"Skipping scene {scene_id} with cloud cover {cloud_cover:.1f}%"
+                        )
+
+        logger.info(
+            f"Found {len(scenes)} Landsat scenes matching criteria "
+            f"(cloud cover <= {cloud_cover_max}%). "
+            f"Checked {scenes_checked} scenes, "
+            f"filtered {scenes_filtered_by_cloud} due to cloud cover."
+        )
+        return scenes
+
+    async def prepare_download(self, item: dict[str, Any], output_dir: Path) -> tuple[str, Path]:
+        """
+        Prepare download URL and output path for Landsat band.
+
+        Args:
+            item: Download item with scene and band info
+            output_dir: Base output directory
+
+        Returns:
+            Tuple of (s3_url, local_path)
+        """
+        scene_id = item["scene_id"]
+        band = item["band"]
+        date = item["date"]
+
+        # S3 key
+        s3_key = f"{item['s3_prefix']}{scene_id}_{self.BAND_MAPPING[band]}"
+        s3_url = f"s3://{self.BUCKET}/{s3_key}"
+
+        # Local path organized by date
+        date_dir = output_dir / date.strftime("%Y/%m/%d") / scene_id
+        local_path = date_dir / f"{scene_id}_{self.BAND_MAPPING[band]}"
+
+        return s3_url, local_path
+
+    async def download_file(self, url: str, output_path: Path, **kwargs) -> DownloadResult:
+        """Override to use S3 download instead of HTTP"""
+        result = DownloadResult(url=url, local_path=output_path, status=DownloadStatus.PENDING)
+
+        # Check if file exists
+        if output_path.exists() and output_path.stat().st_size > 0:
+            result.status = DownloadStatus.COMPLETED
+            result.size_bytes = output_path.stat().st_size
+            return result
+
+        # Parse S3 URL
+        if not url.startswith("s3://"):
+            raise ValueError(f"Expected S3 URL, got: {url}")
+
+        parts = url[5:].split("/", 1)
+        bucket = parts[0]
+        key = parts[1]
+
+        # Ensure output directory exists
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Download from S3
+        start_time = asyncio.get_event_loop().time()
+
+        # Mark as in progress and notify callback
+        result.status = DownloadStatus.IN_PROGRESS
+        if self.progress_callback:
+            self.progress_callback(result)
+
+        try:
+            async with self._semaphore:
+                # Create default session (will use AWS credentials if available, or anonymous)
+                session = aioboto3.Session()
+                async with session.client("s3", config=self.s3_config) as s3:  # type: ignore
+                    # Use temporary file
+                    temp_path = output_path.with_suffix(".tmp")
+
+                    try:
+                        await s3.download_file(
+                            bucket,
+                            key,
+                            str(temp_path),
+                            ExtraArgs={
+                                "RequestPayer": "requester"
+                            },  # Required for USGS Landsat bucket
+                        )
+
+                        # Atomic rename
+                        temp_path.rename(output_path)
+
+                        result.status = DownloadStatus.COMPLETED
+                        result.size_bytes = output_path.stat().st_size
+                        result.duration_seconds = asyncio.get_event_loop().time() - start_time
+
+                        # Notify callback of completion
+                        if self.progress_callback:
+                            self.progress_callback(result)
+
+                    except Exception:
+                        if temp_path.exists():
+                            temp_path.unlink()
+                        raise
+
+        except Exception as e:
+            logger.error(f"Failed to download {url}: {e}")
+            result.status = DownloadStatus.FAILED
+            result.error = str(e)
+
+            # Notify callback of failure
+            if self.progress_callback:
+                self.progress_callback(result)
+
+            # Retry logic would go here
+            raise
+
+        return result
+
+    async def download_scene_bands(
+        self, scene: dict[str, Any], bands: list[str], output_dir: Path
+    ) -> dict[str, Path]:
+        """
+        Download multiple bands for a scene.
+
+        Args:
+            scene: Scene metadata
+            bands: List of band names
+            output_dir: Output directory
+
+        Returns:
+            Dictionary mapping band names to file paths
+        """
+        # Log scene download details
+        logger.info(
+            f"Downloading scene {scene['scene_id']} "
+            f"(path={scene['path']:03d}, row={scene['row']:03d}, "
+            f"date={scene['date'].strftime('%Y-%m-%d')}, "
+            f"cloud_cover={scene['cloud_cover']:.1f}%)"
         )
 
-    polygons = []
-    with fiona.open(shapefile_path, "r") as collection:
-        for feature in collection:
-            properties = feature["properties"]
-            path = int(properties["PATH"])
-            row = int(properties["ROW"])
-            geom = shape(feature["geometry"])
+        # Create download items
+        items = []
+        for band in bands:
+            items.append({**scene, "band": band})
 
-            if isinstance(geom, shapely.geometry.Polygon):
-                polygons.append((geom, path, row))
+        # Download all bands concurrently
+        results = await self.download_batch(items, output_dir)
 
-    print(f"Loaded {len(polygons)} WRS-2 path/row polygons from shapefile")
-    return polygons
+        # Map results to band names
+        band_paths = {}
+        for item, result in zip(items, results):
+            if result.status == DownloadStatus.COMPLETED:
+                band_paths[item["band"]] = result.local_path
+            else:
+                logger.warning(f"Failed to download {item['band']}: {result.error}")
+                band_paths[item["band"]] = None
 
-
-def get_wrs_tiles_for_point(
-    lat: float,
-    lon: float,
-    wrs_polygons: list[tuple[shapely.geometry.Polygon, int, int]] | None = None,
-) -> list[dict[str, int]]:
-    """Get Landsat WRS-2 path and row for given coordinates."""
-    if wrs_polygons is None:
-        wrs_polygons = load_wrs_shapefile()
-
-    point = Point(lon, lat)
-    results = []
-    for polygon, path, row in wrs_polygons:
-        if polygon.contains(point):
-            results.append({"path": path, "row": row})
-
-    return results
+        return band_paths
 
 
-def get_wrs_tiles_for_bbox_tuple(
-    bbox: BBox,
-    wrs_polygons: list[tuple[shapely.geometry.Polygon, int, int]] | None = None,
-) -> list[dict[str, int]]:
-    """Get all Landsat WRS-2 tiles that intersect with a bounding box."""
-    from shapely.geometry import box
-
-    if wrs_polygons is None:
-        wrs_polygons = load_wrs_shapefile()
-
-    min_lon, min_lat, max_lon, max_lat = bbox
-    bbox_polygon = box(min_lon, min_lat, max_lon, max_lat)
-
-    results = []
-    seen_tiles = set()
-
-    for polygon, path, row in wrs_polygons:
-        if polygon.intersects(bbox_polygon):
-            tile_key = (path, row)
-            if tile_key not in seen_tiles:
-                seen_tiles.add(tile_key)
-                results.append({"path": path, "row": row})
-
-    results.sort(key=lambda x: (x["path"], x["row"]))
-    return results
-
-
-def get_wrs_path_row(lat: float, lon: float) -> tuple[int, int]:
-    """Get WRS-2 path and row for given coordinates.
+async def download_landsat_async(
+    dates: list[datetime],
+    bbox: tuple[float, float, float, float],
+    bands: list[str],
+    output_dir: str = "./data/landsat",
+    cloud_cover_max: float = 20.0,
+    show_progress: bool = True,
+) -> dict[datetime, dict[str, list[Path]]]:
+    """
+    High-level async function to download Landsat data for multiple dates.
 
     Args:
-        lat: Latitude
-        lon: Longitude
+        dates: List of target dates
+        bbox: Bounding box
+        bands: List of band names to download
+        output_dir: Output directory
+        cloud_cover_max: Maximum cloud cover
+        show_progress: Show progress bar
 
     Returns:
-        Tuple of (path, row)
+        Dictionary mapping dates to band paths
     """
-    # Use the proper shapefile-based function
-    results = get_wrs_tiles_for_point(lat, lon, None)
+    logger.info(f"Downloading Landsat data for {len(dates)} dates")
+    logger.info(f"Bounding box: {bbox}")
+    logger.info(f"Cloud cover max: {cloud_cover_max}%")
 
-    if results:
-        # Return first result as tuple
-        return results[0]["path"], results[0]["row"]
-    else:
-        # Fallback calculation for areas not covered
-        # Fixed calculation based on actual WRS-2 grid
-        # WRS-2 paths increase westward, rows increase southward
-        path = int((184.5 - lon) % 233) + 1
-        row = int((90 - lat) / 1.42) + 1
+    # Group dates by year for efficient searching
+    dates_by_year = {}
+    for date in dates:
+        if date.year not in dates_by_year:
+            dates_by_year[date.year] = []
+        dates_by_year[date.year].append(date)
 
-        # Clamp to valid ranges
-        path = max(1, min(233, path))
-        row = max(1, min(248, row))
+    async with AsyncLandsatDownloader() as downloader:
+        all_downloads = []
+        tiles_found = set()  # Track which tiles we found scenes for
+        tiles_needed = set()  # Track all tiles we need
 
-        return path, row
+        # Find scenes for each year
+        for year, year_dates in dates_by_year.items():
+            # Date range for the year
+            date_range = (
+                min(year_dates) - timedelta(days=8),
+                max(year_dates) + timedelta(days=8),
+            )
 
+            # Find scenes
+            scenes = await downloader.find_landsat_scenes(
+                year=year,
+                bbox=bbox,
+                date_range=date_range,
+                cloud_cover_max=cloud_cover_max,
+            )
 
+            # Track tiles from found scenes
+            for scene in scenes:
+                tile_id = f"{scene['path']:03d}{scene['row']:03d}"
+                tiles_found.add(tile_id)
+
+            # Match scenes to requested dates
+            for target_date in year_dates:
+                # Group scenes by tile for this date
+                scenes_by_tile = {}
+                for scene in scenes:
+                    tile_id = f"{scene['path']:03d}{scene['row']:03d}"
+                    tiles_needed.add(tile_id)
+
+                    diff = abs(scene["date"] - target_date)
+                    if diff <= timedelta(days=8):
+                        if tile_id not in scenes_by_tile or diff < abs(
+                            scenes_by_tile[tile_id]["date"] - target_date
+                        ):
+                            scenes_by_tile[tile_id] = scene
+
+                # Add downloads for all tiles found
+                for tile_id, scene in scenes_by_tile.items():
+                    all_downloads.append(
+                        {
+                            "date": target_date,
+                            "scene": scene,
+                            "bands": bands,
+                            "tile_id": tile_id,
+                        }
+                    )
+
+                # Log tiles not found for this date
+                missing_tiles = tiles_needed - set(scenes_by_tile.keys())
+                if missing_tiles:
+                    logger.warning(
+                        f"Missing tiles for {target_date.strftime('%Y-%m-%d')}: "
+                        f"{sorted(missing_tiles)}"
+                    )
+
+        # Summary of tile coverage
+        logger.info("\nTile coverage summary:")
+        logger.info(f"  Total tiles needed: {len(tiles_needed)}")
+        logger.info(f"  Tiles with data: {len(tiles_found)}")
+        logger.info(f"  Tiles always missing: {sorted(tiles_needed - tiles_found)}")
+        logger.info(f"  Total scene downloads: {len(all_downloads)}")
+
+        # Set up progress tracking
+        total_files = len(all_downloads) * len(bands)
+        progress = None
+        if show_progress:
+            progress = DownloadProgressTracker(
+                total_files=total_files, description="Downloading Landsat"
+            )
+            downloader.progress_callback = progress.update  # type: ignore
+
+        # Download all scenes/bands concurrently
+        download_tasks = []
+        for download in all_downloads:
+            task = downloader.download_scene_bands(
+                scene=download["scene"],
+                bands=download["bands"],
+                output_dir=Path(output_dir),
+            )
+            download_tasks.append((download["date"], download["tile_id"], task))
+
+        # Execute all downloads
+        results = {}
+        tiles_downloaded_by_date = {}
+
+        for date, tile_id, task in download_tasks:
+            band_paths = await task
+            if date not in results:
+                results[date] = {}
+                tiles_downloaded_by_date[date] = set()
+
+            # Track successful downloads
+            if any(path is not None for path in band_paths.values()):
+                tiles_downloaded_by_date[date].add(tile_id)
+
+            # Organize by band
+            for band, path in band_paths.items():
+                if band not in results[date]:
+                    results[date][band] = []
+                if path:
+                    results[date][band].append(path)
+
+        # Log final summary
+        logger.info("\nDownload summary by date:")
+        for date in sorted(tiles_downloaded_by_date.keys()):
+            logger.info(
+                f"  {date.strftime('%Y-%m-%d')}: "
+                f"{len(tiles_downloaded_by_date[date])} tiles downloaded"
+            )
+
+        if progress:
+            progress.finish()
+
+    return results
+
+# Legacy sync function needed by pipeline
 def filter_landsat_scenes(
     year: int,
     month: int,
@@ -135,8 +572,11 @@ def filter_landsat_scenes(
     row: int,
     collection: str = "collection02",
 ) -> str | None:
-    """Find Landsat scene directory for given date and path/row."""
-    global _DIR_CACHE
+    """Find Landsat scene directory for given date and path/row.
+
+    This is a sync wrapper for compatibility.
+    """
+    import boto3
 
     yr = str(year)
     mo = str(month).zfill(2)
@@ -146,287 +586,31 @@ def filter_landsat_scenes(
 
     prefix = f"{collection}/level-2/standard/oli-tirs/{yr}/{path_str}/{row_str}/"
 
-    if prefix in _DIR_CACHE:
-        directories = _DIR_CACHE[prefix]
-        print(f"Using cached directory listing for {prefix}")
-    else:
-        print(f"Querying S3 for scenes in {prefix}")
-        session = boto3.Session()
-        s3 = session.client("s3")
+    # Simple sync implementation
+    s3 = boto3.client("s3", config=boto3.session.Config(signature_version=boto3.session.UNSIGNED))
 
-        try:
-            resp = s3.list_objects_v2(
-                Bucket="usgs-landsat",
-                Prefix=prefix,
-                RequestPayer="requester",
-                Delimiter="/",
-            )
+    result = s3.list_objects_v2(
+        Bucket="usgs-landsat",
+        Prefix=prefix,
+        Delimiter="/",
+    )
 
-            directories = []
-            common_prefixes = resp.get("CommonPrefixes", [])
-            for prefix_entry in common_prefixes:
-                if isinstance(prefix_entry, dict) and "Prefix" in prefix_entry:
-                    directories.append({"Prefix": prefix_entry["Prefix"]})
+    if "CommonPrefixes" not in result:
+        return None
 
-            print(f"Found {len(directories)} scene directories")
+    directories = [x["Prefix"] for x in result["CommonPrefixes"]]
 
-            if len(_DIR_CACHE) >= _MAX_CACHE_SIZE:
-                _DIR_CACHE.popitem(last=False)
-            _DIR_CACHE[prefix] = directories
+    # Filter directories by date
+    yyyymmdd = f"{yr}{mo}{da}"
 
-        except Exception as e:
-            print(f"Error querying S3: {e}")
-            return None
+    for directory in directories:
+        parts = directory.split("/")
+        if len(parts) > 0:
+            base_name = parts[-2] if parts[-1] == "" else parts[-1]
+            if yyyymmdd in base_name:
+                return directory
 
-    target_date = datetime.strptime(yr + mo + da, "%Y%m%d")
-
-    for entry in directories:
-        try:
-            scene_name = entry["Prefix"].split("/")[-2]
-            date_parts = scene_name.split("_")[3:5]
-
-            start_date = datetime.strptime(date_parts[0], "%Y%m%d")
-            end_date = datetime.strptime(date_parts[1], "%Y%m%d")
-
-            if start_date <= target_date <= end_date:
-                print(f"Selected scene: {scene_name}")
-                return entry["Prefix"]
-
-        except (IndexError, ValueError) as e:
-            print(f"Error parsing scene name {entry.get('Prefix', 'unknown')}: {e}")
-            continue
-
-    print(f"No scene found for {year}-{month:02d}-{day:02d} at path {path}, row {row}")
     return None
 
-
-def download_landsat_band(
-    scene_dir: str,
-    band: int | str,
-    output_path: str,
-) -> str:
-    """Download a specific Landsat band from AWS."""
-    scene_name = scene_dir.rstrip("/").split("/")[-1]
-
-    if band in ("QA_PIXEL", "QA_RADSAT", "QA_AEROSOL"):
-        suffix_map = {
-            "QA_PIXEL": "_QA_PIXEL.TIF",
-            "QA_RADSAT": "_QA_RADSAT.TIF",
-            "QA_AEROSOL": "_SR_QA_AEROSOL.TIF",
-        }
-        suffix = suffix_map[str(band)]
-        s3_key = scene_dir + scene_name + suffix
-    else:
-        s3_key = f"{scene_dir}{scene_name}_SR_B{band}.TIF"
-
-    print(f"Downloading {s3_key} to {output_path}")
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    session = boto3.Session()
-    s3 = session.client("s3")
-
-    try:
-        s3.download_file(
-            "usgs-landsat", s3_key, output_path, ExtraArgs={"RequestPayer": "requester"}
-        )
-        print(f"Successfully downloaded to {output_path}")
-        return output_path
-
-    except Exception as e:
-        print(f"Download failed: {e}")
-        raise
-
-
-
-def get_landsat_band_metadata(file_path: str) -> dict[str, Any]:
-    """Extract metadata from a Landsat band file."""
-    with rasterio.open(file_path) as src:
-        metadata = {
-            "width": src.width,
-            "height": src.height,
-            "count": src.count,
-            "dtype": str(src.dtype),
-            "crs": str(src.crs) if src.crs else None,
-            "bounds": src.bounds,
-            "transform": src.transform,
-            "nodata": src.nodata,
-        }
-
-        if "SR_B" in os.path.basename(file_path):
-            metadata.update(
-                {
-                    "scale_factor": 0.0000275,
-                    "add_offset": -0.2,
-                    "valid_range": [7273, 43636],
-                    "units": "reflectance",
-                    "product_type": "surface_reflectance",
-                }
-            )
-        elif "QA_" in os.path.basename(file_path):
-            metadata.update(
-                {
-                    "scale_factor": 1.0,
-                    "add_offset": 0.0,
-                    "product_type": "quality_assessment",
-                }
-            )
-
-        tags = src.tags()
-        if tags:
-            metadata["gdal_tags"] = tags
-
-        basename = os.path.basename(file_path)
-        if "_" in basename:
-            parts = basename.split("_")
-            if len(parts) >= 4:
-                date_str = parts[3]
-                if len(date_str) == 8 and date_str.isdigit():
-                    metadata["acquisition_date"] = date_str
-
-    return metadata
-
-
-def download_tiles_for_band(
-    band: int | str,
-    year: int,
-    month: int,
-    day: int,
-    bbox: BBox,
-    ignore_missing: bool = False,
-    cache_dir: str | None = None,
-) -> tuple[list[str], list[str], list[str], list[str]]:
-    """Download all tiles for a band covering the given bounding box."""
-    min_lon, min_lat, max_lon, max_lat = bbox
-
-    if cache_dir:
-        download_dir = os.path.join(
-            cache_dir, "landsat", f"{year:04d}", f"{month:02d}", f"{day:02d}"
-        )
-        os.makedirs(download_dir, exist_ok=True)
-    else:
-        download_dir = tempfile.mkdtemp(prefix="landsat_")
-
-    # Get ALL tiles that intersect with the bounding box
-    # This uses proper polygon intersection instead of just corner points
-    wrs_tiles = get_wrs_tiles_for_bbox_tuple(bbox)
-
-    if not wrs_tiles:
-        raise RuntimeError(
-            f"No WRS tiles found for bounding box: ({min_lat}, {min_lon}, {max_lat}, {max_lon}). "
-            "This area may be over water or outside Landsat coverage."
-        )
-
-    # Debug: print tile selection
-    print(f"  Tile selection for band {band} on {year}-{month:02d}-{day:02d}:")
-    print(f"    Bounding box: ({min_lat:.3f}, {min_lon:.3f}, {max_lat:.3f}, {max_lon:.3f})")
-    print(f"    Found {len(wrs_tiles)} tiles that intersect the bounding box:")
-
-    # Sort tiles for consistent ordering
-    wrs_tiles.sort(key=lambda x: (x["path"], x["row"]))
-
-    # Group tiles by path for cleaner output
-    tiles_by_path = {}
-    for tile in wrs_tiles:
-        path = tile["path"]
-        if path not in tiles_by_path:
-            tiles_by_path[path] = []
-        tiles_by_path[path].append(tile["row"])
-
-    for path in sorted(tiles_by_path.keys()):
-        rows = sorted(tiles_by_path[path])
-        print(f"      Path {path:03d}: Rows {rows}")
-
-    downloads: list[str] = []
-    pixels: list[str] = []
-    radsat: list[str] = []
-    aerosol: list[str] = []
-
-    # Download each tile that intersects the bounding box
-    for tile in wrs_tiles:
-        p = tile["path"]
-        r = tile["row"]
-
-        # Find scene directory
-        scene_dir = filter_landsat_scenes(year, month, day, p, r)
-
-        if not scene_dir:
-            if ignore_missing:
-                print(
-                    f"Warning: No data found for tile P{p:03d}R{r:03d} "
-                    f"on {year}-{month}-{day}. Skipping."
-                )
-                continue
-            else:
-                raise RuntimeError(f"No data for tile P{p:03d}R{r:03d} on {year}-{month}-{day}")
-
-        base = scene_dir.split("/")[-2]
-
-        # Download band file
-        out_src = os.path.join(download_dir, f"{base}_SR_B{band}.TIF")
-        if not os.path.exists(out_src):
-            print(f"Downloading {out_src}...")
-            download_landsat_band(scene_dir, band, out_src)
-        else:
-            print(f"Using cached file: {out_src}")
-        downloads.append(out_src)
-
-        # Download QA files
-        qa_types = {
-            "QA_PIXEL": ("_QA_PIXEL.TIF", pixels),
-            "QA_RADSAT": ("_QA_RADSAT.TIF", radsat),
-            "QA_AEROSOL": ("_SR_QA_AEROSOL.TIF", aerosol),
-        }
-
-        for qa_key, (suffix, target_list) in qa_types.items():
-            out_qa = os.path.join(download_dir, f"{base}{suffix}")
-            if not os.path.exists(out_qa):
-                print(f"Downloading {out_qa}...")
-                download_landsat_band(scene_dir, qa_key, out_qa)
-            else:
-                print(f"Using cached file: {out_qa}")
-            target_list.append(out_qa)
-
-    return downloads, pixels, radsat, aerosol
-
-
-def download_all_bands_for_date(
-    year: int,
-    month: int,
-    day: int,
-    bbox: BBox,
-    bands: list[int | str] | None = None,
-    cache_dir: str | None = None,
-    ignore_missing: bool = False,
-) -> dict[str, tuple[list[str], list[str], list[str], list[str]]]:
-    """Download all specified bands for a single date."""
-    if bands is None:
-        bands = [2, 3, 4, 5, "QA_PIXEL"]
-
-    result = {}
-
-    for band in bands:
-        band_key = f"B{band}" if isinstance(band, int) else band
-        print(f"Downloading {band_key} for {year}-{month:02d}-{day:02d}")
-
-        try:
-            # Download this band for the specified date
-            band_data = download_tiles_for_band(
-                band=band,
-                year=year,
-                month=month,
-                day=day,
-                bbox=bbox,
-                ignore_missing=ignore_missing,
-                cache_dir=cache_dir,
-            )
-            result[band_key] = band_data
-        except Exception as e:
-            if ignore_missing:
-                print(
-                    f"Warning: Could not download {band_key} for {year}-{month:02d}-{day:02d}: {e}"
-                )
-                result[band_key] = ([], [], [], [])
-            else:
-                raise
-
-    return result
+# Legacy name aliases for compatibility
+download_all_bands_for_date = download_landsat_async

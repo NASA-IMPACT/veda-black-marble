@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 from blackmarble.config import PipelineConfig
-from blackmarble.pipeline import black_marble_pipeline
+from blackmarble.pipeline import black_marble_pipeline_sync
 
 app = typer.Typer(help="Command-line interface for the VEDA Black Marble processing pipeline.")
 
@@ -29,11 +29,6 @@ def run(
         help="NASA Earthdata token for VIIRS downloads. "
         "If not provided, reads from EARTHDATA_TOKEN environment variable.",
         envvar="EARTHDATA_TOKEN",
-    ),
-    use_async: bool = typer.Option(
-        True,
-        "--async/--no-async",
-        help="Use async downloads for better performance (default: True).",
     ),
     output_path: str = typer.Option(
         "black_marble_output.tif",
@@ -82,7 +77,7 @@ def run(
     """
 
     # Handle Earthdata token
-    if not earthdata_token and use_async:
+    if not earthdata_token:
         typer.echo(
             "Warning: No Earthdata token provided. VIIRS downloads will be skipped.\n"
             "Provide token via --earthdata-token or set EARTHDATA_TOKEN environment variable.",
@@ -202,17 +197,13 @@ def run(
 
     try:
         typer.echo("\nRunning pipeline...")
-        if use_async:
-            typer.echo("🚀 Using async downloads for maximum performance")
-        else:
-            typer.echo("🐌 Using sequential downloads (legacy mode)")
+        typer.echo("🚀 Using async I/O for maximum performance")
 
-        result = black_marble_pipeline(
+        result = black_marble_pipeline_sync(
             bbox=bbox,
             date=date,
             output_path=str(output_path_obj),
             config=config,
-            use_async=use_async,
             earthdata_token=earthdata_token,
         )
 

@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 # from .async_base import DownloadProgressTracker  # Currently unused
-from .async_landsat import download_landsat_async
-from .async_viirs_functional import download_viirs_for_pipeline
+from .landsat import download_landsat_async
+from .viirs import download_viirs_for_pipeline
 
 logger = logging.getLogger(__name__)
 
