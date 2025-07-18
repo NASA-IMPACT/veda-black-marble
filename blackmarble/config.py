@@ -7,8 +7,8 @@ Black Marble pipeline, with clear separation of concerns across phases.
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
+
 import numpy.typing as npt
-import os
 
 # Type aliases
 BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
@@ -114,15 +114,9 @@ class AnalysisConfig:
     enhancement_multiplicative_factor: float = (
         0.3  # Multiplicative mode: max enhancement factor - 1 (e.g., 0.3 = up to 1.3x)
     )
-    enhancement_additive_factor: float = (
-        0.02  # Additive mode: NTL + (factor * urban_field)
-    )
-    enhancement_hybrid_expected_scale: float = (
-        0.2  # Hybrid mode: linear term coefficient
-    )
-    enhancement_hybrid_expected_sqrt_scale: float = (
-        0.1  # Hybrid mode: sqrt term coefficient
-    )
+    enhancement_additive_factor: float = 0.02  # Additive mode: NTL + (factor * urban_field)
+    enhancement_hybrid_expected_scale: float = 0.2  # Hybrid mode: linear term coefficient
+    enhancement_hybrid_expected_sqrt_scale: float = 0.1  # Hybrid mode: sqrt term coefficient
     enhancement_hybrid_application_factor: float = (
         1.0  # Hybrid mode: apply full calculated enhancement
     )
@@ -209,9 +203,7 @@ class PipelineConfig:
     save_diagnostics: bool = False
 
     @classmethod
-    def for_bm_parity(
-        cls, bbox: BBox, date: datetime, output_path: str
-    ) -> "PipelineConfig":
+    def for_bm_parity(cls, bbox: BBox, date: datetime, output_path: str) -> "PipelineConfig":
         """Create configuration that exactly matches legacy bm.py behavior.
 
         This uses the parameters that ensure parity with the legacy docker/bm.py implementation.
@@ -240,9 +232,7 @@ class PipelineConfig:
         )
 
     @classmethod
-    def for_enhanced_quality(
-        cls, bbox: BBox, date: datetime, output_path: str
-    ) -> "PipelineConfig":
+    def for_enhanced_quality(cls, bbox: BBox, date: datetime, output_path: str) -> "PipelineConfig":
         """Create configuration for enhanced quality output.
 
         This enables advanced features that improve output quality beyond

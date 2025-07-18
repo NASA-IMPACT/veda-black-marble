@@ -1,11 +1,12 @@
 """VIIRS nighttime lights data acquisition - SLIM VERSION."""
 
-from typing import Any
-from datetime import datetime, date
-import numpy.typing as npt
 import os
-import requests
 import shutil
+from datetime import date, datetime
+from typing import Any
+
+import numpy.typing as npt
+import requests
 from osgeo import gdal
 
 # Type aliases
@@ -62,7 +63,9 @@ def download_viirs_h5(
         )
 
     # Download file
-    download_url = f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/archives/{matching_filename}"
+    download_url = (
+        f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/archives/{matching_filename}"
+    )
     headers = {"Authorization": f"Bearer {earthdata_token}"}
 
     print(f"Downloading {matching_filename}...")
@@ -125,9 +128,7 @@ def extract_viirs_layers(hdf_file: str, output_dir: str = ".") -> dict[str, str]
     os.makedirs(output_dir, exist_ok=True)
 
     # We only need gap-filled NTL (layer 2)
-    output_path = os.path.join(
-        output_dir, f"{basename}_Gap_Filled_DNB_BRDF-Corrected_NTL.tif"
-    )
+    output_path = os.path.join(output_dir, f"{basename}_Gap_Filled_DNB_BRDF-Corrected_NTL.tif")
 
     try:
         convert_viirs_hdf_to_tiff(hdf_file, output_path, layer=2)
@@ -176,7 +177,7 @@ def download_vnp46a2_tiles(
     """Download all VNP46A2 tiles for a date and bounding box."""
     # Product parameter reserved for future multi-product support
     _ = product  # Currently unused, kept for API compatibility
-    
+
     # Get token
     if not earthdata_token:
         earthdata_token = os.environ.get("EARTHDATA_TOKEN")
@@ -204,17 +205,13 @@ def download_vnp46a2_tiles(
 
     # Download each tile
     for v, h in tiles:
-        h5_filename = (
-            f"VNP46A2.A{date.year}{date.timetuple().tm_yday:03d}.h{h:02d}v{v:02d}.h5"
-        )
+        h5_filename = f"VNP46A2.A{date.year}{date.timetuple().tm_yday:03d}.h{h:02d}v{v:02d}.h5"
         h5_path = os.path.join(download_dir, h5_filename)
 
         # Download HDF5 if needed
         if not os.path.exists(h5_path) or not skip_existing:
             try:
-                download_viirs_h5(
-                    earthdata_token, date.year, date.month, date.day, v, h, h5_path
-                )
+                download_viirs_h5(earthdata_token, date.year, date.month, date.day, v, h, h5_path)
             except Exception as e:
                 print(f"Failed to download tile h{h:02d}v{v:02d}: {e}")
                 continue

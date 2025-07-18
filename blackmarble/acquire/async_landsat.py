@@ -1,10 +1,10 @@
 """Async downloader for Landsat data from AWS S3."""
 
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
-import logging
+from typing import Any
 
 import aioboto3
 from botocore.config import Config
@@ -12,12 +12,11 @@ from botocore.config import Config
 from .async_base import (
     AsyncDownloaderBase,
     DownloadConfig,
+    DownloadProgressTracker,
+    DownloadResult,
     DownloadStatus,
     RateLimiter,
-    DownloadResult,
-    DownloadProgressTracker,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +44,8 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
     def __init__(
         self,
         aws_unsigned: bool = True,
-        config: Optional[DownloadConfig] = None,
-        rate_limiter: Optional[RateLimiter] = None,
+        config: DownloadConfig | None = None,
+        rate_limiter: RateLimiter | None = None,
         progress_callback=None,
     ):
         """
@@ -70,16 +69,12 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         # S3 configuration
         self.aws_unsigned = aws_unsigned
         # Don't use UNSIGNED config - just use default boto3 client
-        self.s3_config = Config(
-            retries={"max_attempts": 0}  # We handle retries ourselves
-        )
+        self.s3_config = Config(retries={"max_attempts": 0})  # We handle retries ourselves
 
         # Cache for S3 directory listings
         self._listing_cache = {}
 
-    async def list_s3_objects(
-        self, prefix: str, delimiter: str = "/"
-    ) -> Dict[str, Any]:
+    async def list_s3_objects(self, prefix: str, delimiter: str = "/") -> dict[str, Any]:
         """
         List S3 objects with caching.
 
@@ -170,10 +165,10 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
     async def find_landsat_scenes(
         self,
         year: int,
-        bbox: Tuple[float, float, float, float],
-        date_range: Optional[Tuple[datetime, datetime]] = None,
+        bbox: tuple[float, float, float, float],
+        date_range: tuple[datetime, datetime] | None = None,
         cloud_cover_max: float = 20.0,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Find Landsat scenes for given criteria.
 
@@ -243,9 +238,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                     scenes_checked += 1
 
                     # Get actual cloud cover from MTL metadata
-                    cloud_cover = await self.get_scene_cloud_cover(
-                        scene_prefix, scene_id
-                    )
+                    cloud_cover = await self.get_scene_cloud_cover(scene_prefix, scene_id)
 
                     # Only add scene if it passes cloud cover filter
                     if cloud_cover <= cloud_cover_max:
@@ -272,9 +265,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         )
         return scenes
 
-    async def prepare_download(
-        self, item: Dict[str, Any], output_dir: Path
-    ) -> Tuple[str, Path]:
+    async def prepare_download(self, item: dict[str, Any], output_dir: Path) -> tuple[str, Path]:
         """
         Prepare download URL and output path for Landsat band.
 
@@ -299,13 +290,9 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
         return s3_url, local_path
 
-    async def download_file(
-        self, url: str, output_path: Path, **kwargs
-    ) -> DownloadResult:
+    async def download_file(self, url: str, output_path: Path, **kwargs) -> DownloadResult:
         """Override to use S3 download instead of HTTP"""
-        result = DownloadResult(
-            url=url, local_path=output_path, status=DownloadStatus.PENDING
-        )
+        result = DownloadResult(url=url, local_path=output_path, status=DownloadStatus.PENDING)
 
         # Check if file exists
         if output_path.exists() and output_path.stat().st_size > 0:
@@ -355,15 +342,13 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
                         result.status = DownloadStatus.COMPLETED
                         result.size_bytes = output_path.stat().st_size
-                        result.duration_seconds = (
-                            asyncio.get_event_loop().time() - start_time
-                        )
+                        result.duration_seconds = asyncio.get_event_loop().time() - start_time
 
                         # Notify callback of completion
                         if self.progress_callback:
                             self.progress_callback(result)
 
-                    except Exception as e:
+                    except Exception:
                         if temp_path.exists():
                             temp_path.unlink()
                         raise
@@ -383,8 +368,8 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         return result
 
     async def download_scene_bands(
-        self, scene: Dict[str, Any], bands: List[str], output_dir: Path
-    ) -> Dict[str, Path]:
+        self, scene: dict[str, Any], bands: list[str], output_dir: Path
+    ) -> dict[str, Path]:
         """
         Download multiple bands for a scene.
 
@@ -425,13 +410,13 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
 
 async def download_landsat_async(
-    dates: List[datetime],
-    bbox: Tuple[float, float, float, float],
-    bands: List[str],
+    dates: list[datetime],
+    bbox: tuple[float, float, float, float],
+    bands: list[str],
     output_dir: str = "./data/landsat",
     cloud_cover_max: float = 20.0,
     show_progress: bool = True,
-) -> Dict[datetime, Dict[str, List[Path]]]:
+) -> dict[datetime, dict[str, list[Path]]]:
     """
     High-level async function to download Landsat data for multiple dates.
 
@@ -518,7 +503,7 @@ async def download_landsat_async(
                     )
 
         # Summary of tile coverage
-        logger.info(f"\nTile coverage summary:")
+        logger.info("\nTile coverage summary:")
         logger.info(f"  Total tiles needed: {len(tiles_needed)}")
         logger.info(f"  Tiles with data: {len(tiles_found)}")
         logger.info(f"  Tiles always missing: {sorted(tiles_needed - tiles_found)}")

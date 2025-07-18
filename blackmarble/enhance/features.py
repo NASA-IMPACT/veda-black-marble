@@ -1,6 +1,7 @@
 """Feature enhancement - ONLY WHAT'S USED."""
 
 from typing import Any
+
 import numpy as np
 import numpy.typing as npt
 
@@ -73,8 +74,6 @@ def enhance_urban_features(
     # Additional enhancement for roads within urban areas
     if road_mask is not None:
         urban_road_pixels = urban_pixels & (road_mask > 0)
-        enhanced[urban_road_pixels] = np.clip(
-            enhanced[urban_road_pixels] * road_factor, 0, 1
-        )
+        enhanced[urban_road_pixels] = np.clip(enhanced[urban_road_pixels] * road_factor, 0, 1)
 
     return enhanced

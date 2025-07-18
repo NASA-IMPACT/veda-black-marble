@@ -4,24 +4,24 @@ This module handles fetching road network data from OpenStreetMap using OSMnx,
 and converting it to raster format for integration with satellite imagery.
 """
 
-from typing import Any, Literal
-import numpy.typing as npt
-import numpy as np
-import rasterio
-import rasterio.features
-from rasterio.crs import CRS
-from rasterio.warp import transform_geom
-from shapely.geometry import shape, mapping
-from shapely.geometry import mapping as geom_to_dict
-from shapely.ops import transform
-import pyproj
-import shapely
-import osmnx as ox
-import networkx as nx
-import os
 import hashlib
 from pathlib import Path
+from typing import Any, Literal
+
 import geopandas as gpd
+import networkx as nx
+import numpy as np
+import numpy.typing as npt
+import osmnx as ox
+import pyproj
+import rasterio
+import rasterio.features
+import shapely
+from rasterio.crs import CRS
+from rasterio.warp import transform_geom
+from shapely.geometry import mapping, shape
+from shapely.geometry import mapping as geom_to_dict
+from shapely.ops import transform
 
 # Type aliases
 BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
@@ -58,9 +58,7 @@ def download_osm_roads(
         raise
 
 
-def graph_to_shapes(
-    G: nx.MultiDiGraph, buffer_distance: float = 0.00005
-) -> list[dict[str, Any]]:
+def graph_to_shapes(G: nx.MultiDiGraph, buffer_distance: float = 0.00005) -> list[dict[str, Any]]:
     """Convert road graph to buffered shapes."""
     if G.number_of_edges() == 0:
         return []
@@ -68,11 +66,7 @@ def graph_to_shapes(
     _, edges_gdf = ox.graph_to_gdfs(G)
     shapes = []
     for _, edge in edges_gdf.iterrows():
-        geom = (
-            edge.geometry.buffer(buffer_distance)
-            if buffer_distance > 0
-            else edge.geometry
-        )
+        geom = edge.geometry.buffer(buffer_distance) if buffer_distance > 0 else edge.geometry
         shapes.append(shapely.geometry.mapping(geom))
 
     print(f"Created {len(shapes)} buffered road shapes")
@@ -123,9 +117,7 @@ def clear_osm_cache() -> None:
         print(f"Cleared OSM cache directory: {cache_dir}")
 
 
-def get_osm_cache_path(
-    bbox: BBox, network_type: str, custom_filter: str | None
-) -> Path:
+def get_osm_cache_path(bbox: BBox, network_type: str, custom_filter: str | None) -> Path:
     """Generate a cache file path for OSM data based on parameters."""
     # Create a unique hash for the parameters
     params_str = f"{bbox}_{network_type}_{custom_filter}"
@@ -195,9 +187,7 @@ def fetch_road_network(
 
                         # Add edge with attributes
                         edge_attrs = row.to_dict()
-                        edge_attrs.pop(
-                            "geometry", None
-                        )  # Remove geometry from attributes
+                        edge_attrs.pop("geometry", None)  # Remove geometry from attributes
                         graph.add_edge(u, v, **edge_attrs)
 
                 print(
@@ -244,12 +234,8 @@ def buffer_roads_in_utm(
     zone, hemisphere = calculate_utm_zone(lon_center, lat_center)
     epsg_code = 32600 + zone if hemisphere == "north" else 32700 + zone
 
-    wgs84_to_utm = pyproj.Transformer.from_crs(
-        "EPSG:4326", f"EPSG:{epsg_code}", always_xy=True
-    )
-    utm_to_wgs84 = pyproj.Transformer.from_crs(
-        f"EPSG:{epsg_code}", "EPSG:4326", always_xy=True
-    )
+    wgs84_to_utm = pyproj.Transformer.from_crs("EPSG:4326", f"EPSG:{epsg_code}", always_xy=True)
+    utm_to_wgs84 = pyproj.Transformer.from_crs(f"EPSG:{epsg_code}", "EPSG:4326", always_xy=True)
 
     geom = shape(geometry)
     geom_utm = transform(wgs84_to_utm.transform, geom)

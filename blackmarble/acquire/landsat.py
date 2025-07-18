@@ -5,24 +5,22 @@ handling WRS-2 tile selection, S3 downloads, and metadata extraction.
 All functions are stateless and testable, replacing the legacy LandsatUtil class.
 """
 
+import collections
 import os
 import tempfile
-from typing import Any
-import numpy.typing as npt
-from datetime import datetime, timedelta
+from datetime import datetime
 from importlib.resources import files
+from typing import Any
 
 import boto3
-import collections
-import shapely.geometry
-from shapely.geometry import shape, Point
 import fiona
+import numpy.typing as npt
 import rasterio
+import shapely.geometry
+from shapely.geometry import Point, shape
 
 # Global cache for S3 directory listings to improve performance
-_DIR_CACHE: collections.OrderedDict[str, list[dict[str, str]]] = (
-    collections.OrderedDict()
-)
+_DIR_CACHE: collections.OrderedDict[str, list[dict[str, str]]] = collections.OrderedDict()
 _MAX_CACHE_SIZE = 100
 
 # Type aliases
@@ -36,9 +34,7 @@ def load_wrs_shapefile(
     """Load WRS-2 path/row polygons from shapefile."""
     if shapefile_path is None:
         shapefile_path = str(
-            files("blackmarble").joinpath(
-                "data", "WRS2_descending_0", "WRS2_descending.shp"
-            )
+            files("blackmarble").joinpath("data", "WRS2_descending_0", "WRS2_descending.shp")
         )
 
     polygons = []
@@ -351,9 +347,7 @@ def download_tiles_for_band(
 
     # Debug: print tile selection
     print(f"  Tile selection for band {band} on {year}-{month:02d}-{day:02d}:")
-    print(
-        f"    Bounding box: ({min_lat:.3f}, {min_lon:.3f}, {max_lat:.3f}, {max_lon:.3f})"
-    )
+    print(f"    Bounding box: ({min_lat:.3f}, {min_lon:.3f}, {max_lat:.3f}, {max_lon:.3f})")
     print(f"    Found {len(wrs_tiles)} tiles that intersect the bounding box:")
 
     # Sort tiles for consistent ordering
@@ -391,9 +385,7 @@ def download_tiles_for_band(
                 )
                 continue
             else:
-                raise RuntimeError(
-                    f"No data for tile P{p:03d}R{r:03d} on {year}-{month}-{day}"
-                )
+                raise RuntimeError(f"No data for tile P{p:03d}R{r:03d} on {year}-{month}-{day}")
 
         base = scene_dir.split("/")[-2]
 

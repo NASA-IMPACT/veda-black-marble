@@ -6,14 +6,14 @@ including date-by-date processing with QA masking applied before temporal compos
 
 import os
 from typing import Any, Literal
+
 import numpy as np
 import numpy.typing as npt
-
 import rasterio
 from osgeo import gdal
-import tempfile
-from .spatial import crop_to_bounds
+
 from .landsat_qa import create_landsat_cloud_mask, print_qa_pixel_summary
+from .spatial import crop_to_bounds
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -100,9 +100,7 @@ def process_landsat_date(
                         try:
                             from pyproj import Transformer
 
-                            transformer = Transformer.from_crs(
-                                "EPSG:4326", src_crs, always_xy=True
-                            )
+                            transformer = Transformer.from_crs("EPSG:4326", src_crs, always_xy=True)
                             # Transform corners
                             minx, miny = transformer.transform(bbox[0], bbox[1])
                             maxx, maxy = transformer.transform(bbox[2], bbox[3])
@@ -168,11 +166,9 @@ def process_landsat_date(
                 mask_total = cloud_mask.size
 
                 if mask_total > 0:
-                    print(
-                        f"  Cloud mask coverage: {mask_clear / mask_total * 100:.1f}% clear"
-                    )
+                    print(f"  Cloud mask coverage: {mask_clear / mask_total * 100:.1f}% clear")
                 else:
-                    print(f"  WARNING: Cloud mask is empty!")
+                    print("  WARNING: Cloud mask is empty!")
 
     # Process each spectral band
     for band_name, (band_files, _, _, _) in bands_data.items():
@@ -193,9 +189,7 @@ def process_landsat_date(
 
             # For many tiles, read in chunks to avoid memory issues
             if len(band_files) > 10:
-                print(
-                    f"  Reading large VRT ({len(band_files)} tiles) - this may take a moment..."
-                )
+                print(f"  Reading large VRT ({len(band_files)} tiles) - this may take a moment...")
 
             with rasterio.open(band_vrt) as src:
                 band_data = src.read(1)
@@ -215,17 +209,13 @@ def process_landsat_date(
                     try:
                         from pyproj import Transformer
 
-                        transformer = Transformer.from_crs(
-                            "EPSG:4326", src_crs, always_xy=True
-                        )
+                        transformer = Transformer.from_crs("EPSG:4326", src_crs, always_xy=True)
                         # Transform corners
                         minx, miny = transformer.transform(bbox[0], bbox[1])
                         maxx, maxy = transformer.transform(bbox[2], bbox[3])
                         bbox_for_crop = (minx, miny, maxx, maxy)
                     except Exception as e:
-                        print(
-                            f"  WARNING: Could not transform bbox for {band_name}: {e}"
-                        )
+                        print(f"  WARNING: Could not transform bbox for {band_name}: {e}")
                         bbox_for_crop = bbox
                 else:
                     bbox_for_crop = bbox
@@ -269,9 +259,7 @@ def process_landsat_date(
             # Debug info
             if total_pixels == 0:
                 print(f"  WARNING: {band_name} has zero pixels after cropping!")
-                print(
-                    f"    Band shape: {band_data.shape}, Mask shape: {cloud_mask.shape}"
-                )
+                print(f"    Band shape: {band_data.shape}, Mask shape: {cloud_mask.shape}")
                 print(f"    Cropped mask shape: {cloud_mask_cropped.shape}")
             else:
                 print(

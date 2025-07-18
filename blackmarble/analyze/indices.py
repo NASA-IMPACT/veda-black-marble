@@ -13,9 +13,7 @@ import numpy.typing as npt
 ArrayLike = npt.NDArray[Any]
 
 
-def calculate_ndvi(
-    nir: ArrayLike, red: ArrayLike, epsilon: float = 0.0001
-) -> ArrayLike:
+def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = 0.0001) -> ArrayLike:
     """Calculate Normalized Difference Vegetation Index (NDVI).
 
     The NDVI is a fundamental vegetation index that measures the health and density
@@ -61,9 +59,7 @@ def calculate_ndvi(
 
     # Input validation
     if nir.shape != red.shape:
-        raise ValueError(
-            f"NIR and Red arrays must have same shape: {nir.shape} vs {red.shape}"
-        )
+        raise ValueError(f"NIR and Red arrays must have same shape: {nir.shape} vs {red.shape}")
 
     # Calculate denominator with epsilon to prevent division by zero
     # The epsilon prevents NaN/inf when both bands are zero (e.g., no-data regions)
@@ -77,9 +73,7 @@ def calculate_ndvi(
     return ndvi
 
 
-def calculate_ndwi(
-    green: ArrayLike, nir: ArrayLike, epsilon: float = 0.0001
-) -> ArrayLike:
+def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = 0.0001) -> ArrayLike:
     """Calculate Normalized Difference Water Index (NDWI).
 
     The NDWI is designed to detect water features and measure water content
@@ -128,9 +122,7 @@ def calculate_ndwi(
 
     # Input validation
     if green.shape != nir.shape:
-        raise ValueError(
-            f"Green and NIR arrays must have same shape: {green.shape} vs {nir.shape}"
-        )
+        raise ValueError(f"Green and NIR arrays must have same shape: {green.shape} vs {nir.shape}")
 
     # Calculate denominator with epsilon to prevent division by zero
     # Water absorbs NIR strongly, so denominator can approach zero over water
@@ -215,9 +207,7 @@ def calculate_ndui(
 
     # Input validation
     if ntl.shape != ndvi.shape:
-        raise ValueError(
-            f"NTL and NDVI arrays must have same shape: {ntl.shape} vs {ndvi.shape}"
-        )
+        raise ValueError(f"NTL and NDVI arrays must have same shape: {ntl.shape} vs {ndvi.shape}")
 
     if ndwi is not None and ndwi.shape != ntl.shape:
         raise ValueError(f"NDWI shape {ndwi.shape} must match NTL shape {ntl.shape}")
@@ -255,7 +245,7 @@ def calculate_ndui(
 
     # Step 5: Transform to [0, 1] range using bm.py formula
     # Transform: abs((ndui + 1.0)) / 2.0
-    ndui = np.abs((ndui + 1.0)) / 2.0
+    ndui = np.abs(ndui + 1.0) / 2.0
 
     # Step 6: Apply floor threshold
     ndui = np.where(ndui < ndui_floor, 0.0, ndui)

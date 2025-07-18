@@ -5,16 +5,17 @@ by rasterizing at 6m resolution (5x5 sub-pixels per 30m Landsat pixel)
 and averaging to get the fraction of sub-pixels covered.
 """
 
-from typing import Any, Literal
+from typing import Any
+
+import networkx as nx
 import numpy as np
 import numpy.typing as npt
+import osmnx as ox
 import rasterio
 import rasterio.features
 from rasterio.crs import CRS
 from rasterio.transform import Affine
 from shapely.geometry import mapping
-import networkx as nx
-import osmnx as ox
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -87,21 +88,17 @@ def buffer_and_rasterize_roads_fractional(
 
     # Check memory requirements
     memory_gb = (height_6m * width_6m) / (1024**3)
-    print(
-        f"  Sub-pixel grid size: {height_6m:,} x {width_6m:,} = {height_6m * width_6m:,} pixels"
-    )
+    print(f"  Sub-pixel grid size: {height_6m:,} x {width_6m:,} = {height_6m * width_6m:,} pixels")
     print(f"  Estimated memory requirement: {memory_gb:.2f} GB")
 
     if memory_gb > 4.0:
-        print(f"  ⚠️  WARNING: Large memory requirement!")
-        print(
-            f"  Consider using binary rasterization (osm_fractional: false) for large areas"
-        )
+        print("  ⚠️  WARNING: Large memory requirement!")
+        print("  Consider using binary rasterization (osm_fractional: false) for large areas")
 
     # For extremely large areas, process in chunks
     if memory_gb > 8.0 or len(shapes) > 1_000_000:
-        print(f"  ❌ ERROR: Area too large for fractional rasterization")
-        print(f"  Please use binary rasterization instead (set osm_fractional: false)")
+        print("  ❌ ERROR: Area too large for fractional rasterization")
+        print("  Please use binary rasterization instead (set osm_fractional: false)")
         return np.zeros(shape, dtype=np.float32)
 
     # Scale transform for 6m resolution
@@ -139,8 +136,8 @@ def buffer_and_rasterize_roads_fractional(
         print(f"Fractional road rasterization: {pixels_with_roads} pixels with roads")
         print(f"Coverage range: {min_frac:.3f} to {max_frac:.3f}")
     else:
-        print(f"WARNING: No roads rasterized at 30m resolution")
+        print("WARNING: No roads rasterized at 30m resolution")
         print(f"  6m raster had {np.sum(raster_6m > 0)} pixels with roads")
-        print(f"  Check projection and buffer size")
+        print("  Check projection and buffer size")
 
     return raster_30m_fractional

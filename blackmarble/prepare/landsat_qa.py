@@ -5,9 +5,10 @@ bit-packed quality assessment data. The bit positions follow the official USGS
 Collection 2 schema.
 """
 
-import numpy as np
-from typing import Literal
 from enum import Enum
+from typing import Literal
+
+import numpy as np
 
 
 class QALevel(Enum):

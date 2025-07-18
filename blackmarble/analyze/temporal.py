@@ -4,8 +4,9 @@ This module provides the median composite function used in the pipeline.
 """
 
 from typing import Any
-import numpy.typing as npt
+
 import numpy as np
+import numpy.typing as npt
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]

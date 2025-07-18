@@ -1,35 +1,28 @@
 #!/usr/bin/env python3
 import os
+import traceback
 from datetime import datetime
 from pathlib import Path
-import typer
-import traceback
-from blackmarble.pipeline import black_marble_pipeline
-from blackmarble.config import PipelineConfig
 
-app = typer.Typer(
-    help="Command-line interface for the VEDA Black Marble processing pipeline."
-)
+import typer
+
+from blackmarble.config import PipelineConfig
+from blackmarble.pipeline import black_marble_pipeline
+
+app = typer.Typer(help="Command-line interface for the VEDA Black Marble processing pipeline.")
 
 
 @app.command()
 def run(
-    lat1: float = typer.Option(
-        ..., "--lat1", help="Latitude of the first corner (e.g., North)."
-    ),
-    lon1: float = typer.Option(
-        ..., "--lon1", help="Longitude of the first corner (e.g., West)."
-    ),
-    lat2: float = typer.Option(
-        ..., "--lat2", help="Latitude of the second corner (e.g., South)."
-    ),
-    lon2: float = typer.Option(
-        ..., "--lon2", help="Longitude of the second corner (e.g., East)."
-    ),
+    lat1: float = typer.Option(..., "--lat1", help="Latitude of the first corner (e.g., North)."),
+    lon1: float = typer.Option(..., "--lon1", help="Longitude of the first corner (e.g., West)."),
+    lat2: float = typer.Option(..., "--lat2", help="Latitude of the second corner (e.g., South)."),
+    lon2: float = typer.Option(..., "--lon2", help="Longitude of the second corner (e.g., East)."),
     year: int = typer.Option(..., "--year", help="Target year for data."),
     month: int = typer.Option(..., "--month", help="Target month for data."),
     day: int = typer.Option(..., "--day", help="Target day for data."),
-    earthdata_token: str | None = typer.Option(
+    earthdata_token: str
+    | None = typer.Option(
         None,
         "--earthdata-token",
         "-t",
@@ -162,7 +155,7 @@ def run(
     # Enable fractional roads if requested
     if fractional_roads:
         config.analysis.osm_fractional = True
-        typer.echo(f"🛣️  Fractional road rasterization enabled")
+        typer.echo("🛣️  Fractional road rasterization enabled")
         typer.echo(
             f"   Sub-pixels: {config.analysis.osm_sub_pixels}x{config.analysis.osm_sub_pixels}"
         )
@@ -178,22 +171,18 @@ def run(
 
     if ntl_enhancement == "legacy":
         config.analysis.ntl_enhancement_approach = "legacy_burn"
-        typer.echo(
-            f"🔥 NTL enhancement: Legacy burn-in (1.3x major roads, 1.1x minor roads)"
-        )
+        typer.echo("🔥 NTL enhancement: Legacy burn-in (1.3x major roads, 1.1x minor roads)")
     else:
         config.analysis.ntl_enhancement_approach = "urban_field"
         # Type narrow the enhancement mode
-        from typing import cast, Literal
+        from typing import Literal, cast
 
         config.analysis.ntl_enhancement_mode = cast(
             Literal["multiplicative", "additive", "hybrid"], ntl_enhancement
         )
         typer.echo(f"🌃 NTL enhancement: Urban field ({ntl_enhancement} mode)")
         if fractional_roads:
-            typer.echo(
-                f"   Urban field scales: {config.analysis.urban_field_sigmas} pixels"
-            )
+            typer.echo(f"   Urban field scales: {config.analysis.urban_field_sigmas} pixels")
 
     # Display processing info
     typer.echo("\nStarting Black Marble pipeline:")

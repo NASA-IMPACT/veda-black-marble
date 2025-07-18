@@ -4,11 +4,11 @@ This package provides a functional API for processing NASA Black Marble data,
 including Landsat temporal compositing, VIIRS nighttime lights integration,
 OSM road enhancement, and urban index calculation.
 """
+from .config import PipelineConfig
+from .pipeline import black_marble_pipeline
 
 __version__ = "0.1.0"
 
-from .pipeline import black_marble_pipeline
-from .config import PipelineConfig
 
 __all__ = [
     "black_marble_pipeline",

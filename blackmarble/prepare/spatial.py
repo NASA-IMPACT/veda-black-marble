@@ -5,12 +5,11 @@ of raster data to prepare it for analysis.
 """
 
 from typing import Any, Literal
+
 import numpy as np
 import numpy.typing as npt
-from osgeo import gdal
-import rasterio
-from rasterio.warp import reproject, Resampling, calculate_default_transform
 from rasterio.transform import Affine
+from rasterio.warp import Resampling, calculate_default_transform, reproject
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -86,9 +85,7 @@ def reproject_image(
     else:
         # Ensure dst_shape is set if it was None but dst_transform was provided
         if dst_shape is None:
-            raise ValueError(
-                "dst_shape must be provided when dst_transform is provided"
-            )
+            raise ValueError("dst_shape must be provided when dst_transform is provided")
 
     # Create output array
     assert dst_shape is not None  # Type checker hint
@@ -149,7 +146,7 @@ def resample_image(
     source_resolution = (abs(src_transform.a), abs(src_transform.e))
 
     if target_resolution is not None:
-        if isinstance(target_resolution, (int, float)):
+        if isinstance(target_resolution, int | float):
             target_resolution = (target_resolution, target_resolution)
 
     # Map resampling methods

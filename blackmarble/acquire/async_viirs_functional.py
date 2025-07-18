@@ -6,12 +6,12 @@ a functional API design for simplicity and clarity.
 
 import asyncio
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
-import os
-import aiohttp
+
 import aiofiles
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +70,11 @@ async def download_viirs_h5_async(
             content_type = response.headers.get("Content-Type", "").lower()
             if "text/html" in content_type:
                 html_content = await response.text()
-                logger.error(f"NASA LAADS API returned HTML instead of JSON")
+                logger.error("NASA LAADS API returned HTML instead of JSON")
                 logger.debug(f"HTML preview: {html_content[:500]}")
                 raise RuntimeError(
-                    f"NASA LAADS API returned HTML instead of JSON. "
-                    f"This usually indicates an authentication or endpoint issue."
+                    "NASA LAADS API returned HTML instead of JSON. "
+                    "This usually indicates an authentication or endpoint issue."
                 )
 
             api_data = await response.json()
@@ -100,12 +100,8 @@ async def download_viirs_h5_async(
             break
 
     if not download_link:
-        logger.error(
-            f"No VNP46A2 file found for tile {tile_id} on {year}-{day_of_year:03d}"
-        )
-        raise RuntimeError(
-            f"No VNP46A2 file found for tile {tile_id} on {year}-{day_of_year:03d}"
-        )
+        logger.error(f"No VNP46A2 file found for tile {tile_id} on {year}-{day_of_year:03d}")
+        raise RuntimeError(f"No VNP46A2 file found for tile {tile_id} on {year}-{day_of_year:03d}")
 
     # Ensure output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -126,8 +122,7 @@ async def download_viirs_h5_async(
                 logger.error("Received HTML error page instead of HDF5 file")
                 logger.debug(f"HTML content: {html_content[:500]}")
                 raise RuntimeError(
-                    "Received HTML error page instead of HDF5 file. "
-                    "Check your Earthdata token."
+                    "Received HTML error page instead of HDF5 file. " "Check your Earthdata token."
                 )
 
             # Download in chunks
@@ -142,9 +137,7 @@ async def download_viirs_h5_async(
 
                     # Log progress every 10MB
                     if downloaded % (10 * 1024 * 1024) < 8192:
-                        logger.debug(
-                            f"Downloaded {downloaded:,} / {total_size:,} bytes"
-                        )
+                        logger.debug(f"Downloaded {downloaded:,} / {total_size:,} bytes")
 
             logger.info(f"Successfully downloaded {output_path} ({total_size:,} bytes)")
             return output_path
@@ -160,7 +153,7 @@ async def download_viirs_tiles_async(
     earthdata_token: str,
     output_dir: str = "./data/viirs",
     max_concurrent: int = 3,
-) -> Dict[str, List[str]]:
+) -> dict[str, list[str]]:
     """Download all VIIRS tiles for a date and bounding box using async I/O.
 
     This is the async version of download_vnp46a2_tiles from the synchronous API.
@@ -178,7 +171,7 @@ async def download_viirs_tiles_async(
         - 'quality': List of quality flag GeoTIFF paths
         - 'radiance': List of radiance GeoTIFF paths (if extracted)
     """
-    logger.info(f">>> download_viirs_tiles_async called")
+    logger.info(">>> download_viirs_tiles_async called")
     logger.info(f"    date: {date}")
     logger.info(f"    bbox: {bbox}")
     logger.info(
@@ -196,7 +189,7 @@ async def download_viirs_tiles_async(
         logger.error(f"bbox type: {type(bbox)}, content: {bbox}")
         raise
 
-    from .viirs import get_tiles_for_bbox, extract_viirs_layers
+    from .viirs import extract_viirs_layers, get_tiles_for_bbox
 
     # Get tiles that cover the bbox
     logger.debug("Calling get_tiles_for_bbox...")
@@ -223,12 +216,8 @@ async def download_viirs_tiles_async(
                 v, h = tile
                 logger.debug(f"  Tile {i + 1}: h{h:02d}v{v:02d}")
             else:
-                logger.error(
-                    f"  Invalid tile at index {i}: {tile} (type: {type(tile)})"
-                )
-                raise ValueError(
-                    f"Invalid tile format: expected (v, h) tuple, got {tile}"
-                )
+                logger.error(f"  Invalid tile at index {i}: {tile} (type: {type(tile)})")
+                raise ValueError(f"Invalid tile format: expected (v, h) tuple, got {tile}")
     except ValueError as e:
         logger.error(f"Error unpacking tiles: {e}")
         logger.error(f"tiles content: {tiles}")
@@ -238,9 +227,7 @@ async def download_viirs_tiles_async(
     year = date.year
     month = date.month
     day = date.day
-    effective_output_dir = os.path.join(
-        output_dir, f"{year:04d}", f"{month:02d}", f"{day:02d}"
-    )
+    effective_output_dir = os.path.join(output_dir, f"{year:04d}", f"{month:02d}", f"{day:02d}")
     os.makedirs(effective_output_dir, exist_ok=True)
 
     # Initialize result lists
@@ -262,9 +249,7 @@ async def download_viirs_tiles_async(
                     logger.error("FOUND UNPACKING ERROR AT LINE 238!")
                 logger.error(f"Error unpacking tile {tile}: {e}")
                 logger.error(f"Tile type: {type(tile)}, content: {tile}")
-                raise ValueError(
-                    f"Cannot unpack tile: {tile}. Expected (v, h) tuple. Error: {e}"
-                )
+                raise ValueError(f"Cannot unpack tile: {tile}. Expected (v, h) tuple. Error: {e}")
             hdf_filename = f"VNP46A2_h{h:02d}v{v:02d}_{year}{month:02d}{day:02d}.h5"
             hdf_path = os.path.join(effective_output_dir, hdf_filename)
 
@@ -304,9 +289,7 @@ async def download_viirs_tiles_async(
                 logger.error(f"Error unpacking download_tasks: {e}")
                 logger.error(f"download_tasks: {download_tasks}")
                 raise ValueError(f"Failed to unpack download_tasks: {e}")
-            download_results = await asyncio.gather(
-                *task_futures, return_exceptions=True
-            )
+            download_results = await asyncio.gather(*task_futures, return_exceptions=True)
 
             # Process results
             for i, result_or_error in enumerate(download_results):
@@ -321,9 +304,7 @@ async def download_viirs_tiles_async(
                     raise ValueError(f"Failed to unpack download_tasks[{i}]: {e}")
 
                 if isinstance(result_or_error, Exception):
-                    logger.error(
-                        f"Failed to download tile h{h:02d}v{v:02d}: {result_or_error}"
-                    )
+                    logger.error(f"Failed to download tile h{h:02d}v{v:02d}: {result_or_error}")
                     continue
 
                 # Extract layers from downloaded HDF5
@@ -333,11 +314,9 @@ async def download_viirs_tiles_async(
                     _add_layer_files_to_result(result, layer_files)
                     logger.debug(f"Successfully processed tile h{h:02d}v{v:02d}")
                 except Exception as e:
-                    logger.error(
-                        f"Error extracting layers from tile h{h:02d}v{v:02d}: {e}"
-                    )
+                    logger.error(f"Error extracting layers from tile h{h:02d}v{v:02d}: {e}")
 
-    logger.info(f"VIIRS download complete. Files by layer:")
+    logger.info("VIIRS download complete. Files by layer:")
     for layer, files in result.items():
         if files:
             logger.info(f"  {layer}: {len(files)} files")
@@ -345,9 +324,7 @@ async def download_viirs_tiles_async(
     return result
 
 
-def _add_layer_files_to_result(
-    result: Dict[str, List[str]], layer_files: Dict[str, str]
-) -> None:
+def _add_layer_files_to_result(result: dict[str, list[str]], layer_files: dict[str, str]) -> None:
     """Helper to add extracted layer files to result dictionary."""
     if "gap_filled_ntl" in layer_files:
         result["gap_filled_ntl"].append(layer_files["gap_filled_ntl"])
@@ -359,7 +336,7 @@ async def download_viirs_for_pipeline(
     earthdata_token: str,
     output_dir: str = "./data/viirs",
     show_progress: bool = True,
-) -> Dict[str, List[Path]]:
+) -> dict[str, list[Path]]:
     """Download VIIRS data for the async pipeline.
 
     This is the main entry point from the async pipeline, returning
@@ -383,9 +360,7 @@ async def download_viirs_for_pipeline(
         file_dict = await download_viirs_tiles_async(
             date=date, bbox=bbox, earthdata_token=earthdata_token, output_dir=output_dir
         )
-        logger.info(
-            f"download_viirs_tiles_async returned keys: {list(file_dict.keys())}"
-        )
+        logger.info(f"download_viirs_tiles_async returned keys: {list(file_dict.keys())}")
         for key, files in file_dict.items():
             logger.info(f"  {key}: {len(files)} files")
     except ValueError as e:

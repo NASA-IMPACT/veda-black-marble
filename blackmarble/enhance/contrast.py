@@ -1,6 +1,7 @@
 """Contrast enhancement - ONLY WHAT'S USED."""
 
 from typing import Any, Literal
+
 import numpy as np
 import numpy.typing as npt
 

@@ -5,6 +5,7 @@ the spatial influence of road infrastructure at multiple scales.
 """
 
 from typing import Any, Literal
+
 import numpy as np
 import numpy.typing as npt
 from scipy.ndimage import gaussian_filter
@@ -44,12 +45,10 @@ def compute_urban_fields(
         >>> assert np.all(field[:, 1] > field[:, 0])
     """
     # Validate inputs
-    assert len(weights) == len(sigmas) + 1, (
-        f"Need {len(sigmas) + 1} weights for {len(sigmas)} sigmas, got {len(weights)}"
-    )
-    assert abs(sum(weights) - 1.0) < 1e-6, (
-        f"Weights must sum to 1.0, got {sum(weights)}"
-    )
+    assert (
+        len(weights) == len(sigmas) + 1
+    ), f"Need {len(sigmas) + 1} weights for {len(sigmas)} sigmas, got {len(weights)}"
+    assert abs(sum(weights) - 1.0) < 1e-6, f"Weights must sum to 1.0, got {sum(weights)}"
 
     # Direct coverage (unblurred)
     fields = [road_fraction.astype(np.float32)]
@@ -57,9 +56,7 @@ def compute_urban_fields(
     # Multi-scale densities
     for sigma in sigmas:
         # Use reflect mode to handle edges properly
-        density = gaussian_filter(
-            road_fraction.astype(np.float32), sigma=sigma, mode="reflect"
-        )
+        density = gaussian_filter(road_fraction.astype(np.float32), sigma=sigma, mode="reflect")
         fields.append(density)
 
     # Weighted combination
@@ -129,7 +126,7 @@ def enhance_ntl_with_urban_field(
         # Context-aware enhancement with proper dynamic range preservation
 
         # DEBUG: Print parameters being used
-        print(f"\n🔍 HYBRID ENHANCEMENT PARAMETERS:")
+        print("\n🔍 HYBRID ENHANCEMENT PARAMETERS:")
         print(f"  - expected_scale: {hybrid_expected_scale}")
         print(f"  - expected_sqrt_scale: {hybrid_expected_sqrt_scale}")
         print(f"  - application_factor: {hybrid_application_factor}")
@@ -156,7 +153,7 @@ def enhance_ntl_with_urban_field(
         result = enhanced / max_enhancement_factor
 
         # DEBUG: Print enhancement statistics
-        print(f"\n📊 HYBRID ENHANCEMENT STATS:")
+        print("\n📊 HYBRID ENHANCEMENT STATS:")
         print(f"  - NTL range before: [{ntl.min():.1f}, {ntl.max():.1f}]")
         print(f"  - NTL range after: [{result.min():.1f}, {result.max():.1f}]")
         print(f"  - Max enhancement factor: {max_enhancement_factor:.3f}")

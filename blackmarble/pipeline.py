@@ -10,17 +10,18 @@ This file demonstrates the clear progression through:
 Each phase builds on the previous one in a clear, readable flow.
 """
 
+import logging
+import os
 from datetime import datetime
 from typing import Any, Literal, cast
-import os
+
 import numpy as np
 import numpy.typing as npt
-import logging
 import rasterio
 from osgeo import gdal
 
+from . import acquire, analyze, enhance, export, prepare
 from .config import PipelineConfig
-from . import acquire, prepare, analyze, enhance, export
 from .pipeline_async import black_marble_pipeline_async
 
 # Type aliases
@@ -117,14 +118,10 @@ def black_marble_pipeline(
         else 0.0000275
     )
     add_offset = (
-        config.preparation.landsat_add_offset
-        if config and hasattr(config, "preparation")
-        else -0.2
+        config.preparation.landsat_add_offset if config and hasattr(config, "preparation") else -0.2
     )
     dilate_pixels = (
-        config.preparation.qa_dilation_radius
-        if config and hasattr(config, "preparation")
-        else 3
+        config.preparation.qa_dilation_radius if config and hasattr(config, "preparation") else 3
     )
 
     # Initialize stacks for each band
@@ -148,9 +145,7 @@ def black_marble_pipeline(
             from datetime import timedelta
 
             target_date = date - timedelta(days=date_idx * 30)
-            print(
-                f"\nProcessing historical date {date_idx}: {target_date.strftime('%Y-%m-%d')}"
-            )
+            print(f"\nProcessing historical date {date_idx}: {target_date.strftime('%Y-%m-%d')}")
 
         # Download all bands for this specific date
         try:
@@ -161,9 +156,7 @@ def black_marble_pipeline(
                 bbox=bbox,
                 bands=[2, 3, 4, 5, "QA_PIXEL"],
                 cache_dir=cache_dir,
-                ignore_missing=(
-                    date_idx > 0
-                ),  # Only ignore missing for historical dates
+                ignore_missing=(date_idx > 0),  # Only ignore missing for historical dates
             )
 
             # Process this date's data with QA masking
@@ -192,9 +185,7 @@ def black_marble_pipeline(
 
         except Exception as e:
             if date_idx > 0:  # Historical date
-                print(
-                    f"  Warning: Could not process date {target_date.strftime('%Y-%m-%d')}: {e}"
-                )
+                print(f"  Warning: Could not process date {target_date.strftime('%Y-%m-%d')}: {e}")
                 continue
             else:  # Primary date
                 raise
@@ -205,9 +196,7 @@ def black_marble_pipeline(
 
     for band_name, stack in band_stacks.items():
         if stack:
-            print(
-                f"\nCreating temporal composite for {band_name} from {len(stack)} dates"
-            )
+            print(f"\nCreating temporal composite for {band_name} from {len(stack)} dates")
 
             # Create median composite from pre-masked data
             composite_data = analyze.create_landsat_median_composite(
@@ -439,20 +428,14 @@ def black_marble_pipeline(
 
     # Rasterize roads to match grid
     roads_rasterized = None
-    if (
-        road_network is not None
-        and reference_shape is not None
-        and reference_transform is not None
-    ):
+    if road_network is not None and reference_shape is not None and reference_transform is not None:
         # Use the new CRS-aware road rasterization
         # This handles meter-based buffering via UTM internally
         buffer_meters = 30.0  # Buffer roads by 30 meters (default in osm.py)
 
         print(f"Road buffering: {buffer_meters:.1f} meters (applied in UTM)")
         print(f"Rasterizing to: {target_crs}")
-        print(
-            f"Road network has {len(road_network.nodes)} nodes, {len(road_network.edges)} edges"
-        )
+        print(f"Road network has {len(road_network.nodes)} nodes, {len(road_network.edges)} edges")
 
         # Use the new function that buffers and rasterizes with CRS support
         roads_rasterized = acquire.buffer_and_rasterize_roads(
@@ -467,9 +450,7 @@ def black_marble_pipeline(
 
         # Print statistics
         road_pixels = np.sum(roads_rasterized > 0)
-        print(
-            f"Rasterized {road_pixels} pixels ({road_pixels / roads_rasterized.size * 100:.2f}%)"
-        )
+        print(f"Rasterized {road_pixels} pixels ({road_pixels / roads_rasterized.size * 100:.2f}%)")
 
         # Save diagnostic output if requested
         if config and getattr(config, "save_diagnostics", False):
@@ -529,11 +510,7 @@ def black_marble_pipeline(
     ntl_composite = viirs_reprojected if viirs_reprojected is not None else None
 
     # Save fine-resolution VIIRS as diagnostic output
-    if (
-        config
-        and getattr(config, "save_diagnostics", False)
-        and ntl_composite is not None
-    ):
+    if config and getattr(config, "save_diagnostics", False) and ntl_composite is not None:
         prepare.save_diagnostic(
             ntl_composite,
             viirs_transform,
@@ -575,9 +552,7 @@ def black_marble_pipeline(
             print(f"  Major roads (1.3x): {np.sum(major_roads_mask)} pixels")
             print(f"  Minor roads (1.1x): {np.sum(minor_roads_mask)} pixels")
             if enhanced_pixels > 0:
-                print(
-                    f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}"
-                )
+                print(f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}")
 
         # Save enhancement diagnostic
         if config and getattr(config, "save_diagnostics", False):
@@ -596,7 +571,7 @@ def black_marble_pipeline(
     if ntl_composite is not None and ndvi is not None:
         # Verify shapes match before calculating NDUI
         if ntl_composite.shape != ndvi.shape:
-            print(f"WARNING: Shape mismatch after alignment!")
+            print("WARNING: Shape mismatch after alignment!")
             print(f"  NTL shape: {ntl_composite.shape}")
             print(f"  NDVI shape: {ndvi.shape}")
             raise ValueError(
@@ -606,14 +581,12 @@ def black_marble_pipeline(
             )
 
         # DIAGNOSTIC: Print data statistics before NDUI
-        print(f"\nBefore NDUI Calculation:")
+        print("\nBefore NDUI Calculation:")
         print(f"  NTL composite shape: {ntl_composite.shape}")
         print(
             f"  NTL non-zero pixels: {(ntl_composite > 0).sum()} ({(ntl_composite > 0).sum() / ntl_composite.size * 100:.1f}%)"
         )
-        print(
-            f"  NTL range: [{np.nanmin(ntl_composite):.3f}, {np.nanmax(ntl_composite):.3f}]"
-        )
+        print(f"  NTL range: [{np.nanmin(ntl_composite):.3f}, {np.nanmax(ntl_composite):.3f}]")
         print(
             f"  NDVI non-NaN pixels: {(~np.isnan(ndvi)).sum()} ({(~np.isnan(ndvi)).sum() / ndvi.size * 100:.1f}%)"
         )
@@ -623,9 +596,7 @@ def black_marble_pipeline(
             ntl=ntl_composite,
             ndvi=ndvi,
             ndwi=ndwi,  # Optional, can be None
-            ntl_floor=config.analysis.ntl_floor
-            if config and hasattr(config, "analysis")
-            else 0.1,
+            ntl_floor=config.analysis.ntl_floor if config and hasattr(config, "analysis") else 0.1,
             ntl_ceiling=config.analysis.ntl_ceiling
             if config and hasattr(config, "analysis")
             else 10.0,
@@ -636,7 +607,7 @@ def black_marble_pipeline(
         )
 
         # DIAGNOSTIC: Print NDUI statistics
-        print(f"\nAfter NDUI Calculation:")
+        print("\nAfter NDUI Calculation:")
         print(
             f"  NDUI non-zero pixels: {(ndui > 0).sum()} ({(ndui > 0).sum() / ndui.size * 100:.1f}%)"
         )
@@ -666,26 +637,18 @@ def black_marble_pipeline(
     ntl_enhanced = None
     if ntl_composite is not None:
         # Map config contrast method to valid options
-        method_mapping: dict[
-            str, Literal["percentile", "minmax"]
-        ] = {
+        method_mapping: dict[str, Literal["percentile", "minmax"]] = {
             "linear": "minmax",
             "percentile": "percentile",
         }
         config_method = config.enhancement.contrast_method if config else "linear"
-        method: Literal["percentile", "minmax"] = (
-            method_mapping.get(config_method, "percentile")
-        )
+        method: Literal["percentile", "minmax"] = method_mapping.get(config_method, "percentile")
 
         ntl_enhanced = enhance.enhance_contrast(
             data=ntl_composite,
             method=method,
-            percentiles=config.enhancement.contrast_percentiles
-            if config
-            else (2.0, 98.0),
-            output_range=config.enhancement.contrast_output_range
-            if config
-            else (0.0, 1.0),
+            percentiles=config.enhancement.contrast_percentiles if config else (2.0, 98.0),
+            output_range=config.enhancement.contrast_output_range if config else (0.0, 1.0),
         )
 
         # Save diagnostic output if requested
@@ -731,11 +694,9 @@ def black_marble_pipeline(
     ntl_colored = None
     if ndui is not None:
         # DIAGNOSTIC: Print data before colormap
-        print(f"\nBefore Colormap Application (USING NDUI):")
+        print("\nBefore Colormap Application (USING NDUI):")
         print(f"  Data shape: {ndui.shape}")
-        print(
-            f"  Non-zero pixels: {(ndui > 0).sum()} ({(ndui > 0).sum() / ndui.size * 100:.1f}%)"
-        )
+        print(f"  Non-zero pixels: {(ndui > 0).sum()} ({(ndui > 0).sum() / ndui.size * 100:.1f}%)")
         print(f"  Data range: [{np.nanmin(ndui):.3f}, {np.nanmax(ndui):.3f}]")
         print(f"  Data type: {ndui.dtype}")
 
@@ -747,14 +708,10 @@ def black_marble_pipeline(
         )
 
         # DIAGNOSTIC: Print data after colormap
-        print(f"\nAfter Colormap Application:")
+        print("\nAfter Colormap Application:")
         print(f"  Output shape: {ntl_colored.shape}")
-        print(
-            f"  Output channels: {ntl_colored.shape[0] if len(ntl_colored.shape) == 3 else 1}"
-        )
-        print(
-            f"  Output range: [{np.nanmin(ntl_colored):.3f}, {np.nanmax(ntl_colored):.3f}]"
-        )
+        print(f"  Output channels: {ntl_colored.shape[0] if len(ntl_colored.shape) == 3 else 1}")
+        print(f"  Output range: [{np.nanmin(ntl_colored):.3f}, {np.nanmax(ntl_colored):.3f}]")
         print(f"  Output type: {ntl_colored.dtype}")
 
         # Save diagnostic output if requested
@@ -770,11 +727,7 @@ def black_marble_pipeline(
 
     # 5. Create false color composite for context (optional)
     landsat_viz = None
-    if (
-        "B5" in landsat_reprojected
-        and "B4" in landsat_reprojected
-        and "B3" in landsat_reprojected
-    ):
+    if "B5" in landsat_reprojected and "B4" in landsat_reprojected and "B3" in landsat_reprojected:
         landsat_viz = enhance.create_false_color_composite(
             red_channel=landsat_reprojected["B5"],  # NIR in red
             green_channel=landsat_reprojected["B4"],  # Red in green
@@ -854,9 +807,7 @@ def black_marble_pipeline(
             transform=reference_transform,
             crs=target_crs,
             metadata=metadata,
-            compress=cast(
-                Literal["deflate", "lzw", "jpeg", "webp", "zstd"], compress_setting
-            ),
+            compress=cast(Literal["deflate", "lzw", "jpeg", "webp", "zstd"], compress_setting),
             tiled=config.export.tiled if config else True,
             overviews=config.export.overview_levels if config else [2, 4, 8, 16],
         )
@@ -883,11 +834,7 @@ def black_marble_pipeline(
             compress=cast(Literal["deflate", "lzw"], compress_setting),
         )
 
-    if (
-        config
-        and config.export.generate_indices_file
-        and reference_transform is not None
-    ):
+    if config and config.export.generate_indices_file and reference_transform is not None:
         # Export indices as multi-band file
         indices_dict = {}
         if ndvi is not None:
@@ -920,9 +867,7 @@ def black_marble_pipeline(
 
     if urban_mask is not None and reference_transform is not None:
         # Calculate urban area in km²
-        pixel_area_m2 = abs(
-            reference_transform.a * reference_transform.e
-        )  # pixel area in m²
+        pixel_area_m2 = abs(reference_transform.a * reference_transform.e)  # pixel area in m²
         urban_pixels = np.sum(urban_mask)
         statistics["urban_area_km2"] = float((urban_pixels * pixel_area_m2) / 1e6)
 

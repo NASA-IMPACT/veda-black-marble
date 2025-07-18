@@ -1,13 +1,14 @@
 """Cloud-Optimized GeoTIFF (COG) generation - SIMPLIFIED."""
 
-from typing import Any, Literal
-import numpy.typing as npt
-import numpy as np
 import os
+from typing import Any, Literal
+
+import numpy as np
+import numpy.typing as npt
 import rasterio
+from rasterio.enums import Resampling
 from rasterio.io import MemoryFile
 from rasterio.shutil import copy
-from rasterio.enums import Resampling
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -32,9 +33,7 @@ def create_cog(
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
     if compress in ["jpeg", "webp"]:
-        raise ValueError(
-            f"Lossy compression '{compress}' not suitable for scientific data"
-        )
+        raise ValueError(f"Lossy compression '{compress}' not suitable for scientific data")
 
     if overviews is None:
         overviews = [2, 4, 8, 16, 32]
@@ -111,9 +110,7 @@ def create_cog(
                 dst.update_tags(**metadata)
 
             resampling = (
-                Resampling.nearest
-                if np.issubdtype(data.dtype, np.integer)
-                else Resampling.bilinear
+                Resampling.nearest if np.issubdtype(data.dtype, np.integer) else Resampling.bilinear
             )
             dst.build_overviews(overviews, resampling)
 
@@ -177,9 +174,7 @@ def export_multi_band(
         for i, name in enumerate(band_names):
             metadata[f"band_{i + 1}_name"] = name
 
-    return create_cog(
-        data, output_path, transform, crs, metadata, compress, nodata=nodata
-    )
+    return create_cog(data, output_path, transform, crs, metadata, compress, nodata=nodata)
 
 
 def create_overviews(

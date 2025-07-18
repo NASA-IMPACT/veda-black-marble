@@ -4,17 +4,18 @@ This version of the pipeline downloads all data upfront using async I/O for
 maximum performance, then processes everything from local files.
 """
 
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Literal
-import os
 import logging
+import os
+from datetime import datetime
+from typing import Any
+
 import numpy as np
 import numpy.typing as npt
 import rasterio
 from osgeo import gdal
 
+from . import acquire, analyze, enhance, export, prepare
 from .config import PipelineConfig
-from . import acquire, prepare, analyze, enhance, export
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -74,20 +75,16 @@ def black_marble_pipeline_async(
         bbox=bbox, date=date, config=config, earthdata_token=earthdata_token
     )
 
-    print(f"\n✅ Downloads complete!")
+    print("\n✅ Downloads complete!")
     print(download_results.summary())
 
     # Check for critical failures
     if not download_results.viirs_data and earthdata_token:
-        logger.error(
-            "VIIRS downloads failed - cannot continue without nighttime lights data"
-        )
+        logger.error("VIIRS downloads failed - cannot continue without nighttime lights data")
         print("❌ Pipeline failed: VIIRS data is required but download failed")
         print("   Please check your EARTHDATA_TOKEN and network connection")
         # Check if there were specific download errors
-        viirs_errors = [
-            err for err in download_results.failed_downloads if "VIIRS" in err
-        ]
+        viirs_errors = [err for err in download_results.failed_downloads if "VIIRS" in err]
         if viirs_errors:
             print(f"   Error details: {viirs_errors[0]}")
         raise RuntimeError(
@@ -98,9 +95,7 @@ def black_marble_pipeline_async(
         logger.warning(
             "No Landsat data downloaded - pipeline will create a minimal output with OSM data only"
         )
-        print(
-            "⚠️  No Landsat data available - creating minimal output with available data"
-        )
+        print("⚠️  No Landsat data available - creating minimal output with available data")
 
     # ==================== PREPARE PHASE ====================
     # Process raw data into analysis-ready format
@@ -183,11 +178,7 @@ def black_marble_pipeline_async(
             viirs_corrected = viirs_ntl
 
         # Save final VIIRS data
-        if (
-            config
-            and getattr(config, "save_diagnostics", False)
-            and viirs_profile is not None
-        ):
+        if config and getattr(config, "save_diagnostics", False) and viirs_profile is not None:
             if viirs_corrected is not None:
                 prepare.save_diagnostic(
                     viirs_corrected,
@@ -229,14 +220,10 @@ def black_marble_pipeline_async(
         else 0.0000275
     )
     add_offset = (
-        config.preparation.landsat_add_offset
-        if config and hasattr(config, "preparation")
-        else -0.2
+        config.preparation.landsat_add_offset if config and hasattr(config, "preparation") else -0.2
     )
     dilate_pixels = (
-        config.preparation.qa_dilation_radius
-        if config and hasattr(config, "preparation")
-        else 3
+        config.preparation.qa_dilation_radius if config and hasattr(config, "preparation") else 3
     )
 
     # Initialize band stacks
@@ -275,7 +262,7 @@ def black_marble_pipeline_async(
 
         # Skip if we don't have all bands
         if not all(band in date_files for band in ["B2", "B3", "B4", "B5", "QA_PIXEL"]):
-            print(f"  Skipping - missing bands")
+            print("  Skipping - missing bands")
             continue
 
         # Convert paths to tuple format expected by process_landsat_date
@@ -330,9 +317,7 @@ def black_marble_pipeline_async(
 
         for band_name, stack in band_stacks.items():
             if stack:
-                print(
-                    f"  Creating temporal composite for {band_name} from {len(stack)} dates"
-                )
+                print(f"  Creating temporal composite for {band_name} from {len(stack)} dates")
 
                 # Create median composite from pre-masked data with scaling
                 composite = analyze.create_landsat_median_composite(
@@ -417,20 +402,14 @@ def black_marble_pipeline_async(
 
     # Rasterize roads to match grid
     roads_rasterized = None
-    if (
-        road_network is not None
-        and reference_shape is not None
-        and reference_transform is not None
-    ):
+    if road_network is not None and reference_shape is not None and reference_transform is not None:
         # Use the new CRS-aware road rasterization (like sync pipeline)
         # Use 30m buffer to match default in osm.py - 5.5m was too small
         buffer_meters = 30.0  # Buffer roads by 30 meters
 
         print(f"Road buffering: {buffer_meters:.1f} meters (applied in UTM)")
         print(f"Rasterizing to: {target_crs}")
-        print(
-            f"Road network has {len(road_network.nodes)} nodes, {len(road_network.edges)} edges"
-        )
+        print(f"Road network has {len(road_network.nodes)} nodes, {len(road_network.edges)} edges")
 
         # Use fractional or binary road rasterization based on config
         if config and config.analysis.osm_fractional:
@@ -460,9 +439,7 @@ def black_marble_pipeline_async(
                     f"Mean fractional coverage: {roads_fractional[roads_fractional > 0].mean():.3f}"
                 )
             else:
-                print(
-                    "⚠️  WARNING: No roads were rasterized! Check buffer size and CRS."
-                )
+                print("⚠️  WARNING: No roads were rasterized! Check buffer size and CRS.")
 
             # Save diagnostic
             if getattr(config, "save_diagnostics", False):
@@ -526,9 +503,7 @@ def black_marble_pipeline_async(
 
     # Use the reprojected data (already in UTM)
     if "B5" in landsat_reprojected and "B4" in landsat_reprojected:
-        ndvi = analyze.calculate_ndvi(
-            nir=landsat_reprojected["B5"], red=landsat_reprojected["B4"]
-        )
+        ndvi = analyze.calculate_ndvi(nir=landsat_reprojected["B5"], red=landsat_reprojected["B4"])
 
         # Save diagnostic output if requested
         if config and getattr(config, "save_diagnostics", False) and ndvi is not None:
@@ -562,9 +537,7 @@ def black_marble_pipeline_async(
     # This is the correct place to apply road enhancement - to the NTL data itself,
     # not to the derived NDUI index
     if ntl_composite is not None:
-        enhancement_approach = (
-            config.analysis.ntl_enhancement_approach if config else "urban_field"
-        )
+        enhancement_approach = config.analysis.ntl_enhancement_approach if config else "urban_field"
 
         if (
             enhancement_approach == "urban_field"
@@ -583,11 +556,9 @@ def black_marble_pipeline_async(
             )
 
             # DEBUG: Print urban field statistics
-            print(f"\n🏙️ URBAN FIELD STATS:")
+            print("\n🏙️ URBAN FIELD STATS:")
             print(f"  - Max urban field: {urban_field.max():.3f}")
-            print(
-                f"  - Mean urban field (where > 0): {urban_field[urban_field > 0].mean():.3f}"
-            )
+            print(f"  - Mean urban field (where > 0): {urban_field[urban_field > 0].mean():.3f}")
             print(
                 f"  - Urban pixels: {np.sum(urban_field > 0)} ({np.sum(urban_field > 0) / urban_field.size * 100:.1f}%)"
             )
@@ -631,11 +602,9 @@ def black_marble_pipeline_async(
             enhanced_pixels = np.sum(enhancement > 0)
             if enhanced_pixels > 0:
                 print(f"  Enhanced {enhanced_pixels} pixels")
-                print(
-                    f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}"
-                )
+                print(f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}")
             else:
-                print(f"  No pixels enhanced (no roads with sufficient density)")
+                print("  No pixels enhanced (no roads with sufficient density)")
 
         elif (
             enhancement_approach == "urban_field"
@@ -643,9 +612,7 @@ def black_marble_pipeline_async(
             and not (config and config.analysis.osm_fractional)
         ):
             # Urban field approach but only binary roads available - convert to pseudo-fractional
-            print(
-                "\n🌃 Enhancing NTL with urban fields (binary roads converted to fractional)"
-            )
+            print("\n🌃 Enhancing NTL with urban fields (binary roads converted to fractional)")
 
             # Convert binary road mask to fractional (0 or 1)
             roads_fractional_pseudo = roads_rasterized.astype(np.float32)
@@ -654,27 +621,19 @@ def black_marble_pipeline_async(
             # Compute urban fields from pseudo-fractional roads
             urban_field = analyze.compute_urban_fields(
                 road_fraction=roads_fractional_pseudo,
-                sigmas=config.analysis.urban_field_sigmas
-                if config
-                else [2.0, 5.0, 10.0],
-                weights=config.analysis.urban_field_weights
-                if config
-                else [0.5, 0.3, 0.2],
+                sigmas=config.analysis.urban_field_sigmas if config else [2.0, 5.0, 10.0],
+                weights=config.analysis.urban_field_weights if config else [0.5, 0.3, 0.2],
             )
 
             # Enhance NTL
             ntl_enhanced = analyze.enhance_ntl_with_urban_field(
                 ntl=ntl_composite,
                 urban_field=urban_field,
-                enhancement_mode=config.analysis.ntl_enhancement_mode
-                if config
-                else "hybrid",
+                enhancement_mode=config.analysis.ntl_enhancement_mode if config else "hybrid",
                 multiplicative_factor=config.analysis.enhancement_multiplicative_factor
                 if config
                 else 0.3,
-                additive_factor=config.analysis.enhancement_additive_factor
-                if config
-                else 0.02,
+                additive_factor=config.analysis.enhancement_additive_factor if config else 0.02,
                 hybrid_expected_scale=config.analysis.enhancement_hybrid_expected_scale
                 if config
                 else 0.2,
@@ -691,9 +650,7 @@ def black_marble_pipeline_async(
             enhanced_pixels = np.sum(enhancement > 0)
             if enhanced_pixels > 0:
                 print(f"  Enhanced {enhanced_pixels} pixels")
-                print(
-                    f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}"
-                )
+                print(f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}")
 
         elif enhancement_approach == "legacy_burn" and (
             roads_rasterized is not None or roads_fractional is not None
@@ -704,11 +661,7 @@ def black_marble_pipeline_async(
             major_factor = config.analysis.legacy_major_road_factor if config else 1.3
             minor_factor = config.analysis.legacy_minor_road_factor if config else 1.1
 
-            if (
-                roads_fractional is not None
-                and config
-                and config.analysis.osm_fractional
-            ):
+            if roads_fractional is not None and config and config.analysis.osm_fractional:
                 # Use fractional roads for burn-in
                 print("  Using fractional road coverage for burn-in")
                 ntl_enhanced = ntl_composite.copy()
@@ -753,15 +706,11 @@ def black_marble_pipeline_async(
                 )
                 # Show appropriate statistics based on road type
                 if roads_rasterized is not None and not (
-                    roads_fractional is not None
-                    and config
-                    and config.analysis.osm_fractional
+                    roads_fractional is not None and config and config.analysis.osm_fractional
                 ):
                     # Binary roads - show road type breakdown
                     # Calculate masks for statistics
-                    major_roads_mask_stats = (roads_rasterized == 1) | (
-                        roads_rasterized == 4
-                    )
+                    major_roads_mask_stats = (roads_rasterized == 1) | (roads_rasterized == 4)
                     minor_roads_mask_stats = (
                         (roads_rasterized == 2)
                         | (roads_rasterized == 3)
@@ -786,9 +735,7 @@ def black_marble_pipeline_async(
                         print(
                             f"  Road coverage: {coverage_pixels} pixels with avg {avg_coverage:.1%} coverage"
                         )
-                print(
-                    f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}"
-                )
+                print(f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}")
 
             # Save enhancement diagnostic
             if config and getattr(config, "save_diagnostics", False):
@@ -807,7 +754,7 @@ def black_marble_pipeline_async(
     if ntl_composite is not None and ndvi is not None:
         # Verify shapes match before calculating NDUI
         if ntl_composite.shape != ndvi.shape:
-            print(f"WARNING: Shape mismatch after alignment!")
+            print("WARNING: Shape mismatch after alignment!")
             print(f"  NTL shape: {ntl_composite.shape}")
             print(f"  NDVI shape: {ndvi.shape}")
             raise ValueError(
@@ -817,14 +764,12 @@ def black_marble_pipeline_async(
             )
 
         # DIAGNOSTIC: Print data statistics before NDUI
-        print(f"\nBefore NDUI Calculation:")
+        print("\nBefore NDUI Calculation:")
         print(f"  NTL composite shape: {ntl_composite.shape}")
         print(
             f"  NTL non-zero pixels: {(ntl_composite > 0).sum()} ({(ntl_composite > 0).sum() / ntl_composite.size * 100:.1f}%)"
         )
-        print(
-            f"  NTL range: [{np.nanmin(ntl_composite):.3f}, {np.nanmax(ntl_composite):.3f}]"
-        )
+        print(f"  NTL range: [{np.nanmin(ntl_composite):.3f}, {np.nanmax(ntl_composite):.3f}]")
         print(
             f"  NDVI non-NaN pixels: {(~np.isnan(ndvi)).sum()} ({(~np.isnan(ndvi)).sum() / ndvi.size * 100:.1f}%)"
         )
@@ -834,9 +779,7 @@ def black_marble_pipeline_async(
             ntl=ntl_composite,
             ndvi=ndvi,
             ndwi=ndwi,  # Optional, can be None
-            ntl_floor=config.analysis.ntl_floor
-            if config and hasattr(config, "analysis")
-            else 0.1,
+            ntl_floor=config.analysis.ntl_floor if config and hasattr(config, "analysis") else 0.1,
             ntl_ceiling=config.analysis.ntl_ceiling
             if config and hasattr(config, "analysis")
             else 10.0,
@@ -847,7 +790,7 @@ def black_marble_pipeline_async(
         )
 
         # DIAGNOSTIC: Print NDUI statistics
-        print(f"\nAfter NDUI Calculation:")
+        print("\nAfter NDUI Calculation:")
         print(
             f"  NDUI non-zero pixels: {(ndui > 0).sum()} ({(ndui > 0).sum() / ndui.size * 100:.1f}%)"
         )
@@ -877,26 +820,18 @@ def black_marble_pipeline_async(
         # Map config contrast method to valid options
         from typing import Literal
 
-        method_mapping: dict[
-            str, Literal["percentile", "minmax"]
-        ] = {
+        method_mapping: dict[str, Literal["percentile", "minmax"]] = {
             "linear": "minmax",
             "percentile": "percentile",
         }
         config_method = config.enhancement.contrast_method if config else "linear"
-        method: Literal["percentile", "minmax"] = (
-            method_mapping.get(config_method, "percentile")
-        )
+        method: Literal["percentile", "minmax"] = method_mapping.get(config_method, "percentile")
 
         ntl_enhanced = enhance.enhance_contrast(
             data=ntl_composite,
             method=method,
-            percentiles=config.enhancement.contrast_percentiles
-            if config
-            else (2.0, 98.0),
-            output_range=config.enhancement.contrast_output_range
-            if config
-            else (0.0, 1.0),
+            percentiles=config.enhancement.contrast_percentiles if config else (2.0, 98.0),
+            output_range=config.enhancement.contrast_output_range if config else (0.0, 1.0),
         )
 
         # Save diagnostic output if requested
@@ -940,11 +875,9 @@ def black_marble_pipeline_async(
     ntl_colored = None
     if ndui is not None:
         # DIAGNOSTIC: Print data before colormap
-        print(f"\nBefore Colormap Application (USING NDUI):")
+        print("\nBefore Colormap Application (USING NDUI):")
         print(f"  Data shape: {ndui.shape}")
-        print(
-            f"  Non-zero pixels: {(ndui > 0).sum()} ({(ndui > 0).sum() / ndui.size * 100:.1f}%)"
-        )
+        print(f"  Non-zero pixels: {(ndui > 0).sum()} ({(ndui > 0).sum() / ndui.size * 100:.1f}%)")
         print(f"  Data range: [{np.nanmin(ndui):.3f}, {np.nanmax(ndui):.3f}]")
         print(f"  Data type: {ndui.dtype}")
 
@@ -956,14 +889,10 @@ def black_marble_pipeline_async(
         )
 
         # DIAGNOSTIC: Print data after colormap
-        print(f"\nAfter Colormap Application:")
+        print("\nAfter Colormap Application:")
         print(f"  Output shape: {ntl_colored.shape}")
-        print(
-            f"  Output channels: {ntl_colored.shape[0] if len(ntl_colored.shape) == 3 else 1}"
-        )
-        print(
-            f"  Output range: [{np.nanmin(ntl_colored):.3f}, {np.nanmax(ntl_colored):.3f}]"
-        )
+        print(f"  Output channels: {ntl_colored.shape[0] if len(ntl_colored.shape) == 3 else 1}")
+        print(f"  Output range: [{np.nanmin(ntl_colored):.3f}, {np.nanmax(ntl_colored):.3f}]")
         print(f"  Output type: {ntl_colored.dtype}")
 
         # Save diagnostic output if requested
@@ -979,11 +908,7 @@ def black_marble_pipeline_async(
 
     # Create false color composite for context (optional)
     landsat_viz = None
-    if (
-        "B5" in landsat_reprojected
-        and "B4" in landsat_reprojected
-        and "B3" in landsat_reprojected
-    ):
+    if "B5" in landsat_reprojected and "B4" in landsat_reprojected and "B3" in landsat_reprojected:
         landsat_viz = enhance.create_false_color_composite(
             red_channel=landsat_reprojected["B5"],  # NIR in red
             green_channel=landsat_reprojected["B4"],  # Red in green
@@ -1053,7 +978,6 @@ def black_marble_pipeline_async(
     # Create Cloud-Optimized GeoTIFF
     if ntl_colored is not None and reference_transform is not None:
         # Get compression setting with proper type casting
-        from typing import cast
 
         compress_setting = config.export.compress if config else "deflate"
         valid_compressions: set[str] = {"deflate", "lzw", "jpeg", "webp", "zstd"}
@@ -1096,11 +1020,7 @@ def black_marble_pipeline_async(
             compress=compress_setting,  # type: ignore[arg-type]
         )
 
-    if (
-        config
-        and config.export.generate_indices_file
-        and reference_transform is not None
-    ):
+    if config and config.export.generate_indices_file and reference_transform is not None:
         # Export indices as multi-band file
         indices_dict = {}
         if ndvi is not None:
@@ -1134,9 +1054,7 @@ def black_marble_pipeline_async(
 
     if urban_mask is not None and reference_transform is not None:
         # Calculate urban area in km²
-        pixel_area_m2 = abs(
-            reference_transform.a * reference_transform.e
-        )  # pixel area in m²
+        pixel_area_m2 = abs(reference_transform.a * reference_transform.e)  # pixel area in m²
         urban_pixels = np.sum(urban_mask)
         statistics["urban_area_km2"] = float((urban_pixels * pixel_area_m2) / 1e6)
 

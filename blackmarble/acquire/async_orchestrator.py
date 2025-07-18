@@ -1,17 +1,17 @@
 """Orchestrator for front-loading all downloads asynchronously."""
 
 import asyncio
+import logging
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple, Callable
-import logging
-import time
+from typing import Any
 
-from .async_viirs_functional import download_viirs_for_pipeline
-from .async_landsat import download_landsat_async
 from .async_base import DownloadProgressTracker
-
+from .async_landsat import download_landsat_async
+from .async_viirs_functional import download_viirs_for_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -21,18 +21,16 @@ class DownloadPlan:
     """Plan for all downloads needed by the pipeline"""
 
     # Target parameters
-    bbox: Tuple[float, float, float, float]
+    bbox: tuple[float, float, float, float]
     primary_date: datetime
 
     # Landsat parameters
-    landsat_dates: List[datetime] = field(default_factory=list)
-    landsat_bands: List[str] = field(
-        default_factory=lambda: ["B2", "B3", "B4", "B5", "QA_PIXEL"]
-    )
+    landsat_dates: list[datetime] = field(default_factory=list)
+    landsat_bands: list[str] = field(default_factory=lambda: ["B2", "B3", "B4", "B5", "QA_PIXEL"])
     landsat_cloud_max: float = 30.0
 
     # VIIRS parameters
-    viirs_layers: List[str] = field(
+    viirs_layers: list[str] = field(
         default_factory=lambda: [
             "Gap_Filled_DNB_BRDF-Corrected_NTL",
             "Latest_High_Quality_Retrieval",
@@ -40,7 +38,7 @@ class DownloadPlan:
     )
 
     # OSM parameters
-    osm_road_types: List[str] = field(
+    osm_road_types: list[str] = field(
         default_factory=lambda: [
             "motorway",
             "trunk",
@@ -62,7 +60,7 @@ class DownloadPlan:
     @classmethod
     def from_pipeline_config(
         cls,
-        bbox: Tuple[float, float, float, float],
+        bbox: tuple[float, float, float, float],
         date: datetime,
         config: Any = None,  # PipelineConfig
     ) -> "DownloadPlan":
@@ -87,9 +85,7 @@ class DownloadPlan:
             output_dir = Path(getattr(config, "data_dir", "./data"))
             cache_enabled = getattr(config, "cache_downloads", True)
             # Try to get cloud_cover_max from acquisition config
-            if hasattr(config, "acquisition") and hasattr(
-                config.acquisition, "cloud_cover_max"
-            ):
+            if hasattr(config, "acquisition") and hasattr(config.acquisition, "cloud_cover_max"):
                 cloud_cover_max = config.acquisition.cloud_cover_max
 
         return cls(
@@ -106,21 +102,19 @@ class DownloadPlan:
 class DownloadResults:
     """Results from all downloads"""
 
-    viirs_data: Dict[str, List[Path]] = field(default_factory=dict)
-    landsat_data: Dict[datetime, Dict[str, List[Path]]] = field(default_factory=dict)
-    osm_data: Optional[Any] = None  # OSM graph data
+    viirs_data: dict[str, list[Path]] = field(default_factory=dict)
+    landsat_data: dict[datetime, dict[str, list[Path]]] = field(default_factory=dict)
+    osm_data: Any | None = None  # OSM graph data
 
     download_time: float = 0.0
     total_files: int = 0
-    failed_downloads: List[str] = field(default_factory=list)
+    failed_downloads: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         """Generate summary of download results"""
         viirs_files = sum(len(paths) for paths in self.viirs_data.values())
         landsat_files = sum(
-            len(paths)
-            for date_data in self.landsat_data.values()
-            for paths in date_data.values()
+            len(paths) for date_data in self.landsat_data.values() for paths in date_data.values()
         )
 
         return (
@@ -138,7 +132,7 @@ class AsyncDownloadOrchestrator:
 
     def __init__(
         self,
-        earthdata_token: Optional[str] = None,
+        earthdata_token: str | None = None,
         show_progress: bool = True,
         max_concurrent_total: int = 20,
     ):
@@ -158,7 +152,7 @@ class AsyncDownloadOrchestrator:
     async def download_all(
         self,
         plan: DownloadPlan,
-        progress_callback: Optional[Callable[[str], None]] = None,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> DownloadResults:
         """
         Execute all downloads according to plan.
@@ -181,9 +175,7 @@ class AsyncDownloadOrchestrator:
         )
 
         if progress_callback:
-            progress_callback(
-                f"Starting downloads for {len(plan.landsat_dates)} dates..."
-            )
+            progress_callback(f"Starting downloads for {len(plan.landsat_dates)} dates...")
 
         # Create all download tasks
         tasks = []
@@ -228,9 +220,7 @@ class AsyncDownloadOrchestrator:
                 import traceback
 
                 tb_str = "".join(
-                    traceback.format_exception(
-                        type(result), result, result.__traceback__
-                    )
+                    traceback.format_exception(type(result), result, result.__traceback__)
                 )
                 logger.error(f"{name} traceback:\n{tb_str}")
                 results.failed_downloads.append(f"{name}: {str(result)}")
@@ -253,9 +243,7 @@ class AsyncDownloadOrchestrator:
 
         # Calculate final statistics
         results.download_time = time.time() - start_time
-        results.total_files = sum(
-            len(paths) for paths in results.viirs_data.values()
-        ) + sum(
+        results.total_files = sum(len(paths) for paths in results.viirs_data.values()) + sum(
             len(paths)
             for date_data in results.landsat_data.values()
             for paths in date_data.values()
@@ -270,7 +258,7 @@ class AsyncDownloadOrchestrator:
 
         return results
 
-    async def _download_viirs(self, plan: DownloadPlan) -> Dict[str, List[Path]]:
+    async def _download_viirs(self, plan: DownloadPlan) -> dict[str, list[Path]]:
         """Download VIIRS data"""
         logger.info(f"Downloading VIIRS data for {plan.primary_date}")
         logger.debug(f"Plan bbox: {plan.bbox}")
@@ -282,8 +270,7 @@ class AsyncDownloadOrchestrator:
             result = await download_viirs_for_pipeline(
                 date=plan.primary_date,
                 bbox=plan.bbox,
-                earthdata_token=self.earthdata_token
-                or "",  # Provide empty string if None
+                earthdata_token=self.earthdata_token or "",  # Provide empty string if None
                 output_dir=str(plan.output_dir / "viirs"),
                 show_progress=self.show_progress,
             )
@@ -296,9 +283,7 @@ class AsyncDownloadOrchestrator:
             logger.error(f"Full traceback:\n{traceback.format_exc()}")
             raise
 
-    async def _download_landsat(
-        self, plan: DownloadPlan
-    ) -> Dict[datetime, Dict[str, List[Path]]]:
+    async def _download_landsat(self, plan: DownloadPlan) -> dict[datetime, dict[str, list[Path]]]:
         """Download Landsat data for all dates"""
         logger.info(f"Downloading Landsat data for {len(plan.landsat_dates)} dates")
 
@@ -313,7 +298,7 @@ class AsyncDownloadOrchestrator:
 
     async def _download_osm(self, plan: DownloadPlan) -> Any:
         """Download OSM data"""
-        logger.info(f"Downloading OSM road network")
+        logger.info("Downloading OSM road network")
 
         # For now, use synchronous OSM download in thread pool
         # since osmnx doesn't have async support
@@ -351,10 +336,10 @@ class AsyncDownloadOrchestrator:
 
 
 def download_all_data_sync(
-    bbox: Tuple[float, float, float, float],
+    bbox: tuple[float, float, float, float],
     date: datetime,
     config: Any,
-    earthdata_token: Optional[str] = None,
+    earthdata_token: str | None = None,
 ) -> DownloadResults:
     """
     Synchronous wrapper for async downloads.
@@ -374,9 +359,7 @@ def download_all_data_sync(
     plan = DownloadPlan.from_pipeline_config(bbox, date, config)
 
     # Create orchestrator
-    orchestrator = AsyncDownloadOrchestrator(
-        earthdata_token=earthdata_token, show_progress=True
-    )
+    orchestrator = AsyncDownloadOrchestrator(earthdata_token=earthdata_token, show_progress=True)
 
     # Run async downloads
     return asyncio.run(orchestrator.download_all(plan))
@@ -399,9 +382,7 @@ async def test_async_downloads():
     )
 
     # Create orchestrator (would need real token)
-    orchestrator = AsyncDownloadOrchestrator(
-        earthdata_token="YOUR_TOKEN_HERE", show_progress=True
-    )
+    orchestrator = AsyncDownloadOrchestrator(earthdata_token="YOUR_TOKEN_HERE", show_progress=True)
 
     # Run downloads
     results = await orchestrator.download_all(plan)

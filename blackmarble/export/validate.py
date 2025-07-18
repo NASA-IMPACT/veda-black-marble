@@ -1,6 +1,7 @@
 """Validation - ONLY WHAT'S USED."""
 
 from typing import Any
+
 import numpy as np
 import numpy.typing as npt
 
