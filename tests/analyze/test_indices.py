@@ -3,13 +3,12 @@
 This module tests only the essential indices functionality needed for bm.py parity.
 """
 
-import pytest
 import numpy as np
 
 from blackmarble.analyze.indices import (
+    calculate_ndui,
     calculate_ndvi,
     calculate_ndwi,
-    calculate_ndui,
 )
 
 

@@ -1,11 +1,11 @@
 """Pytest configuration and shared fixtures for Black Marble tests."""
 
-import pytest
-import numpy as np
-from pathlib import Path
-from datetime import datetime
 import tempfile
-from typing import Dict, Any
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import pytest
 
 
 @pytest.fixture
@@ -94,7 +94,7 @@ def enhanced_pipeline_config(manhattan_bbox, test_date, temp_dir):
 @pytest.fixture
 def mock_cog_generator():
     """Mock COG generator for testing."""
-    from unittest.mock import Mock, MagicMock
+    from unittest.mock import MagicMock, Mock
 
     # Create a mock COGProfile
     COGProfile = Mock()

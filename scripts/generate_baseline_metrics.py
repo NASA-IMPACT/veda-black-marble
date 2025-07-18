@@ -3,26 +3,24 @@
 Runs all audit_* scripts and rolls them into a single baseline snapshot.
 Creates .metrics/baseline_<YYYY-MM-DD>.json
 """
-import json
 import datetime
+import json
 import pathlib
 import subprocess
 import sys
+
 from _utils import METRIC_DIR, timestamp
 
 # Add scripts dir to path
 scripts_dir = pathlib.Path(__file__).parent
 sys.path.insert(0, str(scripts_dir))
 
+
 def run_audit_script(script_name: str) -> dict:
     """Run an audit script and return its metrics."""
     script_path = scripts_dir / f"{script_name}.py"
-    result = subprocess.run(
-        [sys.executable, str(script_path)],
-        capture_output=True,
-        text=True
-    )
-    
+    subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True)
+
     # Read the generated metrics file
     # The audit scripts save files as toolname_YYYY-MM-DD.json
     tool_name = script_name.replace("audit_", "").replace("_", "-")
@@ -32,7 +30,7 @@ def run_audit_script(script_name: str) -> dict:
         tool_name = "pyright"
     elif tool_name == "ruff":
         tool_name = "ruff"
-    
+
     # Find the most recent metrics file for this tool
     pattern = f"{tool_name}_*.json"
     metrics_files = list(METRIC_DIR.glob(pattern))
@@ -40,8 +38,9 @@ def run_audit_script(script_name: str) -> dict:
         latest = max(metrics_files, key=lambda p: p.stat().st_mtime)
         with open(latest) as f:
             return json.load(f)
-    
+
     return {}
+
 
 # Run all audit scripts
 # Note: pyright can be slow on first run, so we'll skip it for initial baseline

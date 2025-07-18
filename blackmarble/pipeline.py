@@ -224,9 +224,8 @@ def black_marble_pipeline(
     if viirs_data and viirs_data.get("gap_filled_ntl"):
         # Create VRT mosaic if we have multiple VIIRS tiles
         if len(viirs_data["gap_filled_ntl"]) > 1:
-            print(
-                f"Creating VRT mosaic for {len(viirs_data['gap_filled_ntl'])} VIIRS gap-filled NTL tiles"
-            )
+            n_tiles = len(viirs_data['gap_filled_ntl'])
+            print(f"Creating VRT mosaic for {n_tiles} VIIRS gap-filled NTL tiles")
             print("VIIRS tiles in mosaic:")
             for i, tile_path in enumerate(viirs_data["gap_filled_ntl"]):
                 print(f"  {i + 1}. {os.path.basename(tile_path)}")

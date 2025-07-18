@@ -65,6 +65,13 @@ This checklist tracks the systematic cleanup of ~7,000 lines of dead code and ar
 **Goal:** Remove obvious dead files and unused functions
 **Timeline:** Week 2
 
+### Dead Code Removal ✅
+- [x] Remove `if False` blocks (removed 147 lines)
+- [x] Remove unused variables (fixed all F841 errors in main code)
+- [x] Remove unused imports (fixed async_orchestrator, async_base)
+- [x] Comment out unused enhancement code sections
+- [x] Reduce total issues from 201 to 37 (81.6% reduction)
+
 ### Whole File Deletions
 - [ ] Delete backup/old files:
   - [ ] `blackmarble/acquire/viirs_bloated.py.backup`
@@ -81,7 +88,7 @@ This checklist tracks the systematic cleanup of ~7,000 lines of dead code and ar
 - [ ] Run test suite after each deletion
 
 ### Orphan Function Removal
-- [ ] Run `vulture blackmarble > vulture_report.txt`
+- [x] Run `vulture blackmarble > vulture_report.txt` (9 items found)
 - [ ] For each reported unused function:
   - [ ] Verify with ripgrep it's truly unused
   - [ ] Check if it's in `__all__` exports
@@ -89,15 +96,17 @@ This checklist tracks the systematic cleanup of ~7,000 lines of dead code and ar
   - [ ] Or add to deprecation list if public API
 
 ### Broken Code Fixes
-- [ ] Run `mypy --strict blackmarble` 
-- [ ] Fix undefined variable errors
+- [x] Run `pyright blackmarble` (replaced mypy)
+- [x] Fix undefined variable errors
 - [ ] Remove functions with syntax errors
 
 ### Update Tests
 - [ ] Remove tests for deleted code
 - [ ] Ensure coverage doesn't drop below baseline
 
-**Commit:** "Remove dead code and unused modules"
+**Commits:** 
+- "Remove if False blocks and unused VIIRS quality masking" ✅
+- "Remove unused variables and clean up dead code" ✅
 
 ---
 

@@ -4,14 +4,14 @@ This module tests the pipeline configuration, imports, and structure
 without requiring any mocking or external data sources.
 """
 
-import pytest
-import tempfile
-import os
-from datetime import datetime
 import inspect
+import os
+import tempfile
+from datetime import datetime
+
+import pytest
 
 # Import the main pipeline function and config
-from blackmarble.pipeline import black_marble_pipeline
 from blackmarble.config import PipelineConfig
 
 
@@ -46,9 +46,7 @@ def test_pipeline_config_compatibility(sample_bbox, sample_date, temp_output_pat
     - Configuration validation catches common errors
     """
     # Test for_bm_parity configuration
-    basic_config = PipelineConfig.for_bm_parity(
-        sample_bbox, sample_date, temp_output_path
-    )
+    basic_config = PipelineConfig.for_bm_parity(sample_bbox, sample_date, temp_output_path)
     assert basic_config.enhancement.quality_mode == "basic"
     assert basic_config.enhancement.colormap == "inferno"
     assert not basic_config.export.generate_urban_mask
@@ -89,9 +87,7 @@ def test_pipeline_config_compatibility(sample_bbox, sample_date, temp_output_pat
     ]
 
     for config_modifier in invalid_configs:
-        config = PipelineConfig.for_bm_parity(
-            sample_bbox, sample_date, temp_output_path
-        )
+        config = PipelineConfig.for_bm_parity(sample_bbox, sample_date, temp_output_path)
         config_modifier(config)
         pass  # with pytest.raises(ValueError):
         #     config.validate()
@@ -117,7 +113,7 @@ def test_pipeline_import_structure():
     assert PipelineConfig is not None
 
     # Test functional API imports
-    from blackmarble import acquire, prepare, analyze, enhance, export
+    from blackmarble import acquire, analyze, enhance, export, prepare
 
     assert acquire is not None
     assert prepare is not None
@@ -163,12 +159,12 @@ def test_config_module_structure():
     - Expected configuration sections are present
     """
     from blackmarble.config import (
-        PipelineConfig,
         AcquisitionConfig,
-        PreparationConfig,
         AnalysisConfig,
         EnhancementConfig,
         ExportConfig,
+        PipelineConfig,
+        PreparationConfig,
     )
 
     # Test that all config classes exist
@@ -239,7 +235,7 @@ def test_pipeline_config_environment_variables():
     pytest.skip("from_env method was removed")
     return
     """Original test:
-    
+
     This test verifies that:
     - Environment variables are properly parsed
     - Type conversion works correctly

@@ -4,13 +4,13 @@ This module provides simpler integration tests for the Black Marble pipeline
 that focus on the core functionality without complex mocking scenarios.
 """
 
-import pytest
-import tempfile
 import os
+import tempfile
 from datetime import datetime
 
+import pytest
+
 # Import the main pipeline function and config
-from blackmarble.pipeline import black_marble_pipeline
 from blackmarble.config import PipelineConfig
 
 
@@ -133,9 +133,7 @@ def test_pipeline_config_environment_loading():
     - Default values are used when environment variables are not set
     - Type conversion works correctly for different value types
     """
-    bbox = (-74.05, 40.69, -73.95, 40.79)
-    date = datetime(2023, 9, 15)
-    output_path = "/tmp/test.tif"
+    datetime(2023, 9, 15)
 
     # Test with no environment variables (should use defaults)
     # from_env method was removed
@@ -248,19 +246,19 @@ def test_configuration_sections_independence():
     config = PipelineConfig.for_bm_parity(bbox, date, output_path)
 
     # Test acquisition section independence
-    original_months = config.acquisition.composite_months
+    config.acquisition.composite_months
     config.acquisition.composite_months = 24
     assert config.acquisition.composite_months == 24
     assert config.preparation.landsat_scale_factor == 0.0000275  # Unchanged
 
     # Test analysis section independence
-    original_floor = config.analysis.ntl_floor
+    config.analysis.ntl_floor
     config.analysis.ntl_floor = 0.5
     assert config.analysis.ntl_floor == 0.5
     assert config.enhancement.colormap == "inferno"  # Unchanged
 
     # Test enhancement section independence
-    original_factor = config.enhancement.road_major_factor
+    config.enhancement.road_major_factor
     config.enhancement.road_major_factor = 2.0
     assert config.enhancement.road_major_factor == 2.0
     assert config.export.tiled is True  # Unchanged
@@ -290,29 +288,31 @@ def test_default_config_functions():
     # Test default config function - functions were removed
     pytest.skip("get_default_config and get_enhanced_config functions were removed")
     return
-    # default_config = get_default_config(bbox, date, output_path)
-    assert default_config.enhancement.quality_mode == "basic"
-    assert default_config.bbox == bbox
-    assert default_config.date == date
-    assert default_config.output_path == output_path
 
-    # Test enhanced config function
-    # enhanced_config = get_enhanced_config(bbox, date, output_path)
-    assert enhanced_config.enhancement.quality_mode == "enhanced"
-    assert enhanced_config.bbox == bbox
-    assert enhanced_config.date == date
-    assert enhanced_config.output_path == output_path
-
-    # Test they return different configurations
-    assert (
-        default_config.enhancement.quality_mode
-        != enhanced_config.enhancement.quality_mode
-    )
-    assert (
-        default_config.analysis.use_scipy_fill_gaps
-        != enhanced_config.analysis.use_scipy_fill_gaps
-    )
-    assert (
-        default_config.export.generate_urban_mask
-        != enhanced_config.export.generate_urban_mask
-    )
+    # The following code is unreachable due to pytest.skip() above
+    # # default_config = get_default_config(bbox, date, output_path)
+    # assert default_config.enhancement.quality_mode == "basic"
+    # assert default_config.bbox == bbox
+    # assert default_config.date == date
+    # assert default_config.output_path == output_path
+    #
+    # # Test enhanced config function
+    # # enhanced_config = get_enhanced_config(bbox, date, output_path)
+    # assert enhanced_config.enhancement.quality_mode == "enhanced"
+    # assert enhanced_config.bbox == bbox
+    # assert enhanced_config.date == date
+    # assert enhanced_config.output_path == output_path
+    #
+    # # Test they return different configurations
+    # assert (
+    #     default_config.enhancement.quality_mode
+    #     != enhanced_config.enhancement.quality_mode
+    # )
+    # assert (
+    #     default_config.analysis.use_scipy_fill_gaps
+    #     != enhanced_config.analysis.use_scipy_fill_gaps
+    # )
+    # assert (
+    #     default_config.export.generate_urban_mask
+    #     != enhanced_config.export.generate_urban_mask
+    # )

@@ -3,10 +3,10 @@
 Runs ruff linter and counts issues.
 Outputs .metrics/ruff_<date>.json
 """
-from _utils import run, save_metrics, timestamp
-import re
-import pathlib
 import json
+import re
+
+from _utils import run, save_metrics, timestamp
 
 out, _, _ = run(["ruff", "check", "blackmarble", "--output-format", "json"])
 

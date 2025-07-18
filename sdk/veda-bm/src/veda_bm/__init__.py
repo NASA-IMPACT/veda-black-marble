@@ -1,6 +1,7 @@
-import boto3
-import pprint
 import math
+
+import boto3
+
 
 class OperationalCredentials:
     def __init__(self, access_key, secret_key, earth_data_token):
@@ -160,7 +161,7 @@ class BlackMarbleRunner:
 
         ecs_client = boto3.client('ecs', aws_access_key_id=self.access_key, aws_secret_access_key=self.secret_key, region_name='us-west-2')
 
-        response = ecs_client.stop_task(
+        ecs_client.stop_task(
             cluster=self.cluster,
             task=task_arn,
             reason='Manually stopping'
@@ -192,9 +193,8 @@ class BlackMarbleRunner:
     def download_file(self, source_bucket, source_path, destination_path):
         session = self.assumed_role_session()
         s3 = session.client('s3')
-        with open(destination_path, 'wb') as f:
-            s3.download_file(source_bucket, source_path,
-            destination_path, ExtraArgs = {"RequestPayer": "requester"})
+        s3.download_file(source_bucket, source_path,
+        destination_path, ExtraArgs = {"RequestPayer": "requester"})
 
     def assumed_role_session(self):
         role = boto3.client('sts').assume_role_with_web_identity(RoleArn=self.aws_role_arn, RoleSessionName='assume-role', WebIdentityToken=self.aws_id_token)

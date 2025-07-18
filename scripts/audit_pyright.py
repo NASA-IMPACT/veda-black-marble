@@ -3,10 +3,9 @@
 Runs pyright in strict mode and counts errors.
 Outputs .metrics/pyright_<date>.json
 """
-from _utils import run, save_metrics, timestamp, BASE_DIR
 import re
-import json
-import pathlib
+
+from _utils import run, save_metrics, timestamp
 
 # Run pyright and capture summary
 out, err, code = run(["pyright", "--stats"])
@@ -18,7 +17,7 @@ error_types = {}
 
 # Look for the summary line (e.g., "42 errors, 13 warnings, 0 information")
 for line in out.splitlines():
-    summary_match = re.search(r'(\d+)\s+errors?,\s+(\d+)\s+warnings?', line)
+    summary_match = re.search(r"(\d+)\s+errors?,\s+(\d+)\s+warnings?", line)
     if summary_match:
         error_count = int(summary_match.group(1))
         warning_count = int(summary_match.group(2))
@@ -28,7 +27,7 @@ for line in out.splitlines():
 for line in out.splitlines():
     if " - error:" in line:
         # Extract error type (e.g., "Type of ... is unknown")
-        match = re.search(r' - error: (.+?)(?:\s+\(.*?\))?\s*$', line)
+        match = re.search(r" - error: (.+?)(?:\s+\(.*?\))?\s*$", line)
         if match:
             error_msg = match.group(1)
             # Categorize by first few words

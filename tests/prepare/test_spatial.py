@@ -3,15 +3,14 @@
 This module tests only the essential spatial functionality needed for bm.py parity.
 """
 
-import pytest
 import numpy as np
-from rasterio.transform import from_bounds
 from rasterio.crs import CRS
+from rasterio.transform import from_bounds
 
 from blackmarble.prepare.spatial import (
-    reproject_image,
-    crop_to_bounds,
     align_rasters,
+    crop_to_bounds,
+    reproject_image,
 )
 
 
