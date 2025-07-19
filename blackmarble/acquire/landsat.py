@@ -58,9 +58,9 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         # Set up default config with S3-specific settings
         if config is None:
             config = DownloadConfig(
-                max_concurrent=10,  # S3 can handle more
+                max_concurrent=20,  # Increased for better parallelism
                 timeout_seconds=300,
-                chunk_size=1024 * 1024,  # 1MB chunks
+                chunk_size=4 * 1024 * 1024,  # 4MB chunks for faster downloads
                 max_retries=3,
             )
 
@@ -68,8 +68,12 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
         # S3 configuration
         self.aws_unsigned = aws_unsigned
-        # Don't use UNSIGNED config - just use default boto3 client
-        self.s3_config = Config(retries={"max_attempts": 0})  # We handle retries ourselves
+        # Optimized S3 config for better performance
+        self.s3_config = Config(
+            retries={"max_attempts": 0},  # We handle retries ourselves
+            max_pool_connections=50,  # Increased from default 10
+            read_timeout=60,  # Faster timeout for listing operations
+        )
 
         # Cache for S3 directory listings
         self._listing_cache = {}
@@ -180,7 +184,13 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         cloud_cover_max: float = 20.0,
     ) -> list[dict[str, Any]]:
         """
-        Find Landsat scenes for given criteria.
+        Find Landsat scenes for given criteria with optimized parallel discovery.
+
+        Key optimizations:
+        1. Parallel path/row discovery (process multiple paths concurrently)
+        2. Batch MTL file downloads (up to 20 concurrent)
+        3. Early date filtering before MTL download
+        4. Better progress tracking
 
         Args:
             year: Year to search
@@ -192,100 +202,188 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
             List of scene metadata
         """
         from .wrs_utils import get_wrs_tiles_for_bbox_tuple
-
-        # Get ALL WRS tiles that intersect with the bbox
-        tile_dicts = get_wrs_tiles_for_bbox_tuple(bbox)
-        tiles = [f"{t['path']:03d}{t['row']:03d}" for t in tile_dicts]
-
-        logger.info(f"Searching Landsat scenes for tiles: {tiles}")
-
-        # Search for scenes
-        scenes = []
-        scenes_checked = 0
-        scenes_filtered_by_cloud = 0
-        sensor_prefix = f"{self.COLLECTION}/{self.LEVEL}/standard/oli-tirs/{year}/"
-
-        # List all paths for the year
-        response = await self.list_s3_objects(sensor_prefix)
-
-        # Add progress bar for scene discovery
         from tqdm.asyncio import tqdm
 
-        path_prefixes = response.get("CommonPrefixes", [])
-        with tqdm(
+        # Get WRS tiles and organize by path for efficient processing
+        tile_dicts = get_wrs_tiles_for_bbox_tuple(bbox)
+        tiles = [f"{t['path']:03d}{t['row']:03d}" for t in tile_dicts]
+        tiles_by_path = {}
+        for t in tile_dicts:
+            path = t['path']
+            if path not in tiles_by_path:
+                tiles_by_path[path] = []
+            tiles_by_path[path].append(f"{path:03d}{t['row']:03d}")
+
+        logger.info(f"Searching {len(tiles)} tiles across {len(tiles_by_path)} paths")
+
+        # Prepare for parallel operations
+        scenes = []
+        scenes_lock = asyncio.Lock()
+        stats = {
+            'scenes_checked': 0,
+            'scenes_filtered_by_cloud': 0,
+            'scenes_filtered_by_date': 0
+        }
+        stats_lock = asyncio.Lock()
+
+        sensor_prefix = f"{self.COLLECTION}/{self.LEVEL}/standard/oli-tirs/{year}/"
+
+        # Create progress bar
+        pbar = tqdm(
             total=None,
             desc=f"🔍 Discovering Landsat scenes ({year})",
             unit="scenes",
             leave=False
-        ) as pbar:
-            for prefix_info in path_prefixes:
-                path_prefix = prefix_info["Prefix"]
-                path_num = int(path_prefix.split("/")[-2])
+        )
 
-                # Check if any of our tiles are in this path
-                relevant_tiles = [t for t in tiles if int(t[:3]) == path_num]
-                if not relevant_tiles:
+        async def process_path(path_num: int, path_tiles: list[str]):
+            """Process a single path in parallel."""
+            path_prefix = f"{sensor_prefix}{path_num:03d}/"
+
+            # List rows in this path
+            row_response = await self.list_s3_objects(path_prefix)
+            if not row_response.get("CommonPrefixes"):
+                return
+
+            # Process rows in parallel
+            row_tasks = []
+            for row_info in row_response.get("CommonPrefixes", []):
+                row_prefix = row_info["Prefix"]
+                row_num = int(row_prefix.split("/")[-2])
+
+                # Check if this path/row matches our tiles
+                current_tile = f"{path_num:03d}{row_num:03d}"
+                if current_tile in path_tiles:
+                    row_tasks.append(process_row(row_prefix, path_num, row_num))
+
+            # Process all rows for this path concurrently
+            if row_tasks:
+                await asyncio.gather(*row_tasks, return_exceptions=True)
+
+        async def process_row(row_prefix: str, path_num: int, row_num: int):
+            """Process scenes in a single row."""
+            # List scenes in this path/row
+            scene_response = await self.list_s3_objects(row_prefix)
+            if not scene_response.get("CommonPrefixes"):
+                return
+
+            # Batch scenes for MTL download
+            scenes_to_check = []
+
+            for scene_info in scene_response.get("CommonPrefixes", []):
+                scene_prefix = scene_info["Prefix"]
+                scene_id = scene_prefix.split("/")[-2]
+
+                # Parse scene date
+                try:
+                    scene_date = datetime.strptime(scene_id.split("_")[3], "%Y%m%d")
+                except (ValueError, IndexError):
                     continue
 
-                # List rows in this path
-                row_response = await self.list_s3_objects(path_prefix)
-
-                for row_info in row_response.get("CommonPrefixes", []):
-                    row_prefix = row_info["Prefix"]
-                    row_num = int(row_prefix.split("/")[-2])
-
-                    # Check if this path/row matches our tiles
-                    current_tile = f"{path_num:03d}{row_num:03d}"
-                    if current_tile not in relevant_tiles:
+                # Apply date filter BEFORE downloading MTL
+                if date_range:
+                    if scene_date < date_range[0] or scene_date > date_range[1]:
+                        async with stats_lock:
+                            stats['scenes_filtered_by_date'] += 1
                         continue
 
-                    # List scenes in this path/row
-                    scene_response = await self.list_s3_objects(row_prefix)
+                scenes_to_check.append({
+                    'scene_id': scene_id,
+                    'scene_prefix': scene_prefix,
+                    'scene_date': scene_date,
+                    'path': path_num,
+                    'row': row_num
+                })
 
-                    # Process scenes with cloud cover check
-                    for scene_info in scene_response.get("CommonPrefixes", []):
-                        scene_prefix = scene_info["Prefix"]
-                        scene_id = scene_prefix.split("/")[-2]
+            # Process scenes in batches for MTL download
+            if scenes_to_check:
+                await process_scene_batch(scenes_to_check)
 
-                        # Parse scene metadata from ID
-                        scene_date = datetime.strptime(scene_id.split("_")[3], "%Y%m%d")
+        async def process_scene_batch(scene_batch: list[dict]):
+            """Process a batch of scenes with concurrent MTL downloads."""
+            # Create tasks for cloud cover checks
+            mtl_tasks = []
+            for scene_info in scene_batch:
+                mtl_tasks.append(check_scene_cloud_cover(scene_info))
 
-                        # Apply date filter
-                        if date_range:
-                            if scene_date < date_range[0] or scene_date > date_range[1]:
-                                continue
+            # Run MTL downloads concurrently (limited by semaphore)
+            results = await asyncio.gather(*mtl_tasks, return_exceptions=True)
 
-                        scenes_checked += 1
-                        pbar.update(1)  # Update progress bar for each scene checked
+            # Process results
+            valid_scenes = []
+            for scene_info, cloud_cover in zip(scene_batch, results):
+                if isinstance(cloud_cover, Exception):
+                    logger.debug(f"Failed to get cloud cover for {scene_info['scene_id']}: {cloud_cover}")
+                    cloud_cover = 100.0  # Conservative fallback
 
-                        # Get actual cloud cover from MTL metadata
-                        cloud_cover = await self.get_scene_cloud_cover(scene_prefix, scene_id)
+                async with stats_lock:
+                    stats['scenes_checked'] += 1
+                    pbar.update(1)
 
-                        # Only add scene if it passes cloud cover filter
-                        if cloud_cover <= cloud_cover_max:
-                            scenes.append(
-                                {
-                                    "scene_id": scene_id,
-                                    "path": path_num,
-                                    "row": row_num,
-                                    "date": scene_date,
-                                    "s3_prefix": scene_prefix,
-                                    "cloud_cover": cloud_cover,
-                                }
-                            )
-                            pbar.set_postfix({"found": len(scenes), "checked": scenes_checked})
-                        else:
-                            scenes_filtered_by_cloud += 1
-                            logger.debug(
-                                f"Skipping scene {scene_id} with cloud cover {cloud_cover:.1f}%"
-                            )
+                if cloud_cover <= cloud_cover_max:
+                    scene_info['cloud_cover'] = cloud_cover
+                    valid_scenes.append(scene_info)
+                    pbar.set_postfix({
+                        'found': len(scenes) + len(valid_scenes),
+                        'checked': stats['scenes_checked']
+                    })
+                else:
+                    async with stats_lock:
+                        stats['scenes_filtered_by_cloud'] += 1
 
+            # Add valid scenes to results
+            if valid_scenes:
+                async with scenes_lock:
+                    for scene in valid_scenes:
+                        scenes.append({
+                            "scene_id": scene['scene_id'],
+                            "path": scene['path'],
+                            "row": scene['row'],
+                            "date": scene['scene_date'],
+                            "s3_prefix": scene['scene_prefix'],
+                            "cloud_cover": scene['cloud_cover'],
+                        })
+
+        # Semaphore to limit concurrent MTL downloads
+        mtl_semaphore = asyncio.Semaphore(20)  # Increased from implicit 1
+
+        async def check_scene_cloud_cover(scene_info: dict) -> float:
+            """Check cloud cover with semaphore limiting."""
+            async with mtl_semaphore:
+                return await self.get_scene_cloud_cover(
+                    scene_info['scene_prefix'],
+                    scene_info['scene_id']
+                )
+
+        # First, list all paths in parallel to check which exist
+        response = await self.list_s3_objects(sensor_prefix)
+        path_prefixes = response.get("CommonPrefixes", [])
+
+        # Filter to only paths we need
+        path_tasks = []
+        for prefix_info in path_prefixes:
+            path_prefix = prefix_info["Prefix"]
+            path_num = int(path_prefix.split("/")[-2])
+
+            if path_num in tiles_by_path:
+                path_tasks.append(process_path(path_num, tiles_by_path[path_num]))
+
+        # Process all paths concurrently
+        logger.info(f"Processing {len(path_tasks)} paths in parallel")
+        await asyncio.gather(*path_tasks, return_exceptions=True)
+
+        # Close progress bar
+        pbar.close()
+
+        # Log summary
         logger.info(
             f"Found {len(scenes)} Landsat scenes matching criteria "
             f"(cloud cover <= {cloud_cover_max}%). "
-            f"Checked {scenes_checked} scenes, "
-            f"filtered {scenes_filtered_by_cloud} due to cloud cover."
+            f"Checked {stats['scenes_checked']} scenes, "
+            f"filtered {stats['scenes_filtered_by_date']} by date, "
+            f"filtered {stats['scenes_filtered_by_cloud']} by cloud cover."
         )
+
         return scenes
 
     async def prepare_download(self, item: dict[str, Any], output_dir: Path) -> tuple[str, Path]:
@@ -558,26 +656,41 @@ async def download_landsat(
             )
             download_tasks.append((download["date"], download["tile_id"], task))
 
-        # Execute all downloads
+        # Execute all downloads in batches for better concurrency
         results = {}
         tiles_downloaded_by_date = {}
+        
+        # Process downloads in batches of 50 scenes
+        batch_size = 50
+        for i in range(0, len(download_tasks), batch_size):
+            batch = download_tasks[i:i + batch_size]
+            
+            # Gather all tasks in this batch
+            batch_results = await asyncio.gather(
+                *[task for _, _, task in batch],
+                return_exceptions=True
+            )
+            
+            # Process results
+            for (date, tile_id, _), band_paths in zip(batch, batch_results):
+                if isinstance(band_paths, Exception):
+                    logger.error(f"Failed to download scene for {date}, tile {tile_id}: {band_paths}")
+                    continue
+                    
+                if date not in results:
+                    results[date] = {}
+                    tiles_downloaded_by_date[date] = set()
 
-        for date, tile_id, task in download_tasks:
-            band_paths = await task
-            if date not in results:
-                results[date] = {}
-                tiles_downloaded_by_date[date] = set()
+                # Track successful downloads
+                if any(path is not None for path in band_paths.values()):
+                    tiles_downloaded_by_date[date].add(tile_id)
 
-            # Track successful downloads
-            if any(path is not None for path in band_paths.values()):
-                tiles_downloaded_by_date[date].add(tile_id)
-
-            # Organize by band
-            for band, path in band_paths.items():
-                if band not in results[date]:
-                    results[date][band] = []
-                if path:
-                    results[date][band].append(path)
+                # Organize by band
+                for band, path in band_paths.items():
+                    if band not in results[date]:
+                        results[date][band] = []
+                    if path:
+                        results[date][band].append(path)
 
         # Log final summary
         logger.info("\nDownload summary by date:")

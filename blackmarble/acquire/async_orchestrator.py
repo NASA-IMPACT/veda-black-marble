@@ -26,7 +26,7 @@ class DownloadPlan:
 
     # Landsat parameters
     landsat_dates: list[datetime] = field(default_factory=list)
-    landsat_bands: list[str] = field(default_factory=lambda: ["B2", "B3", "B4", "B5", "QA_PIXEL"])
+    landsat_bands: list[str] = field(default_factory=lambda: ["B3", "B4", "B5", "QA_PIXEL"])
     landsat_cloud_max: float = 30.0
 
     # VIIRS parameters
