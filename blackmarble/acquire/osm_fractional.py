@@ -76,6 +76,16 @@ def buffer_and_rasterize_roads_fractional(
 
     # Convert to target CRS for rasterization
     edges_buffered = edges_utm.to_crs(crs)
+    
+    # DEBUG: Check CRS and bounds
+    print(f"  Original edges CRS: {edges_gdf.crs}")
+    print(f"  UTM CRS for buffering: {utm_crs}")
+    print(f"  Target CRS: {crs}")
+    print(f"  Edges bounds after buffering: {edges_buffered.total_bounds}")
+    
+    # Also check the transform bounds
+    raster_bounds = rasterio.transform.array_bounds(shape[0], shape[1], transform)
+    print(f"  Raster bounds from transform: {raster_bounds}")
 
     # Convert to shapes
     shapes = [mapping(geom) for geom in edges_buffered.geometry]

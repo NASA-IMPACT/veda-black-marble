@@ -57,6 +57,11 @@ def create_landsat_median_composite(
     # Apply scaling to the raw DN values
     # This converts from raw digital numbers to surface reflectance
     scaled_stack = stacked * scale_factor + add_offset
+    
+    # DEBUG: Check scaling
+    print(f"    Scale factor: {scale_factor}, Add offset: {add_offset}")
+    print(f"    Raw DN range: [{np.nanmin(stacked):.1f}, {np.nanmax(stacked):.1f}]")
+    print(f"    Scaled range: [{np.nanmin(scaled_stack):.3f}, {np.nanmax(scaled_stack):.3f}]")
 
     # Compute median along time axis, ignoring NaN
     # nanmedian handles NaN values gracefully

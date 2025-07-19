@@ -363,6 +363,8 @@ async def black_marble_pipeline(
                     f"  Created composite for {band_name}: shape={composite.shape}, "
                     f"coverage={(composite > 0).sum() / composite.size * 100:.1f}%"
                 )
+                # DEBUG: Check if composite is scaled properly
+                print(f"    Composite range: [{np.nanmin(composite):.3f}, {np.nanmax(composite):.3f}]")
             else:
                 print(f"  Warning: No data found for {band_name}")
 
@@ -567,6 +569,10 @@ async def black_marble_pipeline(
 
     # Use the reprojected data (already in UTM)
     if "B5" in landsat_reprojected and "B4" in landsat_reprojected:
+        # DEBUG: Check Landsat values before NDVI
+        print(f"\nDEBUG - Landsat B4 (red): min={np.nanmin(landsat_reprojected['B4']):.3f}, max={np.nanmax(landsat_reprojected['B4']):.3f}")
+        print(f"DEBUG - Landsat B5 (NIR): min={np.nanmin(landsat_reprojected['B5']):.3f}, max={np.nanmax(landsat_reprojected['B5']):.3f}")
+        
         ndvi = analyze.calculate_ndvi(nir=landsat_reprojected["B5"], red=landsat_reprojected["B4"])
 
         # Save diagnostic output if requested
