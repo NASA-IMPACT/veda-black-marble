@@ -539,6 +539,11 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                 logger.warning(f"Failed to download {item['band']}: {result.error}")
                 band_paths[item["band"]] = None
         
+        # Ensure all required bands have keys (even if None)
+        REQUIRED_BANDS = ["B3", "B4", "B5", "QA_PIXEL"]
+        for band in REQUIRED_BANDS:
+            band_paths.setdefault(band, None)
+        
         # DEBUG: Summary of downloaded bands
         logger.info(f"Scene {scene['scene_id']} band summary: {list(band_paths.keys())}")
         logger.info(f"  Successful: {[b for b, p in band_paths.items() if p is not None]}")
@@ -724,13 +729,22 @@ async def download_landsat(
     # DEBUG: Final verification of downloaded files
     logger.info("\nFinal file verification:")
     for date, bands in results.items():
-        logger.info(f"Date {date}:")
+        logger.info(f"Date {date}: keys={list(bands.keys())}")
         for band, paths in bands.items():
-            existing = [p for p in paths if p.exists()]
-            logger.info(f"  {band}: {len(existing)}/{len(paths)} files exist")
-            if len(existing) < len(paths):
-                missing = [p for p in paths if not p.exists()]
-                logger.error(f"    Missing: {missing}")
+            if paths:
+                existing = [p for p in paths if p.exists()]
+                logger.info(f"  {band}: {len(existing)}/{len(paths)} files exist")
+                if len(existing) < len(paths):
+                    missing = [p for p in paths if not p.exists()]
+                    logger.error(f"    Missing: {missing}")
+            else:
+                logger.info(f"  {band}: No paths (empty list)")
+    
+    # DEBUG: Show exact structure being returned
+    logger.info("\nReturning results structure:")
+    for date in sorted(results.keys()):
+        band_summary = {k: len(v) if v else 0 for k, v in results[date].items()}
+        logger.info(f"  {date.strftime('%Y-%m-%d')}: {band_summary}")
 
     return results
 

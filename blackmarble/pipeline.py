@@ -289,9 +289,12 @@ async def black_marble_pipeline(
 
         date_files = landsat_files_by_date[target_date]
 
-        # Skip if we don't have all bands
-        if not all(band in date_files for band in ["B3", "B4", "B5", "QA_PIXEL"]):
-            print("  Skipping - missing bands")
+        # Skip if we don't have all bands with actual files
+        REQUIRED_BANDS = ["B3", "B4", "B5", "QA_PIXEL"]
+        missing_bands = [b for b in REQUIRED_BANDS if b not in date_files or not date_files.get(b)]
+        if missing_bands:
+            print(f"  Skipping - missing bands: {missing_bands}")
+            print(f"  Available: {[b for b in REQUIRED_BANDS if b in date_files and date_files.get(b)]}")
             continue
 
         # Convert paths to tuple format expected by process_landsat_date
