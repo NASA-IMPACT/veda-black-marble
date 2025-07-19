@@ -465,6 +465,12 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                         result.status = DownloadStatus.COMPLETED
                         result.size_bytes = output_path.stat().st_size
                         result.duration_seconds = asyncio.get_event_loop().time() - start_time
+                        
+                        # DEBUG: Verify file exists
+                        if output_path.exists():
+                            logger.info(f"✅ Landsat file downloaded: {output_path} ({result.size_bytes} bytes)")
+                        else:
+                            logger.error(f"❌ File disappeared after download: {output_path}")
 
                         # Notify callback of completion
                         if self.progress_callback:
@@ -524,9 +530,18 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         for item, result in zip(items, results):
             if result.status == DownloadStatus.COMPLETED:
                 band_paths[item["band"]] = result.local_path
+                # DEBUG: Verify the path exists
+                if result.local_path and result.local_path.exists():
+                    logger.debug(f"✓ Band {item['band']} exists at {result.local_path}")
+                else:
+                    logger.error(f"✗ Band {item['band']} missing at {result.local_path}")
             else:
                 logger.warning(f"Failed to download {item['band']}: {result.error}")
                 band_paths[item["band"]] = None
+        
+        # DEBUG: Summary of downloaded bands
+        logger.info(f"Scene {scene['scene_id']} band summary: {list(band_paths.keys())}")
+        logger.info(f"  Successful: {[b for b, p in band_paths.items() if p is not None]}")
 
         return band_paths
 
@@ -692,6 +707,8 @@ async def download_landsat(
                         results[date][band] = []
                     if path:
                         results[date][band].append(path)
+                        # DEBUG: Track what we're adding
+                        logger.debug(f"Added {band} for {date}: {path}")
 
         # Log final summary
         logger.info("\nDownload summary by date:")
@@ -703,6 +720,17 @@ async def download_landsat(
 
         if progress:
             progress.finish()
+    
+    # DEBUG: Final verification of downloaded files
+    logger.info("\nFinal file verification:")
+    for date, bands in results.items():
+        logger.info(f"Date {date}:")
+        for band, paths in bands.items():
+            existing = [p for p in paths if p.exists()]
+            logger.info(f"  {band}: {len(existing)}/{len(paths)} files exist")
+            if len(existing) < len(paths):
+                missing = [p for p in paths if not p.exists()]
+                logger.error(f"    Missing: {missing}")
 
     return results
 

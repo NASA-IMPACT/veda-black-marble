@@ -265,6 +265,16 @@ async def black_marble_pipeline(
 
     # Original in-memory processing
     print(f"\n💾 Processing {len(landsat_files_by_date)} Landsat dates")
+    
+    # Debug: Print structure of landsat_files_by_date
+    if not landsat_files_by_date:
+        print("WARNING: landsat_files_by_date is empty!")
+    else:
+        sample_date = next(iter(landsat_files_by_date.keys()))
+        print(f"Sample Landsat data structure for {sample_date}:")
+        print(f"  Keys: {list(landsat_files_by_date[sample_date].keys())}")
+        for band, paths in landsat_files_by_date[sample_date].items():
+            print(f"  {band}: {len(paths)} files")
 
     # Process each date's Landsat data
     for idx, target_date in enumerate(sorted(landsat_files_by_date.keys())):
@@ -394,14 +404,16 @@ async def black_marble_pipeline(
             resampling="bilinear",  # Use bilinear like sync pipeline
         )
 
-        # If no Landsat reference, use VIIRS as reference
-        if reference_transform is None and viirs_transform is not None:
-            reference_transform = viirs_transform
-            reference_shape = viirs_reprojected.shape
-            print("⚠️  No Landsat data available - using VIIRS as reference grid")
         
         # Align VIIRS to Landsat grid for consistent processing
-        if reference_transform is not None and reference_shape is not None and landsat_reprojected:
+        if reference_transform is not None and reference_shape is not None:
+            if not landsat_reprojected:
+                raise RuntimeError(
+                    "CRITICAL: No Landsat data available! Pipeline cannot continue without Landsat bands.\n"
+                    "Landsat is required for NDVI calculation, which is essential for NDUI.\n"
+                    "Check that Landsat downloads are succeeding and bands B3, B4, B5 are available."
+                )
+            
             print(f"VIIRS shape before alignment: {viirs_reprojected.shape}")
             print(f"Reference Landsat shape: {reference_shape}")
             
@@ -443,9 +455,6 @@ async def black_marble_pipeline(
                     f"VIIRS alignment failed - only {nonzero_pct:.1f}% non-zero pixels. "
                     "Check tile selection and spatial footprints."
                 )
-        elif reference_transform is not None and reference_shape is not None and not landsat_reprojected:
-            print("⚠️  Skipping VIIRS-Landsat alignment - no Landsat bands available")
-            logger.warning("No Landsat bands processed - using VIIRS grid without alignment")
 
     # Rasterize roads to match grid
     roads_rasterized = None
