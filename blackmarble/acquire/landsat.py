@@ -108,7 +108,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
     async def get_scene_cloud_cover(self, scene_prefix: str, scene_id: str) -> float:
         """
-        Get cloud cover percentage from GeoTIFF metadata (much faster than MTL).
+        Get cloud cover percentage from MTL metadata file.
 
         Args:
             scene_prefix: S3 prefix for the scene
@@ -117,56 +117,56 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         Returns:
             Cloud cover percentage (0-100)
         """
-        # Use a small band file to read metadata (QA_PIXEL is usually smallest)
-        band_key = f"{scene_prefix}{scene_id}_QA_PIXEL.TIF"
+        # MTL file contains the actual cloud cover metadata
+        mtl_key = f"{scene_prefix}{scene_id}_MTL.txt"
 
         try:
-            import rasterio
-            from rasterio.session import AWSSession
+            # Create default session for S3 access
+            session = aioboto3.Session()
+            async with session.client("s3", config=self.s3_config) as s3:
+                # Download MTL file content
+                response = await s3.get_object(
+                    Bucket=self.BUCKET,
+                    Key=mtl_key,
+                    RequestPayer="requester",
+                )
 
-            # Read metadata from GeoTIFF tags using rasterio's S3 support
-            aws_session = AWSSession(aws_unsigned=True, requester_pays=True)
-            with rasterio.Env(session=aws_session):
-                with rasterio.open(f"s3://{self.BUCKET}/{band_key}") as src:
-                    # Try to get cloud cover from various metadata fields
-                    tags = src.tags()
+                content = await response['Body'].read()
+                text = content.decode('utf-8')
 
-                    # Look for cloud cover in various tag formats
-                    cloud_cover_keys = [
-                        'CLOUD_COVER_LAND', 'CLOUD_COVER', 'cloud_cover_land', 'cloud_cover'
-                    ]
-                    for key in cloud_cover_keys:
-                        if key in tags:
-                            try:
-                                return float(tags[key])
-                            except (ValueError, TypeError):
-                                continue
+                # Parse cloud cover from MTL content
+                lines = text.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    # Look for CLOUD_COVER_LAND first (more specific), then CLOUD_COVER
+                    if line.startswith('CLOUD_COVER_LAND ='):
+                        try:
+                            return float(line.split('=')[1].strip())
+                        except (ValueError, IndexError):
+                            continue
+                    elif line.startswith('CLOUD_COVER ='):
+                        try:
+                            return float(line.split('=')[1].strip())
+                        except (ValueError, IndexError):
+                            continue
 
-                    # If not in tags, try in the description or other metadata
-                    if hasattr(src, 'descriptions') and src.descriptions:
-                        desc = str(src.descriptions[0] or '')
-                        if 'cloud' in desc.lower():
-                            # Try to extract number from description
-                            import re
-                            match = re.search(r'cloud.*?(\d+\.?\d*)', desc.lower())
-                            if match:
-                                try:
-                                    return float(match.group(1))
-                                except ValueError:
-                                    pass
-
-                    # Last resort: check if scene ID contains quality indicators
-                    # For newer Landsat, we can infer from collection/tier info
-                    if '_T1' in scene_id:  # Tier 1 = higher quality, usually less clouds
-                        return 15.0  # Conservative estimate for Tier 1
-                    elif '_T2' in scene_id:  # Tier 2 = lower quality
-                        return 35.0  # Conservative estimate for Tier 2
-                    else:
-                        return 25.0  # Middle ground
+                # If no cloud cover found in MTL, use tier-based estimate
+                logger.debug(f"No cloud cover found in MTL for {scene_id}")
+                if '_T1' in scene_id:
+                    return 15.0  # Tier 1 scenes are generally good quality
+                elif '_T2' in scene_id:
+                    return 35.0  # Tier 2 scenes have more variability
+                else:
+                    return 25.0  # Middle ground
 
         except Exception as e:
-            logger.warning(f"Failed to get cloud cover for {scene_id}: {e}")
-            # Return a conservative estimate based on scene tier
+            # Handle access errors gracefully
+            if "Access Denied" in str(e) or "AccessDenied" in str(e):
+                logger.debug(f"Access denied for {scene_id} MTL file (using tier-based estimate)")
+            else:
+                logger.warning(f"Failed to get cloud cover from MTL for {scene_id}: {e}")
+
+            # Return conservative estimate based on scene tier
             if '_T1' in scene_id:
                 return 20.0  # Tier 1 scenes are generally good quality
             else:
@@ -208,65 +208,77 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         # List all paths for the year
         response = await self.list_s3_objects(sensor_prefix)
 
-        for prefix_info in response.get("CommonPrefixes", []):
-            path_prefix = prefix_info["Prefix"]
-            path_num = int(path_prefix.split("/")[-2])
+        # Add progress bar for scene discovery
+        from tqdm.asyncio import tqdm
 
-            # Check if any of our tiles are in this path
-            relevant_tiles = [t for t in tiles if int(t[:3]) == path_num]
-            if not relevant_tiles:
-                continue
+        path_prefixes = response.get("CommonPrefixes", [])
+        with tqdm(
+            total=None,
+            desc=f"🔍 Discovering Landsat scenes ({year})",
+            unit="scenes",
+            leave=False
+        ) as pbar:
+            for prefix_info in path_prefixes:
+                path_prefix = prefix_info["Prefix"]
+                path_num = int(path_prefix.split("/")[-2])
 
-            # List rows in this path
-            row_response = await self.list_s3_objects(path_prefix)
-
-            for row_info in row_response.get("CommonPrefixes", []):
-                row_prefix = row_info["Prefix"]
-                row_num = int(row_prefix.split("/")[-2])
-
-                # Check if this path/row matches our tiles
-                current_tile = f"{path_num:03d}{row_num:03d}"
-                if current_tile not in relevant_tiles:
+                # Check if any of our tiles are in this path
+                relevant_tiles = [t for t in tiles if int(t[:3]) == path_num]
+                if not relevant_tiles:
                     continue
 
-                # List scenes in this path/row
-                scene_response = await self.list_s3_objects(row_prefix)
+                # List rows in this path
+                row_response = await self.list_s3_objects(path_prefix)
 
-                # Process scenes with cloud cover check
-                for scene_info in scene_response.get("CommonPrefixes", []):
-                    scene_prefix = scene_info["Prefix"]
-                    scene_id = scene_prefix.split("/")[-2]
+                for row_info in row_response.get("CommonPrefixes", []):
+                    row_prefix = row_info["Prefix"]
+                    row_num = int(row_prefix.split("/")[-2])
 
-                    # Parse scene metadata from ID
-                    scene_date = datetime.strptime(scene_id.split("_")[3], "%Y%m%d")
+                    # Check if this path/row matches our tiles
+                    current_tile = f"{path_num:03d}{row_num:03d}"
+                    if current_tile not in relevant_tiles:
+                        continue
 
-                    # Apply date filter
-                    if date_range:
-                        if scene_date < date_range[0] or scene_date > date_range[1]:
-                            continue
+                    # List scenes in this path/row
+                    scene_response = await self.list_s3_objects(row_prefix)
 
-                    scenes_checked += 1
+                    # Process scenes with cloud cover check
+                    for scene_info in scene_response.get("CommonPrefixes", []):
+                        scene_prefix = scene_info["Prefix"]
+                        scene_id = scene_prefix.split("/")[-2]
 
-                    # Get actual cloud cover from MTL metadata
-                    cloud_cover = await self.get_scene_cloud_cover(scene_prefix, scene_id)
+                        # Parse scene metadata from ID
+                        scene_date = datetime.strptime(scene_id.split("_")[3], "%Y%m%d")
 
-                    # Only add scene if it passes cloud cover filter
-                    if cloud_cover <= cloud_cover_max:
-                        scenes.append(
-                            {
-                                "scene_id": scene_id,
-                                "path": path_num,
-                                "row": row_num,
-                                "date": scene_date,
-                                "s3_prefix": scene_prefix,
-                                "cloud_cover": cloud_cover,
-                            }
-                        )
-                    else:
-                        scenes_filtered_by_cloud += 1
-                        logger.debug(
-                            f"Skipping scene {scene_id} with cloud cover {cloud_cover:.1f}%"
-                        )
+                        # Apply date filter
+                        if date_range:
+                            if scene_date < date_range[0] or scene_date > date_range[1]:
+                                continue
+
+                        scenes_checked += 1
+                        pbar.update(1)  # Update progress bar for each scene checked
+
+                        # Get actual cloud cover from MTL metadata
+                        cloud_cover = await self.get_scene_cloud_cover(scene_prefix, scene_id)
+
+                        # Only add scene if it passes cloud cover filter
+                        if cloud_cover <= cloud_cover_max:
+                            scenes.append(
+                                {
+                                    "scene_id": scene_id,
+                                    "path": path_num,
+                                    "row": row_num,
+                                    "date": scene_date,
+                                    "s3_prefix": scene_prefix,
+                                    "cloud_cover": cloud_cover,
+                                }
+                            )
+                            pbar.set_postfix({"found": len(scenes), "checked": scenes_checked})
+                        else:
+                            scenes_filtered_by_cloud += 1
+                            logger.debug(
+                                f"Skipping scene {scene_id} with cloud cover {cloud_cover:.1f}%"
+                            )
 
         logger.info(
             f"Found {len(scenes)} Landsat scenes matching criteria "
@@ -459,7 +471,14 @@ async def download_landsat(
         tiles_needed = set()  # Track all tiles we need
 
         # Find scenes for each year
-        for year, year_dates in dates_by_year.items():
+        from tqdm import tqdm
+
+        for year, year_dates in tqdm(
+            dates_by_year.items(),
+            desc="📅 Processing years",
+            unit="year",
+            leave=False
+        ):
             # Date range for the year
             date_range = (
                 min(year_dates) - timedelta(days=8),
