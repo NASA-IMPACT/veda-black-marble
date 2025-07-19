@@ -191,3 +191,5 @@ cache/
 
 # transient data files
 data/
+*.bak
+*_wgs84.tif
