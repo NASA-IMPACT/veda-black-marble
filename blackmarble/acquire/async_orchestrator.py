@@ -25,7 +25,7 @@ class DownloadPlan:
     primary_date: datetime
 
     # Landsat parameters
-    landsat_dates: list[datetime] = field(default_factory=list)
+    landsat_dates: list[datetime] = field(default_factory=lambda: [])
     landsat_bands: list[str] = field(default_factory=lambda: ["B3", "B4", "B5", "QA_PIXEL"])
     landsat_cloud_max: float = 30.0
 
@@ -102,13 +102,13 @@ class DownloadPlan:
 class DownloadResults:
     """Results from all downloads"""
 
-    viirs_data: dict[str, list[Path]] = field(default_factory=dict)
-    landsat_data: dict[datetime, dict[str, list[Path]]] = field(default_factory=dict)
+    viirs_data: dict[str, list[Path]] = field(default_factory=lambda: {})
+    landsat_data: dict[datetime, dict[str, list[Path]]] = field(default_factory=lambda: {})
     osm_data: Any | None = None  # OSM graph data
 
     download_time: float = 0.0
     total_files: int = 0
-    failed_downloads: list[str] = field(default_factory=list)
+    failed_downloads: list[str] = field(default_factory=lambda: [])
 
     def summary(self) -> str:
         """Generate summary of download results"""
@@ -221,12 +221,15 @@ class AsyncDownloadOrchestrator:
             else:
                 if name == "VIIRS":
                     # Only set VIIRS data if we actually got results
-                    if (
-                        result
-                        and isinstance(result, dict)
-                        and any(len(files) > 0 for files in result.values())
-                    ):
-                        results.viirs_data = result
+                    if result and isinstance(result, dict):
+                        # Type narrow result to dict[str, list[Path]]
+                        has_files = False
+                        for files in result.values():
+                            if isinstance(files, list) and len(files) > 0:
+                                has_files = True
+                                break
+                        if has_files:
+                            results.viirs_data = result
                     else:
                         logger.warning("VIIRS download returned empty results")
                 elif name == "Landsat":
@@ -304,7 +307,7 @@ class AsyncDownloadOrchestrator:
             custom_filter = None
             if plan.osm_road_types:
                 # Include both main roads and their links (e.g., "motorway|motorway_link")
-                road_parts = []
+                road_parts: list[str] = []
                 for rt in plan.osm_road_types:
                     road_parts.extend([rt, f"{rt}_link"])
                 road_filter = "|".join(road_parts)

@@ -13,12 +13,8 @@ def enhance_contrast(
     method: Literal["percentile", "minmax"] = "percentile",
     percentiles: tuple[float, float] = (2, 98),
     output_range: tuple[float, float] = (0.0, 1.0),
-    clip_percentiles: tuple[float, float] | None = None,  # For backward compatibility
 ) -> ArrayLike:
     """Enhance image contrast."""
-    # Handle backward compatibility
-    if clip_percentiles is not None:
-        percentiles = clip_percentiles
 
     out_min, out_max = output_range
 

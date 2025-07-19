@@ -7,14 +7,13 @@ This module handles fetching data from various sources:
 """
 
 from .async_orchestrator import DownloadPlan, DownloadResults, download_all_data_sync
-from .landsat import download_landsat, filter_landsat_scenes
+from .landsat import download_landsat
 from .osm import buffer_and_rasterize_roads, clear_osm_cache, fetch_road_network
 from .osm_fractional import buffer_and_rasterize_roads_fractional
 from .viirs import download_viirs, download_viirs_h5
 
 __all__ = [
     # Landsat functions (used by pipeline)
-    "filter_landsat_scenes",
     "download_landsat",
     # OSM functions (used by pipeline)
     "fetch_road_network",

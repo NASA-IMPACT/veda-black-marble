@@ -461,7 +461,6 @@ async def black_marble_pipeline(
                     crs=target_crs,
                 )
 
-            # For compatibility, create a placeholder for roads_rasterized
             roads_rasterized = None
         else:
             # LEGACY: Binary hierarchical rasterization
@@ -493,7 +492,6 @@ async def black_marble_pipeline(
                     crs=target_crs,
                 )
 
-            # For compatibility
             roads_fractional = None
     else:
         # No road network data

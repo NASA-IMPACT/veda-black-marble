@@ -1,7 +1,6 @@
 """WRS-2 utilities for Landsat tile calculations using real USGS data."""
 
 import json
-from typing import Any
 
 # Type alias
 BBox = tuple[float, float, float, float]
@@ -33,7 +32,6 @@ except (FileNotFoundError, ImportError):
 
 def get_wrs_tiles_for_bbox_tuple(
     bbox: BBox,
-    wrs_polygons: Any = None,  # Ignored - kept for compatibility
 ) -> list[dict[str, int]]:
     """Get Landsat WRS-2 tiles that intersect with a bounding box.
 
@@ -42,7 +40,6 @@ def get_wrs_tiles_for_bbox_tuple(
 
     Args:
         bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
-        wrs_polygons: Ignored, kept for compatibility
 
     Returns:
         List of dictionaries with 'path' and 'row' keys for intersecting tiles

@@ -112,7 +112,7 @@ class AsyncDownloaderBase(ABC):
         self._session = ClientSession(timeout=timeout, headers=self.config.headers)
         return self
 
-    async def __aexit__(self, _exc_type, _exc_val, _exc_tb):
+    async def __aexit__(self, _exc_type: Any, _exc_val: Any, _exc_tb: Any) -> None:
         """Async context manager exit"""
         if self._session:
             await self._session.close()
@@ -130,7 +130,7 @@ class AsyncDownloaderBase(ABC):
             Tuple of (download_url, local_path)
         """
 
-    async def download_file(self, url: str, output_path: Path, **kwargs) -> DownloadResult:
+    async def download_file(self, url: str, output_path: Path, **kwargs: Any) -> DownloadResult:
         """
         Download a single file with retry logic.
 
@@ -200,8 +200,8 @@ class AsyncDownloaderBase(ABC):
         return result
 
     async def _download_with_progress(
-        self, url: str, output_path: Path, result: DownloadResult, **kwargs
-    ):
+        self, url: str, output_path: Path, result: DownloadResult, **kwargs: Any
+    ) -> None:
         """Download file with progress tracking"""
         if not self._session:
             raise RuntimeError("Session not initialized. Use async context manager.")

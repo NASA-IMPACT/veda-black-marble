@@ -4,6 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 import aioboto3
@@ -46,7 +47,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         aws_unsigned: bool = True,
         config: DownloadConfig | None = None,
         rate_limiter: RateLimiter | None = None,
-        progress_callback=None,
+        progress_callback: Callable[[DownloadResult], None] | None = None,
     ):
         """
         Args:
@@ -76,7 +77,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         )
 
         # Cache for S3 directory listings
-        self._listing_cache = {}
+        self._listing_cache: dict[str, dict[str, Any]] = {}
 
     async def list_s3_objects(self, prefix: str, delimiter: str = "/") -> dict[str, Any]:
         """
@@ -98,7 +99,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         session = aioboto3.Session()
         async with session.client("s3", config=self.s3_config) as s3:  # type: ignore
             try:
-                response = await s3.list_objects_v2(
+                response = await s3.list_objects_v2(  # type: ignore[attr-defined]
                     Bucket=self.BUCKET,
                     Prefix=prefix,
                     Delimiter=delimiter,
@@ -127,15 +128,15 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         try:
             # Create default session for S3 access
             session = aioboto3.Session()
-            async with session.client("s3", config=self.s3_config) as s3:
+            async with session.client("s3", config=self.s3_config) as s3:  # type: ignore[attr-defined]
                 # Download MTL file content
-                response = await s3.get_object(
+                response = await s3.get_object(  # type: ignore[attr-defined]
                     Bucket=self.BUCKET,
                     Key=mtl_key,
                     RequestPayer="requester",
                 )
 
-                content = await response['Body'].read()
+                content = await response['Body'].read()  # type: ignore[index]
                 text = content.decode('utf-8')
 
                 # Parse cloud cover from MTL content
@@ -207,7 +208,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         # Get WRS tiles and organize by path for efficient processing
         tile_dicts = get_wrs_tiles_for_bbox_tuple(bbox)
         tiles = [f"{t['path']:03d}{t['row']:03d}" for t in tile_dicts]
-        tiles_by_path = {}
+        tiles_by_path: dict[int, list[str]] = {}
         for t in tile_dicts:
             path = t['path']
             if path not in tiles_by_path:
@@ -217,7 +218,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         logger.info(f"Searching {len(tiles)} tiles across {len(tiles_by_path)} paths")
 
         # Prepare for parallel operations
-        scenes = []
+        scenes: list[dict[str, Any]] = []
         scenes_lock = asyncio.Lock()
         stats = {
             'scenes_checked': 0,
@@ -246,7 +247,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                 return
 
             # Process rows in parallel
-            row_tasks = []
+            row_tasks: list[Any] = []
             for row_info in row_response.get("CommonPrefixes", []):
                 row_prefix = row_info["Prefix"]
                 row_num = int(row_prefix.split("/")[-2])
@@ -268,7 +269,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                 return
 
             # Batch scenes for MTL download
-            scenes_to_check = []
+            scenes_to_check: list[dict[str, Any]] = []
 
             for scene_info in scene_response.get("CommonPrefixes", []):
                 scene_prefix = scene_info["Prefix"]
@@ -299,10 +300,10 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
             if scenes_to_check:
                 await process_scene_batch(scenes_to_check)
 
-        async def process_scene_batch(scene_batch: list[dict]):
+        async def process_scene_batch(scene_batch: list[dict[str, Any]]) -> None:
             """Process a batch of scenes with concurrent MTL downloads."""
             # Create tasks for cloud cover checks
-            mtl_tasks = []
+            mtl_tasks: list[Any] = []
             for scene_info in scene_batch:
                 mtl_tasks.append(check_scene_cloud_cover(scene_info))
 
@@ -347,7 +348,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         # Semaphore to limit concurrent MTL downloads
         mtl_semaphore = asyncio.Semaphore(20)  # Increased from implicit 1
 
-        async def check_scene_cloud_cover(scene_info: dict) -> float:
+        async def check_scene_cloud_cover(scene_info: dict[str, Any]) -> float:
             """Check cloud cover with semaphore limiting."""
             async with mtl_semaphore:
                 return await self.get_scene_cloud_cover(
@@ -360,7 +361,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         path_prefixes = response.get("CommonPrefixes", [])
 
         # Filter to only paths we need
-        path_tasks = []
+        path_tasks: list[Any] = []
         for prefix_info in path_prefixes:
             path_prefix = prefix_info["Prefix"]
             path_num = int(path_prefix.split("/")[-2])
@@ -411,7 +412,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
         return s3_url, local_path
 
-    async def download_file(self, url: str, output_path: Path, **kwargs) -> DownloadResult:
+    async def download_file(self, url: str, output_path: Path, **kwargs: Any) -> DownloadResult:
         """Override to use S3 download instead of HTTP"""
         result = DownloadResult(url=url, local_path=output_path, status=DownloadStatus.PENDING)
 
@@ -449,7 +450,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                     temp_path = output_path.with_suffix(".tmp")
 
                     try:
-                        await s3.download_file(
+                        await s3.download_file(  # type: ignore[attr-defined]
                             bucket,
                             key,
                             str(temp_path),
@@ -557,14 +558,14 @@ async def download_landsat(
     logger.info(f"Cloud cover max: {cloud_cover_max}%")
 
     # Group dates by year for efficient searching
-    dates_by_year = {}
+    dates_by_year: dict[int, list[datetime]] = {}
     for date in dates:
         if date.year not in dates_by_year:
             dates_by_year[date.year] = []
         dates_by_year[date.year].append(date)
 
     async with AsyncLandsatDownloader() as downloader:
-        all_downloads = []
+        all_downloads: list[dict[str, Any]] = []
         tiles_found = set()  # Track which tiles we found scenes for
         tiles_needed = set()  # Track all tiles we need
 
@@ -599,7 +600,7 @@ async def download_landsat(
             # Match scenes to requested dates
             for target_date in year_dates:
                 # Group scenes by tile for this date
-                scenes_by_tile = {}
+                scenes_by_tile: dict[str, dict[str, Any]] = {}
                 for scene in scenes:
                     tile_id = f"{scene['path']:03d}{scene['row']:03d}"
                     tiles_needed.add(tile_id)
@@ -647,7 +648,7 @@ async def download_landsat(
             downloader.progress_callback = progress.update  # type: ignore
 
         # Download all scenes/bands concurrently
-        download_tasks = []
+        download_tasks: list[tuple[datetime, str, Any]] = []
         for download in all_downloads:
             task = downloader.download_scene_bands(
                 scene=download["scene"],
@@ -657,8 +658,8 @@ async def download_landsat(
             download_tasks.append((download["date"], download["tile_id"], task))
 
         # Execute all downloads in batches for better concurrency
-        results = {}
-        tiles_downloaded_by_date = {}
+        results: dict[datetime, dict[str, list[Path]]] = {}
+        tiles_downloaded_by_date: dict[datetime, set[str]] = {}
         
         # Process downloads in batches of 50 scenes
         batch_size = 50
@@ -704,53 +705,4 @@ async def download_landsat(
             progress.finish()
 
     return results
-
-# Legacy sync function needed by pipeline
-def filter_landsat_scenes(
-    year: int,
-    month: int,
-    day: int,
-    path: int,
-    row: int,
-    collection: str = "collection02",
-) -> str | None:
-    """Find Landsat scene directory for given date and path/row.
-
-    This is a sync wrapper for compatibility.
-    """
-    import boto3
-
-    yr = str(year)
-    mo = str(month).zfill(2)
-    da = str(day).zfill(2)
-    path_str = str(path).zfill(3)
-    row_str = str(row).zfill(3)
-
-    prefix = f"{collection}/level-2/standard/oli-tirs/{yr}/{path_str}/{row_str}/"
-
-    # Simple sync implementation
-    s3 = boto3.client("s3", config=boto3.session.Config(signature_version=boto3.session.UNSIGNED))
-
-    result = s3.list_objects_v2(
-        Bucket="usgs-landsat",
-        Prefix=prefix,
-        Delimiter="/",
-    )
-
-    if "CommonPrefixes" not in result:
-        return None
-
-    directories = [x["Prefix"] for x in result["CommonPrefixes"]]
-
-    # Filter directories by date
-    yyyymmdd = f"{yr}{mo}{da}"
-
-    for directory in directories:
-        parts = directory.split("/")
-        if len(parts) > 0:
-            base_name = parts[-2] if parts[-1] == "" else parts[-1]
-            if yyyymmdd in base_name:
-                return directory
-
-    return None
 
