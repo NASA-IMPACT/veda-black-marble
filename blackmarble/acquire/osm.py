@@ -37,25 +37,34 @@ def download_osm_roads(
     road_filter: str | None = None,
 ) -> nx.MultiDiGraph:
     """Download OSM road network for a bounding box."""
+    from tqdm import tqdm
+
     print(f"Downloading roads for bbox: N={north}, S={south}, E={east}, W={west}")
     if road_filter:
         print(f"Using filter: {road_filter}")
 
-    try:
-        # osmnx expects bbox as (west, south, east, north)
-        G = ox.graph_from_bbox(
-            bbox=(west, south, east, north),
-            retain_all=True,
-            truncate_by_edge=True,
-            simplify=True,
-            network_type="all",
-            custom_filter=road_filter if road_filter else None,
-        )
-        print(f"Downloaded {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
-        return G
-    except Exception as e:
-        print(f"Error downloading roads: {type(e).__name__}: {e}")
-        raise
+    # Create progress bar for OSM download
+    with tqdm(total=None, desc="🗺️ Fetching OSM road network", unit="nodes", leave=False) as pbar:
+        try:
+            # osmnx expects bbox as (west, south, east, north)
+            G = ox.graph_from_bbox(
+                bbox=(west, south, east, north),
+                retain_all=True,
+                truncate_by_edge=True,
+                simplify=True,
+                network_type="all",
+                custom_filter=road_filter if road_filter else None,
+            )
+
+            # Update progress with node count
+            pbar.update(1)
+            pbar.set_postfix({"nodes": G.number_of_nodes(), "edges": G.number_of_edges()})
+
+            print(f"Downloaded {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+            return G
+        except Exception as e:
+            print(f"Error downloading roads: {type(e).__name__}: {e}")
+            raise
 
 
 def graph_to_shapes(G: nx.MultiDiGraph, buffer_distance: float = 0.00005) -> list[dict[str, Any]]:

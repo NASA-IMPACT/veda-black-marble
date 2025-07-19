@@ -299,15 +299,31 @@ class AsyncDownloaderBase(ABC):
 
 
 class DownloadProgressTracker:
-    """Track progress across multiple downloads"""
+    """Track progress across multiple downloads with tqdm progress bar"""
 
-    def __init__(self, total_files: int, description: str = "Downloading"):
+    def __init__(self, total_files: int, description: str = "Downloading", parent_task=None):
+        """
+        Args:
+            total_files: Total number of files to download
+            description: Description for the progress bar
+            parent_task: Optional parent task for nested progress (future use)
+        """
+        from tqdm import tqdm
+
         self.total = total_files
         self.completed = 0
         self.failed = 0
         self.in_progress = 0
         self.description = description
-        self._lock = None  # No longer needed for sync method
+        self.parent_task = parent_task
+
+        # Create tqdm progress bar
+        self.pbar = tqdm(
+            total=total_files,
+            desc=description,
+            unit="files",
+            leave=False
+        )
 
     def update(self, result: DownloadResult):
         """Update progress based on download result"""
@@ -316,21 +332,24 @@ class DownloadProgressTracker:
         elif result.status == DownloadStatus.COMPLETED:
             self.completed += 1
             self.in_progress = max(0, self.in_progress - 1)
+            self.pbar.update(1)
         elif result.status == DownloadStatus.FAILED:
             self.failed += 1
             self.in_progress = max(0, self.in_progress - 1)
+            self.pbar.update(1)  # Still advance progress even for failures
 
-        # Print progress (could be replaced with tqdm or rich)
-        print(
-            f"\r{self.description}: "
-            f"{self.completed}/{self.total} completed, "
-            f"{self.failed} failed, "
-            f"{self.in_progress} in progress",
-            end="",
-            flush=True,
-        )
+        # Update postfix with status
+        self.pbar.set_postfix({
+            "completed": self.completed,
+            "failed": self.failed,
+            "in_progress": self.in_progress
+        })
 
     def finish(self):
-        """Print final summary"""
-        print()  # New line after progress
-        print(f"{self.description} complete: " f"{self.completed} succeeded, {self.failed} failed")
+        """Print final summary and close progress bar"""
+        self.pbar.close()
+
+        # Print summary
+        status = "✅" if self.failed == 0 else "⚠️"
+        print(f"{status} {self.description} complete: "
+              f"{self.completed} succeeded, {self.failed} failed")
