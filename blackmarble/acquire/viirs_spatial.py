@@ -2,11 +2,11 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import numpy as np
-import rasterio
-from rasterio.warp import transform_bounds
+import rasterio  # type: ignore[import-untyped]
+from rasterio.warp import transform_bounds  # type: ignore[import-untyped]
 from shapely.geometry import box
 
 logger = logging.getLogger(__name__)
@@ -21,14 +21,14 @@ def get_tile_footprint_wgs84(tile_path: Path) -> tuple[float, float, float, floa
     Returns:
         Bounds in WGS84 (min_lon, min_lat, max_lon, max_lat)
     """
-    with rasterio.open(tile_path) as src:
-        bounds = src.bounds
+    with rasterio.open(tile_path) as src:  # type: ignore[attr-defined]
+        bounds = src.bounds  # type: ignore[attr-defined]
         
         # Transform to WGS84 if needed
-        if src.crs and str(src.crs) != "EPSG:4326":
-            bounds = transform_bounds(src.crs, "EPSG:4326", *bounds)
+        if src.crs and str(src.crs) != "EPSG:4326":  # type: ignore[attr-defined]
+            bounds = transform_bounds(src.crs, "EPSG:4326", *bounds)  # type: ignore[attr-defined]
         
-        return bounds
+        return bounds  # type: ignore[no-any-return]
 
 
 def find_viirs_tiles_by_intersection(
@@ -51,15 +51,29 @@ def find_viirs_tiles_by_intersection(
     
     logger.info(f"Selecting VIIRS tiles by spatial intersection for bbox: {bbox}")
     
-    # Find all VIIRS tiles
-    pattern = f"**/*{date_filter}*.tif" if date_filter else "**/*.tif"
-    viirs_files = list(viirs_base_dir.glob(pattern))
+    # Find all VIIRS tiles - prefer WGS84 versions
+    if date_filter:
+        pattern = f"**/*{date_filter}*_wgs84.tif"
+        viirs_files = list(viirs_base_dir.glob(pattern))
+        if not viirs_files:
+            # Fall back to original files
+            pattern = f"**/*{date_filter}*.tif"
+            viirs_files = list(viirs_base_dir.glob(pattern))
+            # Exclude backup files
+            viirs_files = [f for f in viirs_files if not f.name.endswith('.bak')]
+    else:
+        pattern = "**/*_wgs84.tif"
+        viirs_files = list(viirs_base_dir.glob(pattern))
+        if not viirs_files:
+            pattern = "**/*.tif"
+            viirs_files = list(viirs_base_dir.glob(pattern))
+            viirs_files = [f for f in viirs_files if not f.name.endswith('.bak')]
     
     if not viirs_files:
         logger.warning(f"No VIIRS files found in {viirs_base_dir} with pattern {pattern}")
         return []
     
-    selected_tiles = []
+    selected_tiles: list[Path] = []
     
     for tile_path in viirs_files:
         try:
@@ -81,7 +95,7 @@ def find_viirs_tiles_by_intersection(
     return selected_tiles
 
 
-def create_viirs_mosaic(tile_paths: list[Path], target_crs: str = "EPSG:4326") -> tuple[np.ndarray, dict]:
+def create_viirs_mosaic(tile_paths: list[Path], target_crs: str = "EPSG:4326") -> tuple[np.ndarray[Any, Any], dict[str, Any]]:
     """Create a mosaic from multiple VIIRS tiles.
     
     Args:
@@ -96,39 +110,39 @@ def create_viirs_mosaic(tile_paths: list[Path], target_crs: str = "EPSG:4326") -
     
     if len(tile_paths) == 1:
         # Single tile, just read it
-        with rasterio.open(tile_paths[0]) as src:
-            data = src.read(1)
-            profile = src.profile.copy()
-            return data, profile
+        with rasterio.open(tile_paths[0]) as src:  # type: ignore[attr-defined]
+            data: np.ndarray[Any, Any] = src.read(1)  # type: ignore[attr-defined]
+            profile: dict[str, Any] = src.profile.copy()  # type: ignore[attr-defined]
+            return data, profile  # type: ignore[return-value]
     
     # Multiple tiles - create mosaic using rasterio merge
-    from rasterio.merge import merge
+    from rasterio.merge import merge  # type: ignore[import-untyped]
     
     logger.info(f"Creating mosaic from {len(tile_paths)} tiles")
     
     # Open all tiles
-    src_files = [rasterio.open(p) for p in tile_paths]
+    src_files = [rasterio.open(p) for p in tile_paths]  # type: ignore[misc]
     
     try:
         # Merge tiles
-        mosaic, out_transform = merge(src_files, method='max')
+        mosaic, out_transform = merge(src_files, method='max')  # type: ignore[misc]
         
         # Create profile from first file and update
-        profile = src_files[0].profile.copy()
-        profile.update({
+        profile = src_files[0].profile.copy()  # type: ignore[misc]
+        profile.update({  # type: ignore[misc]
             'transform': out_transform,
-            'height': mosaic.shape[1],
-            'width': mosaic.shape[2],
+            'height': mosaic.shape[1],  # type: ignore[misc]
+            'width': mosaic.shape[2],  # type: ignore[misc]
             'crs': target_crs
         })
         
         # Return 2D array
-        return mosaic[0], profile
+        return mosaic[0], profile  # type: ignore[return-value, misc]
         
     finally:
         # Close all files
-        for src in src_files:
-            src.close()
+        for src in src_files:  # type: ignore[assignment]
+            src.close()  # type: ignore[misc]
 
 
 def lonlat_to_modis_sinusoidal_tile(lon: float, lat: float) -> tuple[int, int]:
