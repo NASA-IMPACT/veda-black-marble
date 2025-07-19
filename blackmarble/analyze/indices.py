@@ -13,7 +13,7 @@ import numpy.typing as npt
 ArrayLike = npt.NDArray[Any]
 
 
-def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = 0.0001) -> ArrayLike:
+def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = 0.001) -> ArrayLike:
     """Calculate Normalized Difference Vegetation Index (NDVI).
 
     The NDVI is a fundamental vegetation index that measures the health and density
@@ -63,17 +63,34 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = 0.0001) -> A
 
     # Calculate denominator with epsilon to prevent division by zero
     # The epsilon prevents NaN/inf when both bands are zero (e.g., no-data regions)
-    denominator = nir + red + epsilon
+    denominator = nir + red
+    
+    # Protect against near-zero denominators that can occur when NIR ≈ -Red
+    # This happens with Landsat's -0.2 offset: e.g., NIR=0.5, Red=-0.5
+    # Use a larger epsilon (1e-3) and take the maximum to preserve sign
+    safe_denominator = np.where(
+        np.abs(denominator) < epsilon,
+        np.sign(denominator) * epsilon,
+        denominator
+    )
 
     # Calculate NDVI using the standard formula: (NIR - Red) / (NIR + Red)
-    # No explicit clamping - let mathematical bounds apply naturally
-    # Result is mathematically bounded to [-1, 1] when inputs are non-negative
-    ndvi = (nir - red) / denominator
+    # With safe denominator, values are capped at roughly ±1000 for epsilon=1e-3
+    ndvi = (nir - red) / safe_denominator
+    
+    # Sanity check - NDVI should never exceed reasonable bounds
+    # If it does, we have a calculation error
+    max_abs_ndvi = np.nanmax(np.abs(ndvi))
+    if max_abs_ndvi > 5.0:
+        raise ValueError(
+            f"NDVI calculation error: maximum absolute value {max_abs_ndvi:.1f} exceeds reasonable bounds. "
+            f"Check input scaling and offset values."
+        )
 
     return ndvi
 
 
-def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = 0.0001) -> ArrayLike:
+def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = 0.001) -> ArrayLike:
     """Calculate Normalized Difference Water Index (NDWI).
 
     The NDWI is designed to detect water features and measure water content
@@ -124,13 +141,26 @@ def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = 0.0001) ->
     if green.shape != nir.shape:
         raise ValueError(f"Green and NIR arrays must have same shape: {green.shape} vs {nir.shape}")
 
-    # Calculate denominator with epsilon to prevent division by zero
-    # Water absorbs NIR strongly, so denominator can approach zero over water
-    denominator = green + nir + epsilon
+    # Calculate denominator
+    denominator = green + nir
+    
+    # Protect against near-zero denominators (same issue as NDVI with offset data)
+    safe_denominator = np.where(
+        np.abs(denominator) < epsilon,
+        np.sign(denominator) * epsilon,
+        denominator
+    )
 
     # Calculate NDWI using the standard formula: (Green - NIR) / (Green + NIR)
     # Water reflects green but absorbs NIR, resulting in positive values
-    ndwi = (green - nir) / denominator
+    ndwi = (green - nir) / safe_denominator
+    
+    # Sanity check
+    max_abs_ndwi = np.nanmax(np.abs(ndwi))
+    if max_abs_ndwi > 5.0:
+        raise ValueError(
+            f"NDWI calculation error: maximum absolute value {max_abs_ndwi:.1f} exceeds reasonable bounds."
+        )
 
     return ndwi
 

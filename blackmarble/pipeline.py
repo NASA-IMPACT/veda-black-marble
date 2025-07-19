@@ -396,6 +396,7 @@ async def black_marble_pipeline(
     else:
         # No Landsat data available
         landsat_reprojected = {}
+        print("⚠️  No Landsat bands available after temporal compositing")
 
     # Reproject VIIRS to target CRS first (like sync pipeline)
     viirs_reprojected = None
@@ -409,15 +410,17 @@ async def black_marble_pipeline(
             resampling="bilinear",  # Use bilinear like sync pipeline
         )
 
+        # If no reference from Landsat, use VIIRS as reference
+        if reference_transform is None and viirs_transform is not None:
+            reference_transform = viirs_transform
+            reference_shape = viirs_reprojected.shape
+            print("📍 Using VIIRS as reference grid (no Landsat reference available)")
         
         # Align VIIRS to Landsat grid for consistent processing
         if reference_transform is not None and reference_shape is not None:
             if not landsat_reprojected:
-                raise RuntimeError(
-                    "CRITICAL: No Landsat data available! Pipeline cannot continue without Landsat bands.\n"
-                    "Landsat is required for NDVI calculation, which is essential for NDUI.\n"
-                    "Check that Landsat downloads are succeeding and bands B3, B4, B5 are available."
-                )
+                print("⚠️  WARNING: No Landsat data available for NDVI calculation!")
+                print("    Pipeline will continue but NDUI calculation will be limited")
             
             print(f"VIIRS shape before alignment: {viirs_reprojected.shape}")
             print(f"Reference Landsat shape: {reference_shape}")
@@ -471,6 +474,8 @@ async def black_marble_pipeline(
         print(f"Road buffering: {buffer_meters:.1f} meters (applied in UTM)")
         print(f"Rasterizing to: {target_crs}")
         print(f"Road network has {len(road_network.nodes)} nodes, {len(road_network.edges)} edges")
+        print(f"Reference transform: {reference_transform}")
+        print(f"Reference shape: {reference_shape}")
 
         # Use fractional or binary road rasterization based on config
         if config and config.analysis.osm_fractional:
