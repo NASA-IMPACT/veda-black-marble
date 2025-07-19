@@ -414,7 +414,10 @@ async def black_marble_pipeline(
         if reference_transform is None and viirs_transform is not None:
             reference_transform = viirs_transform
             reference_shape = viirs_reprojected.shape
-            print("📍 Using VIIRS as reference grid (no Landsat reference available)")
+            # Keep the target_crs as UTM - VIIRS has already been reprojected to it
+            print(f"📍 Using VIIRS as reference grid (no Landsat reference available)")
+            print(f"   Reference CRS: {target_crs} (UTM)")
+            print(f"   Reference shape: {reference_shape}")
         
         # Align VIIRS to Landsat grid for consistent processing
         if reference_transform is not None and reference_shape is not None:

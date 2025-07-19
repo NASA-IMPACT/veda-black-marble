@@ -86,6 +86,22 @@ def buffer_and_rasterize_roads_fractional(
     # Also check the transform bounds
     raster_bounds = rasterio.transform.array_bounds(shape[0], shape[1], transform)
     print(f"  Raster bounds from transform: {raster_bounds}")
+    
+    # Sanity check: ensure bounds overlap
+    edges_minx, edges_miny, edges_maxx, edges_maxy = edges_buffered.total_bounds
+    raster_minx, raster_miny, raster_maxx, raster_maxy = raster_bounds
+    
+    # Check for overlap
+    x_overlap = not (edges_maxx < raster_minx or edges_minx > raster_maxx)
+    y_overlap = not (edges_maxy < raster_miny or edges_miny > raster_maxy)
+    
+    if not (x_overlap and y_overlap):
+        print(f"  ⚠️  WARNING: No overlap between roads and raster!")
+        print(f"     Roads X: [{edges_minx:.1f}, {edges_maxx:.1f}]")
+        print(f"     Raster X: [{raster_minx:.1f}, {raster_maxx:.1f}]")
+        print(f"     Roads Y: [{edges_miny:.1f}, {edges_maxy:.1f}]")
+        print(f"     Raster Y: [{raster_miny:.1f}, {raster_maxy:.1f}]")
+        # This will result in zero roads being rasterized
 
     # Convert to shapes
     shapes = [mapping(geom) for geom in edges_buffered.geometry]
