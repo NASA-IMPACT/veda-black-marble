@@ -1,37 +1,39 @@
 """WRS-2 utilities for Landsat tile calculations using real USGS data."""
 
 import json
+from typing import Any
 
 # Type alias
 BBox = tuple[float, float, float, float]
 
 # Load WRS-2 lookup table at import time
+_wrs_table: list[dict[str, int]]
 try:
     import importlib.resources
     with importlib.resources.open_text("blackmarble.static", "wrs2_lookup.json") as f:
-        _WRS_TABLE: list[dict[str, int]] = json.load(f)
+        _wrs_table = json.load(f)
 except (FileNotFoundError, ImportError):
     # Fallback for development/testing
     try:
         from pathlib import Path
         lookup_path = Path(__file__).parent.parent / "static" / "wrs2_lookup.json"
         if lookup_path.exists():
-            _WRS_TABLE = json.loads(lookup_path.read_text())
+            _wrs_table = json.loads(lookup_path.read_text())
         else:
             # Emergency fallback - create minimal set for common areas
-            _WRS_TABLE = [
+            _wrs_table = [
                 {"path": path, "row": row}
                 for path in range(100, 150)
                 for row in range(20, 80)
             ]
     except Exception:
         # Last resort - empty table
-        _WRS_TABLE = []
+        _wrs_table = []
 
 
 def get_wrs_tiles_for_bbox_tuple(
     bbox: BBox,
-    wrs_polygons=None,  # Ignored - kept for compatibility
+    wrs_polygons: Any = None,  # Ignored - kept for compatibility
 ) -> list[dict[str, int]]:
     """Get Landsat WRS-2 tiles that intersect with a bounding box.
 
@@ -68,7 +70,7 @@ def get_wrs_tiles_for_bbox_tuple(
             intersecting = wrs_gdf[wrs_gdf.intersects(bbox_poly)]
             
             # Extract path/row info
-            tiles = []
+            tiles: list[dict[str, int]] = []
             for _, row in intersecting.iterrows():
                 if 'PATH' in row and 'ROW' in row:
                     path = int(row['PATH'])
@@ -109,7 +111,7 @@ def get_wrs_tiles_for_bbox_tuple(
     row_end = int(60 + (60 - min_lat) / 1.5)
     
     # Generate tile list
-    tiles = []
+    tiles: list[dict[str, int]] = []
     for path in range(max(1, path_start), min(234, path_end + 1)):
         for row in range(max(1, row_start), min(249, row_end + 1)):
             tiles.append({'path': path, 'row': row})

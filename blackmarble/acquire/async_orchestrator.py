@@ -178,25 +178,25 @@ class AsyncDownloadOrchestrator:
             progress_callback(f"Starting downloads for {len(plan.landsat_dates)} dates...")
 
         # Create all download tasks
-        tasks = []
-        task_names = []
+        tasks: list[asyncio.Task[Any]] = []
+        task_names: list[str] = []
 
         # VIIRS download task
         if self.earthdata_token:
             logger.info("Creating VIIRS download task")
-            viirs_task = self._download_viirs(plan)
+            viirs_task = asyncio.create_task(self._download_viirs(plan))
             tasks.append(viirs_task)
             task_names.append("VIIRS")
         else:
             logger.warning("No Earthdata token provided, skipping VIIRS downloads")
 
         # Landsat download task
-        landsat_task = self._download_landsat(plan)
+        landsat_task = asyncio.create_task(self._download_landsat(plan))
         tasks.append(landsat_task)
         task_names.append("Landsat")
 
         # OSM download task
-        osm_task = self._download_osm(plan)
+        osm_task = asyncio.create_task(self._download_osm(plan))
         tasks.append(osm_task)
         task_names.append("OSM")
 
@@ -204,7 +204,7 @@ class AsyncDownloadOrchestrator:
         logger.info(f"Starting concurrent downloads: {', '.join(task_names)}")
 
         # Run all tasks
-        task_results = await asyncio.gather(*tasks, return_exceptions=True)
+        task_results: list[Any | BaseException] = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Process results
         for name, result in zip(task_names, task_results):
