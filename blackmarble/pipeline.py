@@ -245,11 +245,11 @@ async def black_marble_pipeline(
     )
 
     # Initialize band stacks
-    band_stacks = {"B2": [], "B3": [], "B4": [], "B5": []}
+    band_stacks = {"B3": [], "B4": [], "B5": []}
     reference_profile = None
 
     # Track all landsat files for metadata
-    all_landsat_files = {"B2": [], "B3": [], "B4": [], "B5": []}
+    all_landsat_files = {"B3": [], "B4": [], "B5": []}
 
     # Add memory monitoring if available
     monitor_memory = False
@@ -280,7 +280,7 @@ async def black_marble_pipeline(
         date_files = landsat_files_by_date[target_date]
 
         # Skip if we don't have all bands
-        if not all(band in date_files for band in ["B2", "B3", "B4", "B5", "QA_PIXEL"]):
+        if not all(band in date_files for band in ["B3", "B4", "B5", "QA_PIXEL"]):
             print("  Skipping - missing bands")
             continue
 
@@ -302,7 +302,7 @@ async def black_marble_pipeline(
         )
 
         # Add to stacks
-        for band_name in ["B2", "B3", "B4", "B5"]:
+        for band_name in ["B3", "B4", "B5"]:
             if band_name in processed_data:
                 masked_data, profile = processed_data[band_name]
                 band_stacks[band_name].append(masked_data)
@@ -394,8 +394,14 @@ async def black_marble_pipeline(
             resampling="bilinear",  # Use bilinear like sync pipeline
         )
 
+        # If no Landsat reference, use VIIRS as reference
+        if reference_transform is None and viirs_transform is not None:
+            reference_transform = viirs_transform
+            reference_shape = viirs_reprojected.shape
+            print("⚠️  No Landsat data available - using VIIRS as reference grid")
+        
         # Align VIIRS to Landsat grid for consistent processing
-        if reference_transform is not None and reference_shape is not None:
+        if reference_transform is not None and reference_shape is not None and landsat_reprojected:
             print(f"VIIRS shape before alignment: {viirs_reprojected.shape}")
             print(f"Reference Landsat shape: {reference_shape}")
             
@@ -437,6 +443,9 @@ async def black_marble_pipeline(
                     f"VIIRS alignment failed - only {nonzero_pct:.1f}% non-zero pixels. "
                     "Check tile selection and spatial footprints."
                 )
+        elif reference_transform is not None and reference_shape is not None and not landsat_reprojected:
+            print("⚠️  Skipping VIIRS-Landsat alignment - no Landsat bands available")
+            logger.warning("No Landsat bands processed - using VIIRS grid without alignment")
 
     # Rasterize roads to match grid
     roads_rasterized = None
@@ -531,8 +540,11 @@ async def black_marble_pipeline(
             roads_rasterized = np.zeros(reference_shape, dtype="uint8")
             roads_fractional = np.zeros(reference_shape, dtype="float32")
         else:
-            roads_rasterized = np.zeros((100, 100), dtype="uint8")
-            roads_fractional = np.zeros((100, 100), dtype="float32")
+            # This should never happen if we have any data
+            raise RuntimeError(
+                "No reference shape available for road rasterization. "
+                "This indicates no Landsat or VIIRS data was successfully processed."
+            )
 
     # ==================== ANALYZE PHASE ====================
     print("\n📈 Calculating indices...")
@@ -988,8 +1000,7 @@ async def black_marble_pipeline(
             "landsat": {
                 "files": all_landsat_files["B5"]
                 + all_landsat_files["B4"]
-                + all_landsat_files["B3"]
-                + all_landsat_files["B2"],
+                + all_landsat_files["B3"],
                 "date_range": f"{date.strftime('%Y-%m-%d')}",
                 "sensor": "Landsat 8/9",
                 "processing_level": "L2SP",

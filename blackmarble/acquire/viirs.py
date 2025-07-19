@@ -525,11 +525,24 @@ def convert_viirs_hdf_to_tiff(hdf_file: str, output_file: str, layer: int = 0) -
     translate_options = gdal.TranslateOptions(
         format="GTiff",
         outputSRS="EPSG:4326",
-        outputBounds=[west, south, east, north],
+        outputBounds=[west, north, east, south],  # Fixed: [ulx, uly, lrx, lry]
         creationOptions=["COMPRESS=DEFLATE", "PREDICTOR=2", "TILED=YES"],
     )
 
-    gdal.Translate(output_file, layer_dataset, options=translate_options)
+    result = gdal.Translate(output_file, layer_dataset, options=translate_options)
+    
+    # Guard rail: Verify the output has correct orientation
+    if result:
+        result_ds = gdal.Open(output_file, gdal.GA_ReadOnly)
+        if result_ds:
+            geotransform = result_ds.GetGeoTransform()
+            if geotransform[5] > 0:  # Y pixel size should be negative
+                os.remove(output_file)
+                raise RuntimeError(
+                    f"Generated south-up raster with positive Y pixel size ({geotransform[5]}). "
+                    f"Refusing to write defective raster."
+                )
+            result_ds = None
 
     return output_file
 
