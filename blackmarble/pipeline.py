@@ -24,6 +24,19 @@ BBox = tuple[float, float, float, float]
 logger = logging.getLogger(__name__)
 
 
+def quick_stats(data: ArrayLike, label: str) -> None:
+    """Log array statistics for debugging."""
+    if data is None:
+        logger.debug(f"{label}: None")
+        return
+        
+    logger.debug(f"{label}:")
+    logger.debug(f"  Shape: {data.shape}, Dtype: {data.dtype}")
+    logger.debug(f"  Min: {np.nanmin(data):.6f}, Max: {np.nanmax(data):.6f}")
+    logger.debug(f"  Non-zero: {(data != 0).sum()} ({(data != 0).sum() / data.size * 100:.1f}%)")
+    logger.debug(f"  NaN count: {np.isnan(data).sum()}")
+
+
 async def black_marble_pipeline(
     bbox: BBox,
     date: datetime,
@@ -385,9 +398,13 @@ async def black_marble_pipeline(
         if reference_transform is not None and reference_shape is not None:
             print(f"VIIRS shape before alignment: {viirs_reprojected.shape}")
             print(f"Reference Landsat shape: {reference_shape}")
+            
+            # Debug stats before alignment
+            quick_stats(viirs_reprojected, "VIIRS before alignment")
 
             # Use the first Landsat band as reference
             reference_band = landsat_reprojected[list(landsat_reprojected.keys())[0]]
+            quick_stats(reference_band, "Landsat reference band")
 
             # Align VIIRS to Landsat grid
             aligned_rasters = prepare.align_rasters(
@@ -400,12 +417,26 @@ async def black_marble_pipeline(
             # Extract the aligned VIIRS data
             viirs_reprojected = aligned_rasters[1][0]
             viirs_transform = aligned_rasters[1][1]
+            
+            # Debug stats after alignment
+            quick_stats(viirs_reprojected, "VIIRS after alignment")
 
             print(f"Aligned VIIRS shape: {viirs_reprojected.shape}")
+            nonzero_count = (viirs_reprojected > 0).sum()
+            nonzero_pct = nonzero_count / viirs_reprojected.size * 100
             print(
-                f"Aligned VIIRS non-zero pixels: {(viirs_reprojected > 0).sum()} "
-                f"({(viirs_reprojected > 0).sum() / viirs_reprojected.size * 100:.1f}%)"
+                f"Aligned VIIRS non-zero pixels: {nonzero_count} "
+                f"({nonzero_pct:.1f}%)"
             )
+            
+            # Critical assertion - stop if alignment produced all zeros
+            if nonzero_pct < 10.0:  # Less than 10% non-zero is suspicious
+                logger.error(f"CRITICAL: VIIRS alignment produced only {nonzero_pct:.1f}% non-zero pixels!")
+                logger.error("This likely indicates incorrect tile selection or alignment failure.")
+                raise RuntimeError(
+                    f"VIIRS alignment failed - only {nonzero_pct:.1f}% non-zero pixels. "
+                    "Check tile selection and spatial footprints."
+                )
 
     # Rasterize roads to match grid
     roads_rasterized = None
