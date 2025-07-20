@@ -64,6 +64,9 @@ dev = [
 [tool.pytest.ini_options]
 addopts = "-raqs"
 testpaths = ["tests"]
+markers = [
+    "edgecase: mark test as testing mathematical or algorithmic edge cases with synthetic data",
+]
 
 [tool.pyright]
 # Docker utility files may have dependencies not available during type checking
