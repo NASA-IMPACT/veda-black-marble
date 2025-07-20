@@ -11,6 +11,7 @@ from .landsat import download_landsat
 from .osm import buffer_and_rasterize_roads, clear_osm_cache, fetch_road_network
 from .osm_fractional import buffer_and_rasterize_roads_fractional
 from .viirs import download_viirs, download_viirs_h5
+from .landsat_search import search_best_scenes, SceneMeta
 
 __all__ = [
     # Landsat functions (used by pipeline)
@@ -27,4 +28,7 @@ __all__ = [
     "download_all_data_sync",
     "DownloadPlan",
     "DownloadResults",
+    # Time-window selection
+    "search_best_scenes",
+    "SceneMeta",
 ]

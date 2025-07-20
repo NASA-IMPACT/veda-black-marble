@@ -59,6 +59,8 @@ dev = [
   "types-requests",
   "radon>=6.0.1",
   "interrogate>=1.5.0",
+  "hypothesis>=6.136.1",
+  "pytest-asyncio>=1.1.0",
 ]
 
 [tool.pytest.ini_options]

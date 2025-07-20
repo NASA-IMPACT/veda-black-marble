@@ -6,7 +6,7 @@ Black Marble pipeline, with clear separation of concerns across phases.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import numpy.typing as npt
 
@@ -38,6 +38,33 @@ class AcquisitionConfig:
     # AWS settings
     aws_credentials: dict[str, str] | None = None
     ignore_missing_tiles: bool = False
+
+
+@dataclass
+class LandsatAcquisitionConfig:
+    """Configuration for time-window based Landsat acquisition."""
+    
+    # Time window settings
+    window_days: int = 15  # Search ±15 days from target date
+    
+    # Quality scoring weights (must sum to 1.0)
+    quality_weights: dict[str, float] = field(default_factory=lambda: {
+        "spatial_coverage": 0.5,   # Weight for spatial coverage
+        "cloud_free": 0.3,         # Weight for cloud-free percentage
+        "snow_free": 0.15,         # Weight for snow-free percentage
+        "off_nadir": 0.05,         # Weight for nadir viewing
+    })
+    
+    # Minimum quality thresholds
+    min_coverage_threshold: float = 0.7  # Minimum acceptable coverage
+    max_cloud_threshold: float = 80.0    # Maximum cloud cover percentage
+    
+    # Seasonal filter (optional)
+    seasonal_filter: Callable[[datetime], bool] | None = None
+    
+    # Scene selection preferences
+    prefer_newer_sensors: bool = True  # Prefer L8/L9 over L7
+    allow_incomplete_coverage: bool = False  # Allow partial tile coverage
 
 
 @dataclass
