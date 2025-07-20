@@ -38,6 +38,9 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
 - Load OSM road network
 - **[Road Rasterization](./road-rasterization.md)** ⚙️
   - Decisions: Fractional vs binary, buffer size, sub-pixel grid
+- **Binary Road Rasterization** (when osm_fractional=False) ⚙️
+  - Hierarchical road type codes (1-6)
+  - Test: `tests/pipeline/test_missing_coverage.py::TestBinaryRoadRasterization`
 
 ### 6. Index Calculations
 - **[Calculate NDVI/NDWI](./spectral-indices.md)** ⚙️
@@ -50,6 +53,9 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
   - Decisions: Multi-scale parameters, weighting
 - **[Enhance NTL](./urban-field-enhancement.md#ntl-enhancement)** ⚙️
   - Decisions: Enhancement mode (multiplicative/additive/hybrid)
+- **Alternative: Legacy Burn-in Enhancement** ⚙️
+  - Direct road enhancement with major/minor factors
+  - Test: `tests/pipeline/test_missing_coverage.py::TestLegacyBurnInEnhancement`
 
 ### 8. Visualization
 - **[Contrast Enhancement](./contrast-enhancement.md)** ⚙️
@@ -63,10 +69,11 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
 - Generate metadata
 - Optional: Export auxiliary products (urban mask, indices)
 
-### 10. Statistics Calculation (Post-processing)
+### 10. Statistics Calculation (Post-processing) ⚙️
 - Calculate urban area (km²)
 - Calculate mean radiance
 - Generate summary statistics
+- Test: `tests/pipeline/test_missing_coverage.py::TestStatisticsCalculation`
 
 ## Legend
 
@@ -102,9 +109,24 @@ uv run pytest tests/pipeline/test_pipeline_flow.py -v
 
 ## Reference Data
 
-Test data is available in `tests/data/reference/` including:
-- VIIRS nighttime lights (150×150 px)
-- Landsat 8 bands (150×150 px) 
+Test data is committed to the repository in `tests/data/reference/` including:
+- VIIRS nighttime lights (150×150 px, ~7.4m resolution)
+- Landsat 8 bands B3/B4/B5/QA_PIXEL (150×150 px, 30m resolution) 
 - OSM road network (12 segments)
+
+**Data Characteristics:**
+- Synthetic but realistic patterns (deterministic generation)
+- Small size suitable for version control (~500 KB total)
+- Includes test scenarios: clouds, water, vegetation, urban areas
+- SHA-256 checksums in `manifest.json` for integrity verification
+
+**Verification:**
+```bash
+# Verify data integrity (default mode)
+uv run python tools/fetch_reference_data.py
+
+# Force regeneration (uses fixed seeds)
+uv run python tools/fetch_reference_data.py --force
+```
 
 See [Reference Data README](../../tests/data/reference/README.md) for details.

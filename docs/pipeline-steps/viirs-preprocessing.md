@@ -4,7 +4,7 @@ This step prepares VIIRS nighttime lights data for integration with Landsat imag
 
 ## Overview
 
-VIIRS (Visible Infrared Imaging Radiometer Suite) provides nighttime lights data at ~500m resolution. We preprocess it to match Landsat's 30m resolution and coordinate system.
+VIIRS (Visible Infrared Imaging Radiometer Suite) provides nighttime lights data at ~500m resolution. We preprocess it to a 12m resolution grid (≈ 0.000111111°) for enhanced spatial detail in urban corridors.
 
 ## Processing Steps
 
@@ -56,12 +56,12 @@ viirs_reprojected, viirs_transform, viirs_bounds = reproject_image(
 
 **Function**: `blackmarble.prepare.spatial.align_rasters()`
 
-**Purpose**: Align VIIRS to Landsat's 30m grid for consistent analysis
+**Purpose**: Align VIIRS to a common 12m grid for consistent analysis
 
 **Key Decisions**:
-- **Target Resolution**: 30m (matching Landsat)
-  - Rationale: All rasters must share the same grid for calculations
-  - Process: VIIRS is resampled from ~500m to 30m during alignment
+- **Target Resolution**: 12m (≈ 0.000111111°)
+  - Rationale: Provides better spatial detail for urban areas while maintaining computational efficiency
+  - Process: VIIRS is resampled from ~500m to 12m during alignment
 - **Resampling Method**: Bilinear
   - Rationale: Smooth interpolation for continuous radiance values
   - Preserves nighttime light gradients
@@ -85,7 +85,7 @@ viirs_aligned = aligned_rasters[1][0]
 **Primary Test**: `tests/pipeline/test_pipeline_flow.py::test_03_viirs_processing`
 - Verifies cropping reduces data size correctly
 - Checks reprojection to UTM
-- Tests alignment with Landsat grid (30m resolution)
+- Tests alignment with common grid (12m resolution)
 
 **Additional Tests**: 
 - `tests/pipeline/test_viirs_processing.py`
@@ -96,7 +96,7 @@ viirs_aligned = aligned_rasters[1][0]
 
 ## Common Issues
 
-1. **Memory Usage**: Alignment to 30m can increase memory 60x (500m→30m)
+1. **Memory Usage**: Alignment to 12m can increase memory ~1700x (500m→12m)
    - Solution: Process in tiles for large areas
 
 2. **Nodata Handling**: VIIRS uses 0 for no data

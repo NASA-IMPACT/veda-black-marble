@@ -8,10 +8,13 @@ We've created a comprehensive documentation structure for the Black Marble pipel
 docs/pipeline-steps/
 ├── README.md                    # Overview and navigation
 ├── viirs-preprocessing.md       # VIIRS crop, resample, reproject
-├── landsat-qa-masking.md       # Cloud/shadow detection strategies  
+├── landsat-qa-masking.md       # Cloud/shadow detection strategies
+├── spatial-alignment.md        # Common grid alignment (TODO: flesh out)
+├── temporal-compositing.md     # Median composites (TODO: flesh out)
 ├── spectral-indices.md         # NDVI/NDWI with epsilon handling
 ├── ndui-calculation.md         # Urban index with water masking
-└── urban-field-enhancement.md  # Multi-scale road influence fields
+├── urban-field-enhancement.md  # Multi-scale road influence fields
+└── statistics-calculation.md   # Area and radiance metrics (TODO: flesh out)
 ```
 
 ## Key Features
@@ -40,7 +43,7 @@ crop_to_bounds() → viirs-preprocessing.md → test_pipeline_flow.py::test_03_v
 
 ### 4. Decision Documentation
 Critical decisions are explained with rationale:
-- VIIRS resampling to 12m (not 30m) for urban detail
+- VIIRS resampling to 12m (≈ 0.000111111°) for urban detail
 - QA masking strategies (conservative/moderate/permissive)
 - Epsilon handling with `np.copysign()` for indices
 - Multi-scale parameters for urban fields
