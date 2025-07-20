@@ -67,10 +67,11 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = 0.001) -> Ar
     
     # Protect against near-zero denominators that can occur when NIR ≈ -Red
     # This happens with Landsat's -0.2 offset: e.g., NIR=0.5, Red=-0.5
-    # Use a larger epsilon (1e-3) and take the maximum to preserve sign
+    # Replace near-zero denominators with epsilon, preserving sign
+    # Use copysign to ensure we don't get values smaller than epsilon in magnitude
     safe_denominator = np.where(
         np.abs(denominator) < epsilon,
-        np.sign(denominator) * epsilon,
+        np.copysign(epsilon, denominator),  # Always at least epsilon in magnitude
         denominator
     )
 
@@ -147,7 +148,7 @@ def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = 0.001) -> 
     # Protect against near-zero denominators (same issue as NDVI with offset data)
     safe_denominator = np.where(
         np.abs(denominator) < epsilon,
-        np.sign(denominator) * epsilon,
+        np.copysign(epsilon, denominator),  # Always at least epsilon in magnitude
         denominator
     )
 

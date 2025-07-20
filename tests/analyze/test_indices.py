@@ -22,7 +22,14 @@ def test_calculate_ndvi():
     result = calculate_ndvi(nir_band, red_band)
 
     # Verify NDVI formula (NIR - Red) / (NIR + Red)
-    expected = (nir_band - red_band) / (nir_band + red_band + 0.0001)
+    # The implementation only uses epsilon when denominator < epsilon
+    denominator = nir_band + red_band
+    safe_denominator = np.where(
+        np.abs(denominator) < 0.001,
+        np.copysign(0.001, denominator),
+        denominator
+    )
+    expected = (nir_band - red_band) / safe_denominator
     np.testing.assert_allclose(result, expected, rtol=1e-6)
 
     # Verify output shape
@@ -48,7 +55,14 @@ def test_calculate_ndwi():
     result = calculate_ndwi(green_band, nir_band)
 
     # Verify NDWI formula (Green - NIR) / (Green + NIR)
-    expected = (green_band - nir_band) / (green_band + nir_band + 0.0001)
+    # The implementation only uses epsilon when denominator < epsilon
+    denominator = green_band + nir_band
+    safe_denominator = np.where(
+        np.abs(denominator) < 0.001,
+        np.copysign(0.001, denominator),
+        denominator
+    )
+    expected = (green_band - nir_band) / safe_denominator
     np.testing.assert_allclose(result, expected, rtol=1e-6)
 
     # Water should have positive NDWI (green > NIR)

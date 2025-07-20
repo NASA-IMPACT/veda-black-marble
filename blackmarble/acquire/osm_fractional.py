@@ -75,12 +75,18 @@ def buffer_and_rasterize_roads_fractional(
     edges_utm["geometry"] = edges_utm.geometry.buffer(buffer_meters)
 
     # Convert to target CRS for rasterization
-    edges_buffered = edges_utm.to_crs(crs)
+    # Ensure CRS is properly formatted
+    if isinstance(crs, str):
+        target_crs = CRS.from_string(crs)
+    else:
+        target_crs = crs
+    edges_buffered = edges_utm.to_crs(target_crs)
     
     # DEBUG: Check CRS and bounds
     print(f"  Original edges CRS: {edges_gdf.crs}")
     print(f"  UTM CRS for buffering: {utm_crs}")
     print(f"  Target CRS: {crs}")
+    print(f"  Target CRS type: {type(crs)}")
     print(f"  Edges bounds after buffering: {edges_buffered.total_bounds}")
     
     # Also check the transform bounds
