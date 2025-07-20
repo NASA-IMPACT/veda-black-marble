@@ -191,5 +191,6 @@ cache/
 
 # transient data files
 data/
+!tests/data/reference/
 *.bak
 *_wgs84.tif
