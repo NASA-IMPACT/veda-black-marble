@@ -13,7 +13,7 @@ import numpy.typing as npt
 ArrayLike = npt.NDArray[Any]
 
 
-def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = 0.001) -> ArrayLike:
+def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = 0.02) -> ArrayLike:
     """Calculate Normalized Difference Vegetation Index (NDVI).
 
     The NDVI is a fundamental vegetation index that measures the health and density
@@ -21,7 +21,10 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = 0.001) -> Ar
     Healthy vegetation strongly reflects NIR light while absorbing red light,
     resulting in high NDVI values.
 
-    Formula: NDVI = (NIR - Red) / (NIR + Red + epsilon)
+    Formula: NDVI = (NIR - Red) / (NIR + Red)
+    
+    Note: Negative reflectance values are masked as NaN to handle Landsat offset artifacts.
+    A minimum denominator threshold is applied to prevent extreme values.
 
     NDVI values interpretation:
     - [-1, 0]: Water, clouds, snow, bare soil
@@ -35,9 +38,9 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = 0.001) -> Ar
             Expected range: [0, 1] for surface reflectance.
         red: Red band reflectance (Band 4 for Landsat 8/9).
             Expected range: [0, 1] for surface reflectance.
-        epsilon: Small value to prevent division by zero in areas where
-            NIR + Red approaches zero. Default 1e-4 provides stability
-            when reflectance values are near zero.
+        epsilon: Minimum denominator threshold to prevent extreme NDVI values.
+            Default is 0.02 (2% reflectance), which prevents artifacts from
+            snow/cloud edges and near-zero denominators.
 
     Returns:
         NDVI array with values mathematically bounded to [-1, 1].
@@ -61,23 +64,27 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = 0.001) -> Ar
     if nir.shape != red.shape:
         raise ValueError(f"NIR and Red arrays must have same shape: {nir.shape} vs {red.shape}")
 
+    # Mask negative reflectance values (Landsat offset artifact)
+    # These are non-physical and indicate no-data or processing artifacts
+    nir_masked = np.where(nir < 0, np.nan, nir)
+    red_masked = np.where(red < 0, np.nan, red)
+
     # Calculate denominator with epsilon to prevent division by zero
     # The epsilon prevents NaN/inf when both bands are zero (e.g., no-data regions)
-    denominator = nir + red
+    denominator = nir_masked + red_masked
     
     # Protect against near-zero denominators that can occur when NIR ≈ -Red
-    # This happens with Landsat's -0.2 offset: e.g., NIR=0.5, Red=-0.5
-    # Replace near-zero denominators with epsilon, preserving sign
-    # Use copysign to ensure we don't get values smaller than epsilon in magnitude
+    # Use a physically meaningful threshold (default 2% of typical reflectance)
+    # This prevents extreme NDVI values from snow/cloud edges
     safe_denominator = np.where(
         np.abs(denominator) < epsilon,
-        np.copysign(epsilon, denominator),  # Always at least epsilon in magnitude
+        np.copysign(epsilon, denominator),
         denominator
     )
 
     # Calculate NDVI using the standard formula: (NIR - Red) / (NIR + Red)
-    # With safe denominator, values are capped at roughly ±1000 for epsilon=1e-3
-    ndvi = (nir - red) / safe_denominator
+    # With the 2% threshold, NDVI is naturally bounded to reasonable values
+    ndvi = (nir_masked - red_masked) / safe_denominator
     
     # Sanity check - NDVI should never exceed reasonable bounds
     # If it does, we have a calculation error
