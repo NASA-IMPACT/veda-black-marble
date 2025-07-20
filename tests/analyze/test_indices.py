@@ -6,6 +6,7 @@ This module tests only the essential indices functionality needed for bm.py pari
 import numpy as np
 
 from blackmarble.analyze.indices import (
+    LANDSAT_EPSILON,
     calculate_ndui,
     calculate_ndvi,
     calculate_ndwi,
@@ -25,8 +26,8 @@ def test_calculate_ndvi():
     # The implementation only uses epsilon when denominator < epsilon
     denominator = nir_band + red_band
     safe_denominator = np.where(
-        np.abs(denominator) < 0.001,
-        np.copysign(0.001, denominator),
+        np.abs(denominator) < LANDSAT_EPSILON,
+        np.copysign(LANDSAT_EPSILON, denominator),
         denominator
     )
     expected = (nir_band - red_band) / safe_denominator
@@ -58,8 +59,8 @@ def test_calculate_ndwi():
     # The implementation only uses epsilon when denominator < epsilon
     denominator = green_band + nir_band
     safe_denominator = np.where(
-        np.abs(denominator) < 0.001,
-        np.copysign(0.001, denominator),
+        np.abs(denominator) < LANDSAT_EPSILON,
+        np.copysign(LANDSAT_EPSILON, denominator),
         denominator
     )
     expected = (green_band - nir_band) / safe_denominator

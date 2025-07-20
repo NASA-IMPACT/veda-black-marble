@@ -12,8 +12,11 @@ import numpy.typing as npt
 # Type aliases
 ArrayLike = npt.NDArray[Any]
 
+# Constants
+LANDSAT_EPSILON = 0.02  # 2% reflectance threshold for Landsat C2 SR data
 
-def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = 0.02) -> ArrayLike:
+
+def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSILON) -> ArrayLike:
     """Calculate Normalized Difference Vegetation Index (NDVI).
 
     The NDVI is a fundamental vegetation index that measures the health and density
@@ -98,7 +101,7 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = 0.02) -> Arr
     return ndvi
 
 
-def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = 0.02) -> ArrayLike:
+def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = LANDSAT_EPSILON) -> ArrayLike:
     """Calculate Normalized Difference Water Index (NDWI).
 
     The NDWI is designed to detect water features and measure water content
