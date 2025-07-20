@@ -17,6 +17,13 @@ from osgeo import gdal
 from . import acquire, analyze, enhance, export, prepare
 from .config import PipelineConfig
 
+# Create logger for spatial debugging
+log = logging.getLogger("bm.spatial")
+
+# Enable debug logging if environment variable is set
+if os.environ.get("BM_SPATIAL_DEBUG", "").lower() in ("1", "true", "yes"):
+    log.setLevel(logging.DEBUG)
+
 # Type aliases
 ArrayLike = npt.NDArray[Any]
 BBox = tuple[float, float, float, float]
@@ -126,6 +133,26 @@ async def black_marble_pipeline(
     viirs_files = download_results.viirs_data
     landsat_files_by_date = download_results.landsat_data
     road_network = download_results.osm_data
+    
+    # Log OSM road network info
+    if road_network is not None:
+        log.debug("OSM road network loaded:")
+        log.debug(f"  - Nodes: {len(road_network.nodes)}")
+        log.debug(f"  - Edges: {len(road_network.edges)}")
+        if hasattr(road_network, 'graph') and 'crs' in road_network.graph:
+            log.debug(f"  - CRS: {road_network.graph.get('crs', 'Unknown')}")
+        
+        # Try to get bounds from the graph
+        try:
+            import osmnx as ox
+            nodes_gdf, _ = ox.graph_to_gdfs(road_network)
+            if len(nodes_gdf) > 0:
+                bounds = nodes_gdf.total_bounds
+                log.debug(f"  - Bounds (from nodes): {bounds}")
+                centroid = nodes_gdf.unary_union.centroid
+                log.debug(f"  - Centroid: ({centroid.x:.6f}, {centroid.y:.6f})")
+        except Exception as e:
+            log.debug(f"  - Could not extract bounds: {e}")
 
     # Process VIIRS data (if available)
     viirs_corrected = None
@@ -162,10 +189,19 @@ async def black_marble_pipeline(
                     viirs_profile = src.profile
 
             # Crop VIIRS to bounding box
-            print(f"Cropping VIIRS data to bbox: {bbox}")
-            viirs_ntl, viirs_transform, _ = prepare.crop_to_bounds(
+            logger.debug(f"Cropping VIIRS data to bbox: {bbox}")
+            logger.debug(f"Original VIIRS shape: {viirs_ntl.shape}")
+            logger.debug(f"Original VIIRS CRS: {viirs_profile['crs']}")
+            orig_bounds = rasterio.transform.array_bounds(viirs_ntl.shape[0], viirs_ntl.shape[1], viirs_profile['transform'])
+            logger.debug(f"Original VIIRS bounds: {orig_bounds}")
+            
+            viirs_ntl, viirs_transform, viirs_bounds = prepare.crop_to_bounds(
                 data=viirs_ntl, src_transform=viirs_profile["transform"], bounds=bbox
             )
+            
+            logger.debug(f"Cropped VIIRS shape: {viirs_ntl.shape}")
+            logger.debug(f"Cropped VIIRS bounds: {viirs_bounds}")
+            logger.debug(f"Non-zero pixels after crop: {(viirs_ntl > 0).sum()} ({(viirs_ntl > 0).sum() / viirs_ntl.size * 100:.1f}%)")
 
             # Resample to finer resolution
             target_resolution = 0.00011111111  # ~12 meters
@@ -227,6 +263,12 @@ async def black_marble_pipeline(
         f"Using projection: {target_crs} "
         f"(UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'})"
     )
+    
+    log.debug(f"Target CRS determined from bbox center:")
+    log.debug(f"  - BBox: {bbox}")
+    log.debug(f"  - Center: ({center_lon:.6f}, {center_lat:.6f})")
+    log.debug(f"  - UTM Zone: {utm_zone}{'N' if hemisphere == 'north' else 'S'}")
+    log.debug(f"  - Target CRS: {target_crs}")
 
     # Process Landsat data
     print("\n🛰️ Processing Landsat data...")
@@ -352,9 +394,15 @@ async def black_marble_pipeline(
                 print(f"  Creating temporal composite for {band_name} from {len(stack)} dates")
 
                 # Create median composite from pre-masked data with scaling
+                logger.debug(f"Creating composite with scale_factor={scale_factor}, add_offset={add_offset}")
                 composite = analyze.create_landsat_median_composite(
                     stack, scale_factor=scale_factor, add_offset=add_offset
                 )
+                
+                logger.debug(f"Composite stats for {band_name}:")
+                logger.debug(f"  Min: {np.nanmin(composite):.3f}, Max: {np.nanmax(composite):.3f}")
+                logger.debug(f"  NaN pixels: {np.isnan(composite).sum()} ({np.isnan(composite).sum() / composite.size * 100:.1f}%)")
+                logger.debug(f"  Non-zero pixels: {(composite != 0).sum()} ({(composite != 0).sum() / composite.size * 100:.1f}%)")
 
                 landsat_bands[band_name] = (composite, reference_profile)
                 landsat_profiles[band_name] = reference_profile
@@ -402,13 +450,22 @@ async def black_marble_pipeline(
     viirs_reprojected = None
     viirs_transform = None
     if viirs_corrected is not None and viirs_profile is not None:
-        viirs_reprojected, viirs_transform, _ = prepare.reproject_image(
+        logger.debug(f"VIIRS Reprojection:")
+        logger.debug(f"  Original VIIRS shape: {viirs_corrected.shape}")
+        logger.debug(f"  Original VIIRS CRS: {viirs_profile['crs']}")
+        logger.debug(f"  Original VIIRS bounds: {rasterio.transform.array_bounds(viirs_corrected.shape[0], viirs_corrected.shape[1], viirs_profile['transform'])}")
+        logger.debug(f"  Target CRS: {target_crs}")
+        
+        viirs_reprojected, viirs_transform, viirs_bounds = prepare.reproject_image(
             data=viirs_corrected,
             src_transform=viirs_profile["transform"],
             src_crs=viirs_profile["crs"],
             dst_crs=target_crs,
             resampling="bilinear",  # Use bilinear like sync pipeline
         )
+        
+        logger.debug(f"  Reprojected VIIRS shape: {viirs_reprojected.shape}")
+        logger.debug(f"  Reprojected VIIRS bounds: {viirs_bounds}")
 
         # If no reference from Landsat, use VIIRS as reference
         if reference_transform is None and viirs_transform is not None:
@@ -436,6 +493,29 @@ async def black_marble_pipeline(
             quick_stats(reference_band, "Landsat reference band")
 
             # Align VIIRS to Landsat grid
+            logger.debug(f"Aligning VIIRS to Landsat")
+            logger.debug(f"  Reference transform: {reference_transform}")
+            logger.debug(f"  VIIRS transform: {viirs_transform}")
+            ref_bounds = rasterio.transform.array_bounds(reference_shape[0], reference_shape[1], reference_transform)
+            viirs_bounds = rasterio.transform.array_bounds(viirs_reprojected.shape[0], viirs_reprojected.shape[1], viirs_transform)
+            logger.debug(f"  Reference bounds: {ref_bounds}")
+            logger.debug(f"  VIIRS bounds: {viirs_bounds}")
+            
+            # Check coverage
+            x_coverage = min(viirs_bounds[2], ref_bounds[2]) - max(viirs_bounds[0], ref_bounds[0])
+            y_coverage = min(viirs_bounds[3], ref_bounds[3]) - max(viirs_bounds[1], ref_bounds[1])
+            x_total = ref_bounds[2] - ref_bounds[0]
+            y_total = ref_bounds[3] - ref_bounds[1]
+            
+            logger.debug(f"  Coverage Analysis:")
+            logger.debug(f"    X-axis coverage: {x_coverage/1000:.1f} km of {x_total/1000:.1f} km ({x_coverage/x_total*100:.1f}%)")
+            logger.debug(f"    Y-axis coverage: {y_coverage/1000:.1f} km of {y_total/1000:.1f} km ({y_coverage/y_total*100:.1f}%)")
+            
+            if x_coverage < x_total * 0.95:
+                logger.warning(f"VIIRS is missing {(x_total-x_coverage)/1000:.1f} km on the east side!")
+            if y_coverage < y_total * 0.95:
+                logger.warning(f"VIIRS has incomplete Y coverage!")
+            
             aligned_rasters = prepare.align_rasters(
                 rasters=[reference_band, viirs_reprojected],
                 transforms=[reference_transform, viirs_transform],
@@ -578,8 +658,11 @@ async def black_marble_pipeline(
     # Use the reprojected data (already in UTM)
     if "B5" in landsat_reprojected and "B4" in landsat_reprojected:
         # DEBUG: Check Landsat values before NDVI
-        print(f"\nDEBUG - Landsat B4 (red): min={np.nanmin(landsat_reprojected['B4']):.3f}, max={np.nanmax(landsat_reprojected['B4']):.3f}")
-        print(f"DEBUG - Landsat B5 (NIR): min={np.nanmin(landsat_reprojected['B5']):.3f}, max={np.nanmax(landsat_reprojected['B5']):.3f}")
+        logger.debug("Landsat Values Before NDVI:")
+        logger.debug(f"  B4 (red): min={np.nanmin(landsat_reprojected['B4']):.3f}, max={np.nanmax(landsat_reprojected['B4']):.3f}")
+        logger.debug(f"  B4 negative pixels: {(landsat_reprojected['B4'] < 0).sum()} ({(landsat_reprojected['B4'] < 0).sum() / landsat_reprojected['B4'].size * 100:.1f}%)")
+        logger.debug(f"  B5 (NIR): min={np.nanmin(landsat_reprojected['B5']):.3f}, max={np.nanmax(landsat_reprojected['B5']):.3f}")
+        logger.debug(f"  B5 negative pixels: {(landsat_reprojected['B5'] < 0).sum()} ({(landsat_reprojected['B5'] < 0).sum() / landsat_reprojected['B5'].size * 100:.1f}%)")
         
         ndvi = analyze.calculate_ndvi(nir=landsat_reprojected["B5"], red=landsat_reprojected["B4"])
 

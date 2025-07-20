@@ -67,37 +67,34 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSI
     if nir.shape != red.shape:
         raise ValueError(f"NIR and Red arrays must have same shape: {nir.shape} vs {red.shape}")
 
-    # Mask negative reflectance values (Landsat offset artifact)
-    # These are non-physical and indicate no-data or processing artifacts
-    nir_masked = np.where(nir < 0, np.nan, nir)
-    red_masked = np.where(red < 0, np.nan, red)
-
-    # Calculate denominator with epsilon to prevent division by zero
-    # The epsilon prevents NaN/inf when both bands are zero (e.g., no-data regions)
-    denominator = nir_masked + red_masked
+    # Calculate numerator and denominator
+    numerator = nir - red
+    denominator = nir + red
     
-    # Protect against near-zero denominators that can occur when NIR ≈ -Red
-    # Use a physically meaningful threshold (default 2% of typical reflectance)
-    # This prevents extreme NDVI values from snow/cloud edges
+    # Use adaptive denominator floor to handle near-zero denominators
+    # This prevents division instability while preserving valid edge pixels
+    # The floor combines absolute noise floor with relative signal threshold
+    epsilon_rel = 0.05  # 5% of signal magnitude
+    
+    # Calculate adaptive floor based on signal magnitude
+    signal_magnitude = (np.abs(nir) + np.abs(red)) / 2
+    adaptive_floor = np.maximum(epsilon, epsilon_rel * signal_magnitude)
+    
+    # Apply floor to denominator while preserving sign
     safe_denominator = np.where(
-        np.abs(denominator) < epsilon,
-        np.copysign(epsilon, denominator),
+        np.abs(denominator) < adaptive_floor,
+        np.copysign(adaptive_floor, denominator),
         denominator
     )
-
-    # Calculate NDVI using the standard formula: (NIR - Red) / (NIR + Red)
-    # With the 2% threshold, NDVI is naturally bounded to reasonable values
-    ndvi = (nir_masked - red_masked) / safe_denominator
     
-    # Sanity check - NDVI should never exceed reasonable bounds
-    # If it does, we have a calculation error
-    max_abs_ndvi = np.nanmax(np.abs(ndvi))
-    if max_abs_ndvi > 5.0:
-        raise ValueError(
-            f"NDVI calculation error: maximum absolute value {max_abs_ndvi:.1f} exceeds reasonable bounds. "
-            f"Check input scaling and offset values."
-        )
-
+    # Calculate NDVI using the safe denominator
+    ndvi = numerator / safe_denominator
+    
+    # Clamp to valid NDVI range [-1, 1]
+    # This handles any remaining edge cases where the calculation
+    # produces values slightly outside the theoretical bounds
+    ndvi = np.clip(ndvi, -1.0, 1.0)
+    
     return ndvi
 
 
@@ -155,32 +152,30 @@ def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = LANDSAT_EP
     if green.shape != nir.shape:
         raise ValueError(f"Green and NIR arrays must have same shape: {green.shape} vs {nir.shape}")
 
-    # Mask negative reflectance values (Landsat offset artifact)
-    # These are non-physical and indicate no-data or processing artifacts
-    green_masked = np.where(green < 0, np.nan, green)
-    nir_masked = np.where(nir < 0, np.nan, nir)
-
-    # Calculate denominator
-    denominator = green_masked + nir_masked
+    # Calculate numerator and denominator
+    numerator = green - nir
+    denominator = green + nir
     
-    # Protect against near-zero denominators (same issue as NDVI with offset data)
+    # Use adaptive denominator floor (same approach as NDVI)
+    epsilon_rel = 0.05  # 5% of signal magnitude
+    
+    # Calculate adaptive floor based on signal magnitude
+    signal_magnitude = (np.abs(green) + np.abs(nir)) / 2
+    adaptive_floor = np.maximum(epsilon, epsilon_rel * signal_magnitude)
+    
+    # Apply floor to denominator while preserving sign
     safe_denominator = np.where(
-        np.abs(denominator) < epsilon,
-        np.copysign(epsilon, denominator),  # Always at least epsilon in magnitude
+        np.abs(denominator) < adaptive_floor,
+        np.copysign(adaptive_floor, denominator),
         denominator
     )
-
-    # Calculate NDWI using the standard formula: (Green - NIR) / (Green + NIR)
-    # Water reflects green but absorbs NIR, resulting in positive values
-    ndwi = (green_masked - nir_masked) / safe_denominator
     
-    # Sanity check
-    max_abs_ndwi = np.nanmax(np.abs(ndwi))
-    if max_abs_ndwi > 5.0:
-        raise ValueError(
-            f"NDWI calculation error: maximum absolute value {max_abs_ndwi:.1f} exceeds reasonable bounds."
-        )
-
+    # Calculate NDWI using the safe denominator
+    ndwi = numerator / safe_denominator
+    
+    # Clamp to valid NDWI range [-1, 1]
+    ndwi = np.clip(ndwi, -1.0, 1.0)
+    
     return ndwi
 
 

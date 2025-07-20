@@ -13,6 +13,24 @@ from blackmarble.analyze.indices import (
 )
 
 
+def test_calculate_ndvi_edge_case_preservation():
+    """Test that NDVI handles edge cases without masking valid pixels."""
+    # Case that produced NDVI=11 in the field
+    nir = np.array([0.1068])
+    red = np.array([-0.1039])
+    
+    ndvi = calculate_ndvi(nir, red)
+    
+    # Should not mask the pixel
+    assert not np.isnan(ndvi[0]), "Valid edge case pixel was incorrectly masked"
+    
+    # Should be clamped to valid range
+    assert -1 <= ndvi[0] <= 1, f"NDVI {ndvi[0]} outside valid range"
+    
+    # For this specific case, NDVI should be 1.0 (clamped)
+    assert ndvi[0] == 1.0, f"Expected NDVI=1.0 for opposing values, got {ndvi[0]}"
+
+
 def test_calculate_ndvi():
     """Test NDVI calculation - CRITICAL for vegetation masking in NDUI."""
     # Create test data

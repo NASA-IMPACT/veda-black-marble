@@ -3,6 +3,7 @@
 This module provides the median composite function used in the pipeline.
 """
 
+import warnings
 from typing import Any
 
 import numpy as np
@@ -58,14 +59,14 @@ def create_landsat_median_composite(
     # This converts from raw digital numbers to surface reflectance
     scaled_stack = stacked * scale_factor + add_offset
     
-    # DEBUG: Check scaling
-    print(f"    Scale factor: {scale_factor}, Add offset: {add_offset}")
-    print(f"    Raw DN range: [{np.nanmin(stacked):.1f}, {np.nanmax(stacked):.1f}]")
-    print(f"    Scaled range: [{np.nanmin(scaled_stack):.3f}, {np.nanmax(scaled_stack):.3f}]")
 
     # Compute median along time axis, ignoring NaN
     # nanmedian handles NaN values gracefully
-    composite = np.nanmedian(scaled_stack, axis=0)
+    # Suppress warning about all-NaN slices - this is expected for pixels
+    # with persistent clouds or outside scene boundaries
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', r'All-NaN slice encountered')
+        composite = np.nanmedian(scaled_stack, axis=0)
 
     # Keep NaN values for pixels with no valid observations
     # This preserves the distinction between "no data" and "dark surface"

@@ -192,44 +192,15 @@ async def download_viirs_tiles_async(
 
     # These functions are now defined in this same module
 
-    # Get tiles that cover the bbox using spatial intersection
-    logger.debug("Using spatial intersection to find tiles...")
+    # Always calculate all tiles needed for complete coverage
+    logger.debug("Calculating tiles needed for bbox...")
     try:
-        # Import spatial selection
-        from .viirs_spatial import find_viirs_tiles_by_intersection
-        
-        # Check what tiles we have for this date
-        date_str = date.strftime("%Y%m%d")
-        viirs_base = Path(output_dir)
-        
-        # Find tiles by intersection
-        existing_tiles = find_viirs_tiles_by_intersection(bbox, viirs_base, date_str)
-        
-        if existing_tiles:
-            logger.info(f"Found {len(existing_tiles)} existing tiles by spatial intersection")
-            # Extract tile IDs from paths for compatibility
-            tiles = []
-            for tile_path in existing_tiles:
-                # Extract h##v## pattern
-                import re
-                match = re.search(r'h(\d{2})v(\d{2})', tile_path.name)
-                if match:
-                    h = int(match.group(1))
-                    v = int(match.group(2))
-                    tiles.append((v, h))
-            logger.debug(f"Extracted tile IDs: {tiles}")
-        else:
-            # Fall back to coordinate-based selection
-            logger.warning("No existing tiles found, using coordinate-based selection")
-            tiles = get_tiles_for_bbox(bbox)
-            logger.debug(f"get_tiles_for_bbox returned: {tiles}")
-        logger.debug(f"tiles type: {type(tiles)}, length: {len(tiles)}")
-        if tiles:
-            logger.debug(f"First tile: {tiles[0]}, type: {type(tiles[0])}")
+        tiles = get_tiles_for_bbox(bbox)
+        logger.info(f"Need {len(tiles)} tiles for complete coverage of bbox {bbox}")
+        logger.debug(f"Tiles needed: {tiles}")
     except Exception as e:
         logger.error(f"Error in get_tiles_for_bbox: {e}")
         import traceback
-
         logger.error(f"Traceback:\n{traceback.format_exc()}")
         raise
 
