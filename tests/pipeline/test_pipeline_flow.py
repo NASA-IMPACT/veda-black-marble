@@ -4,7 +4,6 @@ This test suite follows the same logical steps as blackmarble/pipeline.py,
 using reference data stored in the test directory.
 """
 
-import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -13,10 +12,8 @@ from datetime import datetime
 import numpy as np
 import pytest
 import rasterio
-from rasterio.transform import from_origin
 from rasterio.crs import CRS
 
-from blackmarble import acquire, analyze, enhance, export, prepare
 from blackmarble.config import PipelineConfig
 from blackmarble.prepare.spatial import crop_to_bounds, reproject_image, align_rasters
 from blackmarble.prepare.landsat_qa import create_landsat_cloud_mask
@@ -63,29 +60,19 @@ class TestPipelineFlow:
         if temp_dir.exists():
             shutil.rmtree(temp_dir, ignore_errors=True)
     
-    @pytest.fixture
-    def reference_data_paths(self):
-        """Get paths to reference test data."""
-        test_data_dir = Path(__file__).parent.parent / "data" / "reference"
-        
-        return {
-            "viirs": test_data_dir / "viirs" / "VNP46A2_h08v05_20231015.tif",
-            "landsat": {
-                "B3": test_data_dir / "landsat" / "LC08_L2SP_044034_20231015_B3.TIF",
-                "B4": test_data_dir / "landsat" / "LC08_L2SP_044034_20231015_B4.TIF", 
-                "B5": test_data_dir / "landsat" / "LC08_L2SP_044034_20231015_B5.TIF",
-                "QA_PIXEL": test_data_dir / "landsat" / "LC08_L2SP_044034_20231015_QA_PIXEL.TIF",
-            },
-            "osm": test_data_dir / "osm" / "test_roads.gpkg"
-        }
     
     @pytest.fixture
-    def pipeline_config(self, test_bbox, test_date, setup_and_cleanup):
+    def pipeline_config(self, test_bbox, test_date):
         """Create pipeline configuration for testing."""
+        # Use a temporary directory for outputs
+        output_dir = Path(tempfile.gettempdir()) / "blackmarble_test_output"
+        output_dir.mkdir(exist_ok=True)
+        
         config = PipelineConfig(
             bbox=test_bbox,
             date=test_date,
-            output_path=str(self.output_dir)
+            output_path=str(output_dir),
+            save_diagnostics=True
         )
         config.acquisition.composite_months = 1  # Simple for testing
         config.analysis.osm_fractional = True
@@ -123,20 +110,18 @@ class TestPipelineFlow:
         """Test loading reference data files."""
         print("\n📥 TEST: Loading reference data")
         
-        # Check if reference data exists (we'll create it if not)
+        # Verify all reference data exists (fixture ensures this)
         viirs_path = reference_data_paths["viirs"]
-        if not viirs_path.exists():
-            print(f"  Creating reference VIIRS data at {viirs_path}")
-            self._create_reference_viirs(viirs_path)
+        assert viirs_path.exists(), f"VIIRS reference data missing: {viirs_path}"
+        print(f"  ✓ VIIRS data: {viirs_path.name}")
         
         for band, path in reference_data_paths["landsat"].items():
-            if not path.exists():
-                print(f"  Creating reference Landsat {band} at {path}")
-                self._create_reference_landsat(path, band)
+            assert path.exists(), f"Landsat {band} reference data missing: {path}"
+            print(f"  ✓ Landsat {band}: {path.name}")
         
-        if not reference_data_paths["osm"].exists():
-            print(f"  Creating reference OSM data at {reference_data_paths['osm']}")
-            self._create_reference_osm(reference_data_paths["osm"])
+        osm_path = reference_data_paths["osm"]
+        assert osm_path.exists(), f"OSM reference data missing: {osm_path}"
+        print(f"  ✓ OSM data: {osm_path.name}")
     
     # ==================== VIIRS PROCESSING PHASE ====================
     
@@ -430,98 +415,3 @@ class TestPipelineFlow:
         print(f"    Min: {np.nanmin(data):.6f}, Max: {np.nanmax(data):.6f}")
         print(f"    Non-zero: {(data != 0).sum()} ({(data != 0).sum() / data.size * 100:.1f}%)")
         print(f"    NaN count: {np.isnan(data).sum()}")
-    
-    def _create_reference_viirs(self, path):
-        """Create synthetic VIIRS reference data."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Create realistic VIIRS data
-        shape = (500, 500)
-        data = np.random.exponential(2, shape).astype(np.float32)
-        data = np.clip(data, 0, 50)  # Realistic range
-        
-        # Add some bright spots (cities)
-        y, x = np.ogrid[:shape[0], :shape[1]]
-        mask = ((x - 250)**2 + (y - 250)**2) < 2500
-        data[mask] = data[mask] * 5
-        
-        # Save as GeoTIFF
-        transform = from_origin(-122.5, 37.8, 0.005, 0.005)  # ~500m pixels
-        profile = {
-            'driver': 'GTiff',
-            'height': shape[0],
-            'width': shape[1],
-            'count': 1,
-            'dtype': 'float32',
-            'crs': 'EPSG:4326',
-            'transform': transform,
-            'compress': 'deflate'
-        }
-        
-        with rasterio.open(path, 'w', **profile) as dst:
-            dst.write(data, 1)
-    
-    def _create_reference_landsat(self, path, band):
-        """Create synthetic Landsat reference data."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        
-        shape = (300, 300)
-        
-        if band == "QA_PIXEL":
-            # Create QA data with some clouds
-            data = np.full(shape, 21824, dtype=np.uint16)  # Clear land
-            # Add cloud patches
-            data[50:100, 50:100] = 22080  # Cloud
-            data[200:220, 150:200] = 21824 | (1 << 4)  # Shadow
-        else:
-            # Create spectral band data
-            if band == "B3":  # Green
-                base = 9000
-            elif band == "B4":  # Red
-                base = 8000
-            elif band == "B5":  # NIR
-                base = 12000
-            
-            data = np.full(shape, base, dtype=np.uint16)
-            # Add variation
-            data += np.random.randint(-500, 500, shape)
-            data = np.clip(data, 0, 65535)
-        
-        # Save as GeoTIFF (UTM projection)
-        transform = from_origin(500000, 4200000, 30, 30)  # 30m pixels
-        profile = {
-            'driver': 'GTiff',
-            'height': shape[0],
-            'width': shape[1],
-            'count': 1,
-            'dtype': 'uint16',
-            'crs': 'EPSG:32610',  # UTM Zone 10N
-            'transform': transform,
-            'compress': 'deflate'
-        }
-        
-        with rasterio.open(path, 'w', **profile) as dst:
-            dst.write(data, 1)
-    
-    def _create_reference_osm(self, path):
-        """Create synthetic OSM road data."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        
-        import geopandas as gpd
-        from shapely.geometry import LineString
-        
-        # Create simple road network
-        roads = [
-            LineString([(-122.45, 37.75), (-122.42, 37.77)]),  # Main road
-            LineString([(-122.44, 37.73), (-122.44, 37.78)]),  # Cross road
-            LineString([(-122.46, 37.76), (-122.41, 37.76)]),  # Another road
-        ]
-        
-        # Create GeoDataFrame
-        gdf = gpd.GeoDataFrame({
-            'highway': ['primary', 'secondary', 'residential'],
-            'geometry': roads
-        }, crs='EPSG:4326')
-        
-        # Save as GeoPackage
-        gdf.to_file(path, driver='GPKG')

@@ -120,6 +120,48 @@ def mock_cog_generator():
     return generator
 
 
+@pytest.fixture(scope="session")
+def reference_data_paths():
+    """Verify and return paths to reference data files.
+    
+    This fixture runs once per test session and ensures all reference
+    data is present and valid before tests run.
+    """
+    import subprocess
+    import sys
+    
+    # Get reference data directory
+    test_dir = Path(__file__).parent
+    reference_dir = test_dir / "data" / "reference"
+    
+    # Run verification
+    result = subprocess.run(
+        [sys.executable, str(test_dir.parent / "tools" / "fetch_reference_data.py")],
+        capture_output=True,
+        text=True
+    )
+    
+    if result.returncode != 0:
+        pytest.fail(
+            f"Reference data verification failed!\n"
+            f"stdout: {result.stdout}\n"
+            f"stderr: {result.stderr}\n"
+            f"Run 'python tools/fetch_reference_data.py --force' to regenerate"
+        )
+    
+    # Return paths
+    return {
+        "viirs": reference_dir / "viirs" / "VNP46A2_h08v05_20231015.tif",
+        "landsat": {
+            "B3": reference_dir / "landsat" / "LC08_L2SP_044034_20231015_B3.TIF",
+            "B4": reference_dir / "landsat" / "LC08_L2SP_044034_20231015_B4.TIF",
+            "B5": reference_dir / "landsat" / "LC08_L2SP_044034_20231015_B5.TIF",
+            "QA_PIXEL": reference_dir / "landsat" / "LC08_L2SP_044034_20231015_QA_PIXEL.TIF",
+        },
+        "osm": reference_dir / "osm" / "test_roads.gpkg"
+    }
+
+
 # Pytest configuration
 def pytest_configure(config):
     """Configure pytest with custom markers."""
