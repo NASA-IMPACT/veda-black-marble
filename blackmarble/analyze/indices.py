@@ -98,14 +98,17 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = 0.02) -> Arr
     return ndvi
 
 
-def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = 0.001) -> ArrayLike:
+def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = 0.02) -> ArrayLike:
     """Calculate Normalized Difference Water Index (NDWI).
 
     The NDWI is designed to detect water features and measure water content
     in vegetation. Water strongly absorbs near-infrared radiation while
     reflecting green light, resulting in positive NDWI values for water bodies.
 
-    Formula: NDWI = (Green - NIR) / (Green + NIR + epsilon)
+    Formula: NDWI = (Green - NIR) / (Green + NIR)
+    
+    Note: Negative reflectance values are masked as NaN to handle Landsat offset artifacts.
+    A minimum denominator threshold is applied to prevent extreme values.
 
     NDWI values interpretation:
     - [0.3, 1.0]: Open water, wet surfaces
@@ -122,9 +125,9 @@ def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = 0.001) -> 
             Expected range: [0, 1] for surface reflectance.
         nir: Near-infrared band reflectance (Band 5 for Landsat 8/9).
             Expected range: [0, 1] for surface reflectance.
-        epsilon: Small value to prevent division by zero in areas where
-            Green + NIR approaches zero. Default 1e-4 provides stability
-            when reflectance values are near zero.
+        epsilon: Minimum denominator threshold to prevent extreme NDWI values.
+            Default is 0.02 (2% reflectance), which prevents artifacts from
+            sunglint/cloud edges and near-zero denominators.
 
     Returns:
         NDWI array with values mathematically bounded to [-1, 1].
@@ -149,8 +152,13 @@ def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = 0.001) -> 
     if green.shape != nir.shape:
         raise ValueError(f"Green and NIR arrays must have same shape: {green.shape} vs {nir.shape}")
 
+    # Mask negative reflectance values (Landsat offset artifact)
+    # These are non-physical and indicate no-data or processing artifacts
+    green_masked = np.where(green < 0, np.nan, green)
+    nir_masked = np.where(nir < 0, np.nan, nir)
+
     # Calculate denominator
-    denominator = green + nir
+    denominator = green_masked + nir_masked
     
     # Protect against near-zero denominators (same issue as NDVI with offset data)
     safe_denominator = np.where(
@@ -161,7 +169,7 @@ def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = 0.001) -> 
 
     # Calculate NDWI using the standard formula: (Green - NIR) / (Green + NIR)
     # Water reflects green but absorbs NIR, resulting in positive values
-    ndwi = (green - nir) / safe_denominator
+    ndwi = (green_masked - nir_masked) / safe_denominator
     
     # Sanity check
     max_abs_ndwi = np.nanmax(np.abs(ndwi))
