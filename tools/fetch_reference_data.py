@@ -9,7 +9,11 @@ Note: For actual downloaded data, you would need to set up EARTHDATA
 credentials and use the pipeline's download functionality.
 """
 
+import argparse
+import hashlib
+import json
 import shutil
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -64,6 +68,9 @@ def create_osm_data() -> None:
 
 def create_synthetic_viirs(output_dir: Path) -> None:
     """Create realistic synthetic VIIRS data."""
+    # Set fixed random seed for reproducibility
+    np.random.seed(42)
+    
     # Smaller size for version control
     shape = (150, 150)
     
@@ -126,6 +133,9 @@ def create_synthetic_viirs(output_dir: Path) -> None:
 
 def create_synthetic_landsat(output_dir: Path) -> None:
     """Create realistic synthetic Landsat data."""
+    # Set fixed random seed for reproducibility
+    np.random.seed(43)
+    
     # Smaller size for version control
     shape = (150, 150)
     
@@ -301,8 +311,109 @@ def check_total_size() -> float:
     return total_size / (1024 * 1024)  # MB
 
 
+def compute_sha256(file_path: Path) -> str:
+    """Compute SHA-256 hash of a file."""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
+
+
+def generate_manifest() -> dict:
+    """Generate manifest with SHA-256 hashes for all reference files."""
+    manifest = {}
+    
+    for path in sorted(REFERENCE_DIR.rglob("*")):
+        if path.is_file() and path.name not in ["manifest.json", "README.md", ".DS_Store"]:
+            rel_path = path.relative_to(REFERENCE_DIR)
+            manifest[str(rel_path)] = {
+                "sha256": compute_sha256(path),
+                "size": path.stat().st_size
+            }
+    
+    return manifest
+
+
+def save_manifest(manifest: dict) -> None:
+    """Save manifest to JSON file."""
+    manifest_path = REFERENCE_DIR / "manifest.json"
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2, sort_keys=True)
+    print(f"\n📋 Saved manifest to {manifest_path}")
+
+
+def verify_integrity() -> bool:
+    """Verify reference data against manifest."""
+    manifest_path = REFERENCE_DIR / "manifest.json"
+    
+    if not manifest_path.exists():
+        print("❌ No manifest.json found!")
+        return False
+    
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+    
+    print("\n🔍 Verifying reference data integrity...")
+    all_valid = True
+    
+    for rel_path, info in manifest.items():
+        file_path = REFERENCE_DIR / rel_path
+        
+        if not file_path.exists():
+            print(f"❌ Missing: {rel_path}")
+            all_valid = False
+            continue
+        
+        actual_hash = compute_sha256(file_path)
+        expected_hash = info["sha256"]
+        
+        if actual_hash == expected_hash:
+            print(f"✅ Valid: {rel_path}")
+        else:
+            print(f"❌ Hash mismatch: {rel_path}")
+            print(f"   Expected: {expected_hash}")
+            print(f"   Actual:   {actual_hash}")
+            all_valid = False
+    
+    return all_valid
+
+
 def main():
-    """Main function to create all reference data."""
+    """Main function to create or verify reference data."""
+    parser = argparse.ArgumentParser(
+        description="Manage reference data for Black Marble pipeline tests"
+    )
+    parser.add_argument(
+        "--force", 
+        action="store_true",
+        help="Force regeneration of reference data (default: verify only)"
+    )
+    parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip verification after generation"
+    )
+    
+    args = parser.parse_args()
+    
+    # Default mode: verify integrity
+    if not args.force:
+        if not REFERENCE_DIR.exists():
+            print("❌ Reference data directory does not exist!")
+            print(f"   Expected: {REFERENCE_DIR}")
+            print("   Run with --force to generate reference data")
+            sys.exit(1)
+        
+        if verify_integrity():
+            print("\n✅ All reference data is valid!")
+            sys.exit(0)
+        else:
+            print("\n❌ Reference data integrity check failed!")
+            print("   Run with --force to regenerate")
+            sys.exit(1)
+    
+    # Force mode: regenerate data
     print("🚀 Creating reference data for Black Marble pipeline tests")
     print(f"   Test area: {TEST_BBOX}")
     print(f"   Test date: {TEST_DATE}")
@@ -312,14 +423,17 @@ def main():
     REFERENCE_DIR.mkdir(parents=True, exist_ok=True)
     
     # Create synthetic data
-    print("\n📝 Note: Creating realistic synthetic data for testing")
-    print("   For actual satellite data, use the pipeline's download functionality")
-    print("   with valid EARTHDATA credentials")
+    print("\n📝 Note: Creating deterministic synthetic data for testing")
+    print("   Using fixed random seeds for reproducibility")
     
     # Create data
     create_viirs_data()
     create_landsat_data()
     create_osm_data()
+    
+    # Generate and save manifest
+    manifest = generate_manifest()
+    save_manifest(manifest)
     
     # Check total size
     total_mb = check_total_size()
@@ -334,9 +448,18 @@ def main():
     # Show file listing
     print("\n📁 Created files:")
     for path in sorted(REFERENCE_DIR.rglob("*")):
-        if path.is_file():
+        if path.is_file() and path.name not in [".DS_Store"]:
             size_kb = path.stat().st_size / 1024
             print(f"   {path.relative_to(REFERENCE_DIR)}: {size_kb:.1f} KB")
+    
+    # Verify if requested
+    if not args.no_verify:
+        print("\n" + "="*50)
+        if verify_integrity():
+            print("\n✅ Verification passed!")
+        else:
+            print("\n❌ Verification failed!")
+            sys.exit(1)
     
     print("\n✨ Done! Reference data is ready for commit.")
     print("   Add these files to git:")
