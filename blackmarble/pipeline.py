@@ -330,6 +330,12 @@ async def black_marble_pipeline(
 
     # Original in-memory processing
     print(f"\n💾 Processing {len(landsat_files_by_date)} Landsat dates")
+    
+    # Debug configuration
+    if config:
+        print(f"  Index-first calculation: {getattr(config.analysis, 'calculate_indices_first', False)}")
+        print(f"  Use legacy indices: {getattr(config.analysis, 'use_legacy_indices', False)}")
+        print(f"  Mask low denominator: {getattr(config.analysis, 'mask_low_denom', False)}")
 
     # Debug: Print structure of landsat_files_by_date
     if not landsat_files_by_date:
@@ -407,6 +413,7 @@ async def black_marble_pipeline(
         # Check if we should calculate indices first (new approach)
         if config and config.analysis.calculate_indices_first and not config.analysis.use_legacy_indices:
             # Calculate indices for this date BEFORE temporal compositing
+            print(f"  Using index-first calculation for {target_date.strftime('%Y-%m-%d')}")
             if "B5" in processed_data and "B4" in processed_data and "B3" in processed_data:
                 # Get the masked data
                 b3_data, _ = processed_data["B3"]
@@ -512,6 +519,10 @@ async def black_marble_pipeline(
 
     # Create temporal composites
     print("\n⏳ Creating Landsat temporal composites...")
+    
+    # Debug what we have
+    print(f"  Index stacks: NDVI={len(index_stacks['ndvi'])}, NDWI={len(index_stacks['ndwi'])}")
+    print(f"  Band stacks: B3={len(band_stacks['B3'])}, B4={len(band_stacks['B4'])}, B5={len(band_stacks['B5'])}")
 
     if config and config.analysis.calculate_indices_first and not config.analysis.use_legacy_indices and any(index_stacks.values()):
         # NEW APPROACH: Create index composites (indices already calculated per-date)
@@ -689,9 +700,10 @@ async def black_marble_pipeline(
             # Debug stats before alignment
             quick_stats(viirs_reprojected, "VIIRS before alignment")
 
-            # Use the first Landsat band as reference
-            reference_band = landsat_reprojected[list(landsat_reprojected.keys())[0]]
-            quick_stats(reference_band, "Landsat reference band")
+            # Use the first Landsat band as reference (if available)
+            if landsat_reprojected:
+                reference_band = landsat_reprojected[list(landsat_reprojected.keys())[0]]
+                quick_stats(reference_band, "Landsat reference band")
 
             # Align VIIRS to Landsat grid
             logger.debug(f"Aligning VIIRS to Landsat")
