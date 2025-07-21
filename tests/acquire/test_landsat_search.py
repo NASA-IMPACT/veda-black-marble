@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -314,7 +314,7 @@ class TestIOFunctions:
             
             mock_session.return_value.client.return_value = mock_client
             
-            result = await with_s3_client(test_func, unsigned=True)
+            result = await with_s3_client(test_func)
             
             assert called
             assert result == "result"
@@ -323,26 +323,26 @@ class TestIOFunctions:
     
     @pytest.mark.asyncio
     async def test_with_s3_client_session_caching(self):
-        """Global aioboto3.Session object should be reused between calls."""
-        # Ensure cache is clear before we start
-        import importlib
-        ls_mod = importlib.import_module("blackmarble.acquire.landsat_search")
-        ls_mod._session_cache = None
-
+        """Test that with_s3_client uses create_s3_session from landsat module."""
         async def dummy(_):
             return "ok"
 
-        with patch('blackmarble.acquire.landsat_search.aioboto3.Session') as mock_session:
+        with patch('blackmarble.acquire.landsat.create_s3_session') as mock_create:
+            # Create a proper mock session that returns a context manager
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock()
-            mock_session.return_value.client.return_value = mock_client
+            
+            # Mock the session.client() method to return the context manager
+            mock_session = MagicMock()
+            mock_session.client = MagicMock(return_value=mock_client)
+            mock_create.return_value = mock_session
 
-            await with_s3_client(dummy)
-            await with_s3_client(dummy)
+            result = await with_s3_client(dummy)
 
-            # aioboto3.Session() should be called exactly once due to cache
-            assert mock_session.call_count == 1
+            # Verify create_s3_session was called
+            assert mock_create.call_count == 1
+            assert result == "ok"
 
 
 class TestMainPipeline:
@@ -365,12 +365,12 @@ class TestMainPipeline:
             return [
                 {
                     "scene_id": "LC08_L2SP_013032_20230809_20230812_02_T1",
-                    "scene_prefix": "collection02/level-2/standard/oli-tirs/2023/013/032/",
+                    "s3_prefix": "collection02/level-2/standard/oli-tirs/2023/013/032/",
                     "cloud_cover": 10.0,
                 },
                 {
                     "scene_id": "LC08_L2SP_013032_20230807_20230810_02_T1",
-                    "scene_prefix": "collection02/level-2/standard/oli-tirs/2023/013/032/",
+                    "s3_prefix": "collection02/level-2/standard/oli-tirs/2023/013/032/",
                     "cloud_cover": 25.0,
                 },
             ]

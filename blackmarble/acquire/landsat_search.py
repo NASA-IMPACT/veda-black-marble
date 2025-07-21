@@ -8,12 +8,9 @@ import asyncio
 import json
 import logging
 import math
-import os
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Protocol
-
-import aioboto3
 
 from blackmarble.config import LandsatAcquisitionConfig
 
@@ -370,10 +367,10 @@ def parse_scene_metadata(scene_dict: dict[str, Any], mtl_data: dict[str, Any] | 
         id_parts = parse_scene_id(scene_id)
 
         cloud_cover = scene_dict.get("cloud_cover", 100.0)
-        s3_prefix = scene_dict.get("scene_prefix", "")
+        s3_prefix = scene_dict.get("s3_prefix", "")
 
         if not mtl_data:
-            logger.warning("No MTL metadata available for %s", scene_id)
+            logger.debug("No MTL metadata available for %s", scene_id)
             return None
 
         cloud_cover = extract_cloud_cover(mtl_data)
@@ -430,11 +427,8 @@ async def fetch_mtl_metadata(
     mtl_key = f"{scene_prefix}{scene_id}_MTL.json"
     try:
         response = await s3.get_object(Bucket=bucket, Key=mtl_key, RequestPayer="requester")
-        try:
-            async with response["Body"] as body:
-                content = await body.read()
-        finally:
-            await response["Body"].close()
+        async with response["Body"] as body:
+            content = await body.read()
 
         if not content:
             logger.warning("Empty MTL JSON file for %s", scene_id)
@@ -454,11 +448,8 @@ async def fetch_mtl_metadata(
             txt_key = mtl_key.replace(".json", ".txt")
             try:
                 response = await s3.get_object(Bucket=bucket, Key=txt_key, RequestPayer="requester")
-                try:
-                    async with response["Body"] as body:
-                        content = await body.read()
-                finally:
-                    await response["Body"].close()
+                async with response["Body"] as body:
+                    content = await body.read()
 
                 if not content:
                     logger.warning("Empty MTL text file for %s", scene_id)
@@ -474,9 +465,11 @@ async def fetch_mtl_metadata(
                 return None
         elif error_code == 'AccessDenied':
             logger.debug("Access denied for MTL file %s (scene may not exist)", scene_id)
+            logger.debug("Tried key: %s", mtl_key)
             return None
         else:
-            logger.exception("Failed to retrieve MTL for %s", scene_id)
+            logger.exception("Failed to retrieve MTL for %s: %s", scene_id, str(e))
+            logger.debug("Tried key: %s", mtl_key)
             return None
 
 
@@ -489,7 +482,9 @@ async def fetch_mtl_with_semaphore(
     """Fetch and parse scene with MTL metadata (I/O with concurrency control)."""
     async with semaphore:
         scene_id = scene_dict.get("scene_id", "")
-        scene_prefix = scene_dict.get("scene_prefix", "")
+        scene_prefix = scene_dict.get("s3_prefix", "")
+        
+        logger.debug(f"Fetching MTL for scene_id={scene_id}, prefix={scene_prefix}")
         
         mtl_data = await fetch_mtl_metadata(s3, bucket, scene_prefix, scene_id)
         return parse_scene_metadata(scene_dict, mtl_data)
@@ -506,25 +501,10 @@ async def with_s3_client(
 ) -> Any:
     """Execute function with managed S3 client (bracket pattern)."""
     # USGS Landsat data requires signed requests with RequestPayer='requester'
-    # Get credentials from environment
-    aws_access_key = os.environ.get('AWS_ACCESS_KEY_ID')
-    aws_secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    # Import here to avoid circular dependency
+    from .landsat import create_s3_session
     
-    if not aws_access_key or not aws_secret_key:
-        logger.warning(
-            "AWS credentials not found in environment. "
-            "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables."
-        )
-    
-    # Create session with explicit credentials if available
-    if aws_access_key and aws_secret_key:
-        session = aioboto3.Session(
-            aws_access_key_id=aws_access_key,
-            aws_secret_access_key=aws_secret_key
-        )
-    else:
-        # Fall back to default credential chain
-        session = aioboto3.Session()
+    session = create_s3_session()
     
     async with session.client(
         "s3",
