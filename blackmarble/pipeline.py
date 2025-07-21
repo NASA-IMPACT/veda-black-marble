@@ -145,11 +145,12 @@ async def black_marble_pipeline(
         # Try to get bounds from the graph
         try:
             import osmnx as ox
-            nodes_gdf, _ = ox.graph_to_gdfs(road_network)
-            if len(nodes_gdf) > 0:
-                bounds = nodes_gdf.total_bounds
-                log.debug(f"  - Bounds (from nodes): {bounds}")
-                centroid = nodes_gdf.unary_union.centroid
+            # Use edges instead of nodes to avoid MultiIndex issues with tuple node IDs
+            edges_gdf = ox.graph_to_gdfs(road_network, nodes=False)
+            if len(edges_gdf) > 0:
+                bounds = edges_gdf.total_bounds
+                log.debug(f"  - Bounds (from edges): {bounds}")
+                centroid = edges_gdf.unary_union.centroid
                 log.debug(f"  - Centroid: ({centroid.x:.6f}, {centroid.y:.6f})")
         except Exception as e:
             log.debug(f"  - Could not extract bounds: {e}")

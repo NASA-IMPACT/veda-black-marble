@@ -72,7 +72,8 @@ def graph_to_shapes(G: nx.MultiDiGraph, buffer_distance: float = 0.00005) -> lis
     if G.number_of_edges() == 0:
         return []
 
-    _, edges_gdf = ox.graph_to_gdfs(G)
+    # Only get edges - we don't need nodes and this avoids MultiIndex issues
+    edges_gdf = ox.graph_to_gdfs(G, nodes=False)
     shapes = []
     for _, edge in edges_gdf.iterrows():
         geom = edge.geometry.buffer(buffer_distance) if buffer_distance > 0 else edge.geometry
@@ -312,7 +313,8 @@ def buffer_and_rasterize_roads(
             graph.graph = {}
         graph.graph['crs'] = 'EPSG:4326'
     
-    _, edges_gdf = ox.graph_to_gdfs(graph)
+    # Only get edges - we don't need nodes and this avoids MultiIndex issues
+    edges_gdf = ox.graph_to_gdfs(graph, nodes=False)
 
     if len(edges_gdf) == 0:
         return np.zeros(shape, dtype=np.uint8)

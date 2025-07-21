@@ -85,7 +85,8 @@ def buffer_and_rasterize_roads_fractional(
                 graph.graph = {}
             graph.graph['crs'] = 'EPSG:4326'
         
-        _, edges_gdf = ox.graph_to_gdfs(graph)
+        # Only get edges - we don't need nodes and this avoids MultiIndex issues
+        edges_gdf = ox.graph_to_gdfs(graph, nodes=False)
         log.debug(f"Got {len(edges_gdf)} edges with CRS: {edges_gdf.crs}")
     except (ValueError, KeyError) as e:
         # Empty graph or other error
