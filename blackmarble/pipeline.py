@@ -689,21 +689,17 @@ async def black_marble_pipeline(
             print(f"   Reference shape: {reference_shape}")
 
         # Align VIIRS to Landsat grid for consistent processing
-        if reference_transform is not None and reference_shape is not None:
-            if not landsat_reprojected:
-                print("⚠️  WARNING: No Landsat data available for NDVI calculation!")
-                print("    Pipeline will continue but NDUI calculation will be limited")
-
+        if reference_transform is not None and reference_shape is not None and landsat_reprojected:
+            # We have Landsat data to align to
             print(f"VIIRS shape before alignment: {viirs_reprojected.shape}")
             print(f"Reference Landsat shape: {reference_shape}")
 
             # Debug stats before alignment
             quick_stats(viirs_reprojected, "VIIRS before alignment")
 
-            # Use the first Landsat band as reference (if available)
-            if landsat_reprojected:
-                reference_band = landsat_reprojected[list(landsat_reprojected.keys())[0]]
-                quick_stats(reference_band, "Landsat reference band")
+            # Use the first Landsat band as reference
+            reference_band = landsat_reprojected[list(landsat_reprojected.keys())[0]]
+            quick_stats(reference_band, "Landsat reference band")
 
             # Align VIIRS to Landsat grid
             logger.debug(f"Aligning VIIRS to Landsat")
@@ -768,6 +764,11 @@ async def black_marble_pipeline(
                     f"VIIRS alignment failed - only {nonzero_pct:.1f}% non-zero pixels. "
                     "Check tile selection and spatial footprints."
                 )
+        else:
+            # No Landsat data to align to
+            if not landsat_reprojected:
+                print("⚠️  WARNING: No Landsat data available for NDVI calculation!")
+                print("    Pipeline will continue but NDUI calculation will be limited")
 
     # Rasterize roads to match grid
     roads_rasterized = None

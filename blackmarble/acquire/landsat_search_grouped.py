@@ -307,6 +307,13 @@ async def search_best_scene_group(
     # Run the search
     async def search_with_client(s3_client: S3Client) -> list[SceneMeta]:
         # Get all scenes in time window (don't select best per tile yet)
+        from .landsat import AsyncLandsatDownloader
+        
+        # Create the find_scenes function if not provided
+        if find_scenes_func is None:
+            downloader = AsyncLandsatDownloader(aws_unsigned=False)
+            find_scenes_func = downloader.find_landsat_scenes
+        
         all_scenes = await search_best_scenes_functional(
             params=params,
             find_scenes_func=find_scenes_func,
