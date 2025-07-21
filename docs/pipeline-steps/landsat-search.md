@@ -2,7 +2,7 @@
 
 ## Overview
 
-The scene search strategy ensures complete spatial coverage of Landsat imagery by searching for the best available scenes within a time window rather than requiring exact date matches.
+The scene search strategy ensures complete spatial coverage of Landsat imagery by searching for the best available scenes within a time window rather than requiring exact date matches. This functionality is integrated into the Black Marble pipeline and automatically selects optimal Landsat scenes based on quality metrics.
 
 ## Problem Solved
 
@@ -145,6 +145,41 @@ The system handles various edge cases:
 - Invalid weight configurations
 - Seasonal filter eliminating all candidates
 
+## Pipeline Integration
+
+The time-window search is fully integrated into the Black Marble pipeline. To customize the search parameters:
+
+```python
+from blackmarble.pipeline import black_marble_pipeline_sync
+from blackmarble.config import PipelineConfig
+
+# Create pipeline config
+config = PipelineConfig(
+    bbox=bbox,
+    date=date,
+    output_path="output.tif"
+)
+
+# Customize Landsat acquisition parameters
+config.acquisition.landsat_acquisition.window_days = 20  # Search ±20 days
+config.acquisition.landsat_acquisition.max_cloud_threshold = 90.0  # Allow cloudier scenes
+config.acquisition.landsat_acquisition.quality_weights = {
+    "spatial_coverage": 0.6,  # Prioritize coverage
+    "cloud_free": 0.2,
+    "snow_free": 0.1,
+    "off_nadir": 0.1,
+}
+
+# Run pipeline with custom search config
+result = black_marble_pipeline_sync(
+    bbox=bbox,
+    date=date,
+    output_path="output.tif",
+    config=config,
+    earthdata_token=token
+)
+```
+
 ## Usage Example
 
 Complete example with error handling:
@@ -210,6 +245,17 @@ scenes = asyncio.run(acquire_landsat_scenes())
 3. **Quality Optimization**: Automatically selects clearest scenes
 4. **Flexible Constraints**: Seasonal and quality thresholds
 5. **Robust to Edge Cases**: Handles missing data, duplicates, timezones
+
+## AWS Credentials Requirement
+
+The Landsat search functionality requires AWS credentials to access the USGS Landsat bucket on S3. Set these environment variables before running:
+
+```bash
+export AWS_ACCESS_KEY_ID=your_access_key_id
+export AWS_SECRET_ACCESS_KEY=your_secret_access_key
+```
+
+**Important**: The USGS Landsat bucket requires signed requests with `RequestPayer='requester'` parameter. Unsigned (anonymous) access is not supported.
 
 ## Testing
 

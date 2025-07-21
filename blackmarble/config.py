@@ -16,6 +16,33 @@ ArrayLike = npt.NDArray[Any]
 
 
 @dataclass
+class LandsatAcquisitionConfig:
+    """Configuration for time-window based Landsat acquisition."""
+    
+    # Time window settings
+    window_days: int = 15  # Search ±15 days from target date
+    
+    # Quality scoring weights (must sum to 1.0)
+    quality_weights: dict[str, float] = field(default_factory=lambda: {
+        "spatial_coverage": 0.5,   # Weight for spatial coverage
+        "cloud_free": 0.3,         # Weight for cloud-free percentage
+        "snow_free": 0.15,         # Weight for snow-free percentage
+        "off_nadir": 0.05,         # Weight for nadir viewing
+    })
+    
+    # Minimum quality thresholds
+    min_coverage_threshold: float = 0.7  # Minimum acceptable coverage
+    max_cloud_threshold: float = 80.0    # Maximum cloud cover percentage
+    
+    # Seasonal filter (optional)
+    seasonal_filter: Callable[[datetime], bool] | None = None
+    
+    # Scene selection preferences
+    prefer_newer_sensors: bool = True  # Prefer L8/L9 over L7
+    allow_incomplete_coverage: bool = False  # Allow partial tile coverage
+
+
+@dataclass
 class AcquisitionConfig:
     """Configuration for data acquisition phase."""
 
@@ -24,6 +51,9 @@ class AcquisitionConfig:
     landsat_level: str = "L2SP"
     cloud_cover_max: float = 30.0
     composite_months: int = 12  # Number of months for temporal composite
+    
+    # Landsat time-window acquisition configuration
+    landsat_acquisition: LandsatAcquisitionConfig = field(default_factory=LandsatAcquisitionConfig)
 
     # VIIRS settings
     viirs_product: str = "VNP46A2"

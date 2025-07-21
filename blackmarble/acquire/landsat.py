@@ -95,8 +95,11 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         if cache_key in self._listing_cache:
             return self._listing_cache[cache_key]
 
-        # Create default session (will use AWS credentials if available, or anonymous)
+        # Create session based on aws_unsigned setting
         session = aioboto3.Session()
+        
+        # For USGS Landsat data, we need signed requests with RequestPayer='requester'
+        # So ignore the aws_unsigned flag and always use signed requests
         async with session.client("s3", config=self.s3_config) as s3:  # type: ignore
             try:
                 response = await s3.list_objects_v2(  # type: ignore[attr-defined]
@@ -126,7 +129,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         mtl_key = f"{scene_prefix}{scene_id}_MTL.txt"
 
         try:
-            # Create default session for S3 access
+            # Create session for S3 access (always signed for USGS Landsat)
             session = aioboto3.Session()
             async with session.client("s3", config=self.s3_config) as s3:  # type: ignore[attr-defined]
                 # Download MTL file content
@@ -443,7 +446,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
         try:
             async with self._semaphore:
-                # Create default session (will use AWS credentials if available, or anonymous)
+                # Create session for S3 access (always signed for USGS Landsat)
                 session = aioboto3.Session()
                 async with session.client("s3", config=self.s3_config) as s3:  # type: ignore
                     # Use temporary file

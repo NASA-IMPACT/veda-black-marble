@@ -39,6 +39,20 @@ class SceneMeta:
     quality_score: float = 0.0  # Calculated
     s3_prefix: str = ""  # S3 location
 
+    def to_scene_dict(self) -> dict[str, Any]:
+        """
+        Convert to the mutable dict structure consumed by
+        AsyncLandsatDownloader.download_scene_bands().
+        """
+        return {
+            "scene_id": self.scene_id,
+            "path": self.path,
+            "row": self.row,
+            "date": self.date,
+            "cloud_cover": self.cloud_cover,
+            "s3_prefix": self.s3_prefix,
+        }
+
 
 @dataclass(frozen=True)
 class SearchParams:
@@ -475,27 +489,20 @@ async def fetch_mtl_with_semaphore(
 # Resource Management (Bracket Pattern)
 # ============================================================================
 
-_session_cache: aioboto3.Session | None = None
-_session_lock = asyncio.Lock()
-
 async def with_s3_client(
     func: Callable[[S3Client], Any],
     *,
     region_name: str = "us-west-2",
-    unsigned: bool = True,
 ) -> Any:
     """Execute function with managed S3 client (bracket pattern)."""
-    global _session_cache
-    config = Config(signature_version='UNSIGNED') if unsigned else None
-
-    async with _session_lock:
-        if _session_cache is None:
-            _session_cache = aioboto3.Session()
-
-    async with _session_cache.client(
+    # USGS Landsat data requires signed requests with RequestPayer='requester'
+    # Create a new session each time to ensure we pick up current credentials
+    session = aioboto3.Session()
+    
+    async with session.client(
         "s3",
         region_name=region_name,
-        config=config
+        config=None  # Use default (signed) configuration
     ) as s3_client:
         return await func(s3_client)
 
@@ -610,7 +617,7 @@ async def search_best_scenes(
     if find_scenes_func is None:
         # Import here to avoid circular dependency
         from .landsat import AsyncLandsatDownloader
-        downloader = AsyncLandsatDownloader(aws_unsigned=True)
+        downloader = AsyncLandsatDownloader(aws_unsigned=False)  # Use signed requests
         find_scenes_func = downloader.find_landsat_scenes
     
     params = SearchParams(

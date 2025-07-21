@@ -22,6 +22,8 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
   - Decisions: Target CRS selection
 
 ### 3. Landsat Processing  
+- **[Scene Search and Selection](./landsat-search.md)** ⚙️
+  - Decisions: Time window (±15 days), quality weights, tile coverage
 - Load Landsat bands (B3, B4, B5, QA_PIXEL)
 - **[Cloud Masking](./landsat-qa-masking.md)** ⚙️
   - Decisions: QA strategy (conservative/moderate/permissive), dilation

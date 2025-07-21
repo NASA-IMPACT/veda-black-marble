@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 # from .async_base import DownloadProgressTracker  # Currently unused
+from .landsat_search import search_best_scenes
+from .landsat import AsyncLandsatDownloader
 from .landsat import download_landsat
 from .viirs import download_viirs
 
@@ -28,6 +30,7 @@ class DownloadPlan:
     landsat_dates: list[datetime] = field(default_factory=lambda: [])
     landsat_bands: list[str] = field(default_factory=lambda: ["B3", "B4", "B5", "QA_PIXEL"])
     landsat_cloud_max: float = 30.0
+    landsat_acquisition_config: Any | None = None  # LandsatAcquisitionConfig
 
     # VIIRS parameters
     viirs_layers: list[str] = field(
@@ -80,6 +83,7 @@ class DownloadPlan:
         output_dir = Path("./data")
         cache_enabled = True
         cloud_cover_max = 30.0  # Default matching config.py
+        landsat_acquisition_config = None
 
         if config:
             output_dir = Path(getattr(config, "data_dir", "./data"))
@@ -87,12 +91,16 @@ class DownloadPlan:
             # Try to get cloud_cover_max from acquisition config
             if hasattr(config, "acquisition") and hasattr(config.acquisition, "cloud_cover_max"):
                 cloud_cover_max = config.acquisition.cloud_cover_max
+            # Get landsat acquisition config
+            if hasattr(config, "acquisition") and hasattr(config.acquisition, "landsat_acquisition"):
+                landsat_acquisition_config = config.acquisition.landsat_acquisition
 
         return cls(
             bbox=bbox,
             primary_date=date,
             landsat_dates=landsat_dates,
             landsat_cloud_max=cloud_cover_max,
+            landsat_acquisition_config=landsat_acquisition_config,
             output_dir=output_dir,
             cache_downloads=cache_enabled,
         )
@@ -280,17 +288,95 @@ class AsyncDownloadOrchestrator:
             raise
 
     async def _download_landsat(self, plan: DownloadPlan) -> dict[datetime, dict[str, list[Path]]]:
-        """Download Landsat data for all dates"""
-        logger.info(f"Downloading Landsat data for {len(plan.landsat_dates)} dates")
+        """
+        Download Landsat data using the new time-window search strategy.
 
-        return await download_landsat(
-            dates=plan.landsat_dates,
-            bbox=plan.bbox,
-            bands=plan.landsat_bands,
-            output_dir=str(plan.output_dir / "landsat"),
-            cloud_cover_max=plan.landsat_cloud_max,
-            show_progress=self.show_progress,
+        Steps
+        1. For each target date in the download plan, call `search_best_scenes`
+           to obtain the optimal scene per WRS tile inside the configured time
+           window (the window and quality weights are defined in
+           landsat_search.LandsatAcquisitionConfig, imported internally by the
+           helper).
+        2. Use a single AsyncLandsatDownloader context to fetch the requested
+           bands for every selected scene.  All I/O happens concurrently and is
+           constrained by the downloader's internal semaphore.
+        3. Return the data structure expected by the downstream pipeline:
+           results[date][band] = list[Path]
+        """
+        logger.info(
+            "Searching for optimal Landsat scenes across %d target dates (time-window)",
+            len(plan.landsat_dates),
         )
+        logger.debug("Plan bands: %s", plan.landsat_bands)
+
+        # Phase 1 ───────────────────────────────────────────────────────────
+        # Discover best scenes (one coroutine per target date)
+        search_tasks: list[asyncio.Task[list[Any]]] = [
+            asyncio.create_task(
+                search_best_scenes(
+                    bbox=plan.bbox,
+                    target_date=target_date,
+                    config=plan.landsat_acquisition_config,  # Pass the functional config
+                    allow_incomplete=True,  # do not fail whole pipeline for sparse tiles
+                )
+            )
+            for target_date in plan.landsat_dates
+        ]
+
+        scene_lists: list[list[Any]] = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+        # Map target date → scenes
+        date_to_scenes: dict[datetime, list[Any]] = {}
+        for target_date, result in zip(plan.landsat_dates, scene_lists):
+            if isinstance(result, Exception):
+                logger.error("Scene search failed for %s: %s", target_date.date(), result)
+                raise result
+            date_to_scenes[target_date] = result
+
+        # Phase 2 ───────────────────────────────────────────────────────────
+        # Download all requested bands for every scene
+        results: dict[datetime, dict[str, list[Path]]] = {}
+        async with AsyncLandsatDownloader() as downloader:
+            download_coroutines: list[tuple[datetime, Any, asyncio.Future]] = []
+
+            for date_key, scenes in date_to_scenes.items():
+                for scene in scenes:
+                    # Convert SceneMeta → dict expected by downloader
+                    scene_dict = scene.to_scene_dict()
+                    coro = downloader.download_scene_bands(
+                        scene=scene_dict,
+                        bands=plan.landsat_bands,
+                        output_dir=plan.output_dir / "landsat",
+                    )
+                    download_coroutines.append((date_key, scene, asyncio.create_task(coro)))
+
+            # Gather with error capture
+            for date_key, _scene, task in download_coroutines:
+                try:
+                    band_paths = await task
+                except Exception as exc:
+                    logger.error("Download failed for scene %s: %s", _scene.scene_id, exc)
+                    raise
+
+                if date_key not in results:
+                    results[date_key] = {}
+
+                for band, path in band_paths.items():
+                    if band not in results[date_key]:
+                        results[date_key][band] = []
+                    if path:
+                        results[date_key][band].append(path)
+
+        # Log summary
+        for date_key, band_dict in results.items():
+            logger.info(
+                "Landsat %s: downloaded %d bands across %d tiles",
+                date_key.strftime("%Y-%m-%d"),
+                sum(len(v) for v in band_dict.values()),
+                len({p.parent for v in band_dict.values() for p in v}),
+            )
+
+        return results
 
     async def _download_osm(self, plan: DownloadPlan) -> Any:
         """Download OSM data"""
