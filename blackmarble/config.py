@@ -20,7 +20,7 @@ class LandsatAcquisitionConfig:
     """Configuration for time-window based Landsat acquisition."""
 
     # Time window settings
-    window_days: int = 45  # Search ±45 days from target date (increased for better tile coverage)
+    window_days: int = 7 
 
     # Quality scoring weights (must sum to 1.0)
     quality_weights: dict[str, float] = field(
