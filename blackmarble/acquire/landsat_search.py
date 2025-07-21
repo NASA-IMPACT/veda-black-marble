@@ -8,12 +8,12 @@ import asyncio
 import json
 import logging
 import math
+import os
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Protocol
 
 import aioboto3
-from botocore.config import Config
 
 from blackmarble.config import LandsatAcquisitionConfig
 
@@ -446,28 +446,38 @@ async def fetch_mtl_metadata(
             logger.warning("Corrupted JSON MTL for %s: %s", scene_id, exc)
             return None
 
-    except s3.exceptions.NoSuchKey:
-        # Fall back to text format .....................................
-        txt_key = mtl_key.replace(".json", ".txt")
-        try:
-            response = await s3.get_object(Bucket=bucket, Key=txt_key, RequestPayer="requester")
+    except Exception as e:
+        # Check if it's NoSuchKey error
+        error_code = getattr(e, 'response', {}).get('Error', {}).get('Code', '')
+        if error_code == 'NoSuchKey':
+            # Fall back to text format .....................................
+            txt_key = mtl_key.replace(".json", ".txt")
             try:
-                async with response["Body"] as body:
-                    content = await body.read()
-            finally:
-                await response["Body"].close()
+                response = await s3.get_object(Bucket=bucket, Key=txt_key, RequestPayer="requester")
+                try:
+                    async with response["Body"] as body:
+                        content = await body.read()
+                finally:
+                    await response["Body"].close()
 
-            if not content:
-                logger.warning("Empty MTL text file for %s", scene_id)
+                if not content:
+                    logger.warning("Empty MTL text file for %s", scene_id)
+                    return None
+
+                return parse_mtl_text(content.decode("utf-8"))
+            except Exception as e2:
+                error_code2 = getattr(e2, 'response', {}).get('Error', {}).get('Code', '')
+                if error_code2 == 'NoSuchKey':
+                    logger.debug("No MTL file found for %s", scene_id)
+                else:
+                    logger.debug("Failed to retrieve MTL text for %s: %s", scene_id, e2)
                 return None
-
-            return parse_mtl_text(content.decode("utf-8"))
-        except s3.exceptions.NoSuchKey:
-            logger.debug("No MTL file found for %s", scene_id)
+        elif error_code == 'AccessDenied':
+            logger.debug("Access denied for MTL file %s (scene may not exist)", scene_id)
             return None
-    except Exception:
-        logger.exception("Failed to retrieve MTL for %s", scene_id)
-        return None
+        else:
+            logger.exception("Failed to retrieve MTL for %s", scene_id)
+            return None
 
 
 async def fetch_mtl_with_semaphore(
@@ -496,8 +506,25 @@ async def with_s3_client(
 ) -> Any:
     """Execute function with managed S3 client (bracket pattern)."""
     # USGS Landsat data requires signed requests with RequestPayer='requester'
-    # Create a new session each time to ensure we pick up current credentials
-    session = aioboto3.Session()
+    # Get credentials from environment
+    aws_access_key = os.environ.get('AWS_ACCESS_KEY_ID')
+    aws_secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    
+    if not aws_access_key or not aws_secret_key:
+        logger.warning(
+            "AWS credentials not found in environment. "
+            "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables."
+        )
+    
+    # Create session with explicit credentials if available
+    if aws_access_key and aws_secret_key:
+        session = aioboto3.Session(
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key
+        )
+    else:
+        # Fall back to default credential chain
+        session = aioboto3.Session()
     
     async with session.client(
         "s3",

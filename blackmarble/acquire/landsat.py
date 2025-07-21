@@ -22,6 +22,21 @@ from .async_base import (
 logger = logging.getLogger(__name__)
 
 
+def create_s3_session() -> aioboto3.Session:
+    """Create S3 session with explicit credentials if available."""
+    import os
+    aws_access_key = os.environ.get('AWS_ACCESS_KEY_ID')
+    aws_secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    
+    if aws_access_key and aws_secret_key:
+        return aioboto3.Session(
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key
+        )
+    else:
+        return aioboto3.Session()
+
+
 class AsyncLandsatDownloader(AsyncDownloaderBase):
     """Async downloader for Landsat Collection 2 data from AWS S3"""
 
@@ -95,8 +110,8 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         if cache_key in self._listing_cache:
             return self._listing_cache[cache_key]
 
-        # Create session based on aws_unsigned setting
-        session = aioboto3.Session()
+        # Create session with explicit credentials if available
+        session = create_s3_session()
         
         # For USGS Landsat data, we need signed requests with RequestPayer='requester'
         # So ignore the aws_unsigned flag and always use signed requests
@@ -129,8 +144,9 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         mtl_key = f"{scene_prefix}{scene_id}_MTL.txt"
 
         try:
-            # Create session for S3 access (always signed for USGS Landsat)
-            session = aioboto3.Session()
+            # Create session with explicit credentials if available
+            session = create_s3_session()
+            
             async with session.client("s3", config=self.s3_config) as s3:  # type: ignore[attr-defined]
                 # Download MTL file content
                 response = await s3.get_object(  # type: ignore[attr-defined]
@@ -446,8 +462,9 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
         try:
             async with self._semaphore:
-                # Create session for S3 access (always signed for USGS Landsat)
-                session = aioboto3.Session()
+                # Create session with explicit credentials if available
+                session = create_s3_session()
+                
                 async with session.client("s3", config=self.s3_config) as s3:  # type: ignore
                     # Use temporary file
                     temp_path = output_path.with_suffix(".tmp")

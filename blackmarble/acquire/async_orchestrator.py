@@ -12,7 +12,6 @@ from typing import Any
 # from .async_base import DownloadProgressTracker  # Currently unused
 from .landsat_search import search_best_scenes
 from .landsat import AsyncLandsatDownloader
-from .landsat import download_landsat
 from .viirs import download_viirs
 
 logger = logging.getLogger(__name__)
