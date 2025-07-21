@@ -11,6 +11,7 @@ from typing import Any
 
 # from .async_base import DownloadProgressTracker  # Currently unused
 from .landsat_search import search_best_scenes
+from .landsat_search_grouped import search_best_scenes as search_best_scenes_grouped
 from .landsat import AsyncLandsatDownloader
 from .viirs import download_viirs
 
@@ -310,9 +311,18 @@ class AsyncDownloadOrchestrator:
 
         # Phase 1 ───────────────────────────────────────────────────────────
         # Discover best scenes (one coroutine per target date)
+        # Choose search function based on config
+        search_func = search_best_scenes
+        if plan.landsat_acquisition_config and hasattr(plan.landsat_acquisition_config, 'selection_strategy'):
+            if plan.landsat_acquisition_config.selection_strategy == "date_grouped":
+                search_func = search_best_scenes_grouped
+                logger.info("Using date-grouped scene selection for spatial consistency")
+            else:
+                logger.info("Using per-tile scene selection (legacy mode)")
+        
         search_tasks: list[asyncio.Task[list[Any]]] = [
             asyncio.create_task(
-                search_best_scenes(
+                search_func(
                     bbox=plan.bbox,
                     target_date=target_date,
                     config=plan.landsat_acquisition_config,  # Pass the functional config

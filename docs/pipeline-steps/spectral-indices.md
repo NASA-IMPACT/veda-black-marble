@@ -8,6 +8,8 @@ Spectral indices use ratios of different wavelengths to highlight specific land 
 - **NDVI** (Normalized Difference Vegetation Index): Vegetation density
 - **NDWI** (Normalized Difference Water Index): Water bodies and moisture
 
+**Critical Update**: As of the index-first calculation fix, indices are now calculated **per-date before temporal compositing** to ensure mathematical correctness.
+
 ## Algorithms
 
 ### NDVI Calculation
@@ -47,6 +49,71 @@ NDWI = (Green - NIR) / (Green + NIR)
 - `0.0 to 0.3`: Wet surfaces
 - `-0.3 to 0.0`: Dry surfaces
 - `-1.0 to -0.3`: Vegetation, built-up areas
+
+## Index-First Temporal Compositing
+
+### Mathematical Correctness
+
+The pipeline now calculates indices **per-date before temporal compositing**. This is critical because:
+
+```
+median(NDVI_t) ≠ NDVI(median(NIR_t), median(RED_t))
+```
+
+The median of ratios is not equal to the ratio of medians. The old approach (band-first) produces mathematically incorrect results, particularly affecting agricultural areas with seasonal vegetation changes.
+
+### Implementation
+
+```python
+# NEW APPROACH (Correct)
+# 1. Calculate indices for each date
+index_stacks = {"ndvi": [], "ndwi": []}
+for date in landsat_dates:
+    nir, red, green = load_bands(date)
+    ndvi = calculate_ndvi(nir, red, mask_low_denom=True)
+    ndwi = calculate_ndwi(green, nir, mask_low_denom=True)
+    index_stacks["ndvi"].append(ndvi)
+    index_stacks["ndwi"].append(ndwi)
+
+# 2. Create temporal composites
+ndvi_composite = create_index_temporal_composite(
+    index_stacks["ndvi"],
+    method="percentile",
+    percentile=85.0  # Peak vegetation for NDUI
+)
+```
+
+### Why 85th Percentile NDVI for NDUI?
+
+NDUI uses NDVI to correct for vegetation's light-dimming effect:
+```
+NDUI = NTL / (1 - NDVI + epsilon)
+```
+
+Using the 85th percentile:
+- Captures maximum vegetation light-blocking potential
+- Prevents over-estimation of urban extent in agricultural areas
+- Better represents the "greenest" state
+
+### Configuration
+
+```python
+config = PipelineConfig(
+    analysis=AnalysisConfig(
+        # Index-first calculation (default)
+        calculate_indices_first=True,
+        mask_low_denom=True,
+        
+        # Temporal compositing methods
+        ndvi_composite_method="percentile",
+        ndvi_composite_percentile=85.0,
+        ndwi_composite_method="median",
+        
+        # Legacy mode (for backward compatibility)
+        use_legacy_indices=False
+    )
+)
+```
 
 ## Critical Implementation Detail: Epsilon Handling
 
@@ -161,6 +228,24 @@ def validate_index(data, name, expected_range=(-1, 1)):
     if not (expected_range[0] <= min_val <= max_val <= expected_range[1]):
         logger.warning(f"{name} outside expected range: [{min_val:.3f}, {max_val:.3f}]")
 ```
+
+## Comparison Tool
+
+A tool is provided to compare NDUI outputs between the legacy and new calculation methods:
+
+```bash
+python tools/compare_ndui.py old_ndui.tif new_ndui.tif -o comparison/
+```
+
+This generates:
+- `comparison_stats.json`: Statistical analysis of differences
+- `ndui_difference_raw.tif`: Raw difference values
+- `ndui_difference_classes.tif`: Classified changes (decreased/unchanged/increased)
+
+Expected differences:
+- Agricultural areas: Higher NDUI with new method (better vegetation correction)
+- Urban areas: Minimal change
+- Overall: More accurate urban/rural discrimination
 
 ## Related Steps
 

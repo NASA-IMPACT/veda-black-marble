@@ -16,7 +16,7 @@ ArrayLike = npt.NDArray[Any]
 LANDSAT_EPSILON = 0.02  # 2% reflectance threshold for Landsat C2 SR data
 
 
-def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSILON) -> ArrayLike:
+def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSILON, mask_low_denom: bool = False) -> ArrayLike:
     """Calculate Normalized Difference Vegetation Index (NDVI).
 
     The NDVI is a fundamental vegetation index that measures the health and density
@@ -44,6 +44,9 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSI
         epsilon: Minimum denominator threshold to prevent extreme NDVI values.
             Default is 0.02 (2% reflectance), which prevents artifacts from
             snow/cloud edges and near-zero denominators.
+        mask_low_denom: If True, return NaN for pixels with denominator < epsilon
+            instead of using a safe denominator. This preserves mathematical
+            correctness for temporal compositing.
 
     Returns:
         NDVI array with values mathematically bounded to [-1, 1].
@@ -71,34 +74,49 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSI
     numerator = nir - red
     denominator = nir + red
     
-    # Use adaptive denominator floor to handle near-zero denominators
-    # This prevents division instability while preserving valid edge pixels
-    # The floor combines absolute noise floor with relative signal threshold
-    epsilon_rel = 0.05  # 5% of signal magnitude
-    
-    # Calculate adaptive floor based on signal magnitude
-    signal_magnitude = (np.abs(nir) + np.abs(red)) / 2
-    adaptive_floor = np.maximum(epsilon, epsilon_rel * signal_magnitude)
-    
-    # Apply floor to denominator while preserving sign
-    safe_denominator = np.where(
-        np.abs(denominator) < adaptive_floor,
-        np.copysign(adaptive_floor, denominator),
-        denominator
-    )
-    
-    # Calculate NDVI using the safe denominator
-    ndvi = numerator / safe_denominator
+    if mask_low_denom:
+        # Return NaN for low denominators to preserve mathematical correctness
+        # This is crucial for index-first temporal compositing
+        ndvi = np.where(
+            np.abs(denominator) < epsilon,
+            np.nan,
+            numerator / denominator
+        )
+    else:
+        # Use adaptive denominator floor to handle near-zero denominators
+        # This prevents division instability while preserving valid edge pixels
+        # The floor combines absolute noise floor with relative signal threshold
+        epsilon_rel = 0.05  # 5% of signal magnitude
+        
+        # Calculate adaptive floor based on signal magnitude
+        signal_magnitude = (np.abs(nir) + np.abs(red)) / 2
+        adaptive_floor = np.maximum(epsilon, epsilon_rel * signal_magnitude)
+        
+        # Apply floor to denominator while preserving sign
+        safe_denominator = np.where(
+            np.abs(denominator) < adaptive_floor,
+            np.copysign(adaptive_floor, denominator),
+            denominator
+        )
+        
+        # Calculate NDVI using the safe denominator
+        ndvi = numerator / safe_denominator
     
     # Clamp to valid NDVI range [-1, 1]
     # This handles any remaining edge cases where the calculation
     # produces values slightly outside the theoretical bounds
-    ndvi = np.clip(ndvi, -1.0, 1.0)
+    # Important: preserve NaN values during clipping
+    if mask_low_denom:
+        # Only clip non-NaN values
+        mask = ~np.isnan(ndvi)
+        ndvi[mask] = np.clip(ndvi[mask], -1.0, 1.0)
+    else:
+        ndvi = np.clip(ndvi, -1.0, 1.0)
     
     return ndvi
 
 
-def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = LANDSAT_EPSILON) -> ArrayLike:
+def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = LANDSAT_EPSILON, mask_low_denom: bool = False) -> ArrayLike:
     """Calculate Normalized Difference Water Index (NDWI).
 
     The NDWI is designed to detect water features and measure water content
@@ -128,6 +146,9 @@ def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = LANDSAT_EP
         epsilon: Minimum denominator threshold to prevent extreme NDWI values.
             Default is 0.02 (2% reflectance), which prevents artifacts from
             sunglint/cloud edges and near-zero denominators.
+        mask_low_denom: If True, return NaN for pixels with denominator < epsilon
+            instead of using a safe denominator. This preserves mathematical
+            correctness for temporal compositing.
 
     Returns:
         NDWI array with values mathematically bounded to [-1, 1].
@@ -156,25 +177,40 @@ def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = LANDSAT_EP
     numerator = green - nir
     denominator = green + nir
     
-    # Use adaptive denominator floor (same approach as NDVI)
-    epsilon_rel = 0.05  # 5% of signal magnitude
-    
-    # Calculate adaptive floor based on signal magnitude
-    signal_magnitude = (np.abs(green) + np.abs(nir)) / 2
-    adaptive_floor = np.maximum(epsilon, epsilon_rel * signal_magnitude)
-    
-    # Apply floor to denominator while preserving sign
-    safe_denominator = np.where(
-        np.abs(denominator) < adaptive_floor,
-        np.copysign(adaptive_floor, denominator),
-        denominator
-    )
-    
-    # Calculate NDWI using the safe denominator
-    ndwi = numerator / safe_denominator
+    if mask_low_denom:
+        # Return NaN for low denominators to preserve mathematical correctness
+        # This is crucial for index-first temporal compositing
+        ndwi = np.where(
+            np.abs(denominator) < epsilon,
+            np.nan,
+            numerator / denominator
+        )
+    else:
+        # Use adaptive denominator floor (same approach as NDVI)
+        epsilon_rel = 0.05  # 5% of signal magnitude
+        
+        # Calculate adaptive floor based on signal magnitude
+        signal_magnitude = (np.abs(green) + np.abs(nir)) / 2
+        adaptive_floor = np.maximum(epsilon, epsilon_rel * signal_magnitude)
+        
+        # Apply floor to denominator while preserving sign
+        safe_denominator = np.where(
+            np.abs(denominator) < adaptive_floor,
+            np.copysign(adaptive_floor, denominator),
+            denominator
+        )
+        
+        # Calculate NDWI using the safe denominator
+        ndwi = numerator / safe_denominator
     
     # Clamp to valid NDWI range [-1, 1]
-    ndwi = np.clip(ndwi, -1.0, 1.0)
+    # Important: preserve NaN values during clipping
+    if mask_low_denom:
+        # Only clip non-NaN values
+        mask = ~np.isnan(ndwi)
+        ndwi[mask] = np.clip(ndwi[mask], -1.0, 1.0)
+    else:
+        ndwi = np.clip(ndwi, -1.0, 1.0)
     
     return ndwi
 

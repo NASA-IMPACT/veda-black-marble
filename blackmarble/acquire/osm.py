@@ -112,8 +112,6 @@ def rasterize_shapes(
     return mask
 
 
-
-
 def clear_osm_cache() -> None:
     """Clear all cached OSM data."""
     cache_dir = Path("data/osm_cache")
@@ -306,13 +304,14 @@ def buffer_and_rasterize_roads(
 ) -> ArrayLike:
     """Buffer and rasterize an existing road network graph."""
     # Check if graph has CRS info (fix for cached graphs without CRS)
-    if not hasattr(graph, 'graph') or 'crs' not in graph.graph:
+    if not hasattr(graph, "graph") or "crs" not in graph.graph:
         import logging
+
         logging.warning("Graph missing CRS attribute, assuming EPSG:4326")
-        if not hasattr(graph, 'graph'):
+        if not hasattr(graph, "graph"):
             graph.graph = {}
-        graph.graph['crs'] = 'EPSG:4326'
-    
+        graph.graph["crs"] = "EPSG:4326"
+
     # Only get edges - we don't need nodes and this avoids MultiIndex issues
     edges_gdf = ox.graph_to_gdfs(graph, nodes=False)
 

@@ -18,28 +18,40 @@ ArrayLike = npt.NDArray[Any]
 @dataclass
 class LandsatAcquisitionConfig:
     """Configuration for time-window based Landsat acquisition."""
-    
+
     # Time window settings
-    window_days: int = 15  # Search ±15 days from target date
-    
+    window_days: int = 45  # Search ±45 days from target date (increased for better tile coverage)
+
     # Quality scoring weights (must sum to 1.0)
-    quality_weights: dict[str, float] = field(default_factory=lambda: {
-        "spatial_coverage": 0.5,   # Weight for spatial coverage
-        "cloud_free": 0.3,         # Weight for cloud-free percentage
-        "snow_free": 0.15,         # Weight for snow-free percentage
-        "off_nadir": 0.05,         # Weight for nadir viewing
-    })
-    
+    quality_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "spatial_coverage": 0.5,  # Weight for spatial coverage
+            "cloud_free": 0.3,  # Weight for cloud-free percentage
+            "snow_free": 0.15,  # Weight for snow-free percentage
+            "off_nadir": 0.05,  # Weight for nadir viewing
+        }
+    )
+
     # Minimum quality thresholds
     min_coverage_threshold: float = 0.7  # Minimum acceptable coverage
-    max_cloud_threshold: float = 80.0    # Maximum cloud cover percentage
-    
+    max_cloud_threshold: float = 80.0  # Maximum cloud cover percentage
+
     # Seasonal filter (optional)
     seasonal_filter: Callable[[datetime], bool] | None = None
-    
+
     # Scene selection preferences
     prefer_newer_sensors: bool = True  # Prefer L8/L9 over L7
     allow_incomplete_coverage: bool = False  # Allow partial tile coverage
+    
+    # Date-grouped selection settings
+    # Design: With 12 dates × ±45 day windows throughout the year, we have ample
+    # opportunities to find dates with complete coverage. Therefore we prioritize:
+    # 1. Temporal consistency (tolerance_days=0) - all tiles from exact same date
+    # 2. Spatial completeness (require_complete_coverage=True) - no missing tiles
+    # 3. Quality optimization - among complete dates, pick the one with lowest cloud cover
+    selection_strategy: Literal["per_tile", "date_grouped"] = "date_grouped"  # New default for spatial consistency
+    tolerance_days: float = 0.0  # Max days between scenes in same group (0 = same date only)
+    require_complete_coverage: bool = True  # Only consider dates with all required tiles
 
 
 @dataclass
@@ -51,7 +63,7 @@ class AcquisitionConfig:
     landsat_level: str = "L2SP"
     cloud_cover_max: float = 30.0
     composite_months: int = 12  # Number of months for temporal composite
-    
+
     # Landsat time-window acquisition configuration
     landsat_acquisition: LandsatAcquisitionConfig = field(default_factory=LandsatAcquisitionConfig)
 
@@ -71,33 +83,6 @@ class AcquisitionConfig:
 
 
 @dataclass
-class LandsatAcquisitionConfig:
-    """Configuration for time-window based Landsat acquisition."""
-    
-    # Time window settings
-    window_days: int = 15  # Search ±15 days from target date
-    
-    # Quality scoring weights (must sum to 1.0)
-    quality_weights: dict[str, float] = field(default_factory=lambda: {
-        "spatial_coverage": 0.5,   # Weight for spatial coverage
-        "cloud_free": 0.3,         # Weight for cloud-free percentage
-        "snow_free": 0.15,         # Weight for snow-free percentage
-        "off_nadir": 0.05,         # Weight for nadir viewing
-    })
-    
-    # Minimum quality thresholds
-    min_coverage_threshold: float = 0.7  # Minimum acceptable coverage
-    max_cloud_threshold: float = 80.0    # Maximum cloud cover percentage
-    
-    # Seasonal filter (optional)
-    seasonal_filter: Callable[[datetime], bool] | None = None
-    
-    # Scene selection preferences
-    prefer_newer_sensors: bool = True  # Prefer L8/L9 over L7
-    allow_incomplete_coverage: bool = False  # Allow partial tile coverage
-
-
-@dataclass
 class PreparationConfig:
     """Configuration for data preparation phase."""
 
@@ -113,6 +98,10 @@ class PreparationConfig:
     mask_snow: bool = True
     mask_water: bool = False
     qa_dilation_radius: int = 3
+    qa_cloud_strategy: Literal["conservative", "moderate", "permissive"] = "moderate"
+    # Separate strategy for compositing vs final masking
+    qa_composite_strategy: Literal["conservative", "moderate", "permissive"] | None = None  # If None, uses qa_cloud_strategy
+    qa_composite_dilation: int | None = None  # If None, uses qa_dilation_radius
 
     # VIIRS corrections
     viirs_fill_value: float = 65530
@@ -143,6 +132,19 @@ class AnalysisConfig:
     composite_method: Literal["median", "mean", "max", "percentile"] = "median"
     composite_percentile: int | None = None
     min_valid_observations: int = 1
+    
+    # Index calculation settings (for mathematical correctness)
+    calculate_indices_first: bool = True  # Calculate indices per-date before compositing
+    mask_low_denom: bool = True  # Return NaN for low denominators (preserves correctness)
+    
+    # Index-specific composite methods (overrides composite_method for these indices)
+    ndvi_composite_method: Literal["median", "mean", "percentile"] = "percentile"
+    ndvi_composite_percentile: float = 85.0  # 85th percentile captures peak vegetation
+    ndwi_composite_method: Literal["median", "mean", "percentile"] = "median"
+    ndwi_composite_percentile: float = 50.0
+    
+    # Legacy compatibility
+    use_legacy_indices: bool = False  # If True, uses old band-first calculation
 
     # OSM fractional road rasterization
     osm_fractional: bool = False  # Use fractional road rasterization
@@ -232,6 +234,21 @@ class ExportConfig:
 
 
 @dataclass
+class MemoryConfig:
+    """Configuration for memory management during processing."""
+    
+    # Memory optimization settings
+    delete_bands_after_indices: bool = True  # Delete band arrays after calculating indices
+    gc_interval: int = 3  # Run garbage collection every N dates
+    memory_warning_gb: float = 8.0  # Warn if memory usage exceeds this
+    memory_limit_gb: float | None = None  # Hard limit - abort if exceeded
+    
+    # Streaming options
+    use_streaming: bool = True  # Process dates incrementally vs all at once
+    batch_size: int | None = None  # Process dates in batches if set
+
+
+@dataclass
 class PipelineConfig:
     """Main configuration class for the target pipeline."""
 
@@ -246,6 +263,7 @@ class PipelineConfig:
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
     enhancement: EnhancementConfig = field(default_factory=EnhancementConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
 
     # Global settings
     verbose: bool = False
@@ -258,6 +276,12 @@ class PipelineConfig:
     cache_downloads: bool = False
     cache_dir: str | None = None
     save_diagnostics: bool = False
+    save_temporal_stack: bool = True  # Persist per-date Landsat arrays before compositing
+    diagnostic_bands: list[str] = field(default_factory=lambda: ["B3", "B4", "B5"])
+
+    # Compositing options
+    landsat_composite_method: str = "mean"  # "mean" or "median"
+    log_composite_coverage: bool = False  # Log per-scene valid pixel coverage
 
     @classmethod
     def for_bm_parity(cls, bbox: BBox, date: datetime, output_path: str) -> "PipelineConfig":

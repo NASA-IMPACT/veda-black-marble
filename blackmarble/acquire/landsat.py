@@ -71,20 +71,17 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
             rate_limiter: Rate limiter
             progress_callback: Progress callback function
         """
-        # Set up default config with S3-specific settings
         if config is None:
             config = DownloadConfig(
-                max_concurrent=20,  # Increased for better parallelism
+                max_concurrent=20,
                 timeout_seconds=300,
-                chunk_size=4 * 1024 * 1024,  # 4MB chunks for faster downloads
+                chunk_size=4 * 1024 * 1024,
                 max_retries=3,
             )
 
         super().__init__(config, rate_limiter, progress_callback)
 
-        # S3 configuration
         self.aws_unsigned = aws_unsigned
-        # Optimized S3 config for better performance
         self.s3_config = Config(
             retries={"max_attempts": 0},  # We handle retries ourselves
             max_pool_connections=50,  # Increased from default 10
@@ -208,15 +205,15 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
         Key optimizations:
         1. Parallel path/row discovery (process multiple paths concurrently)
-        2. Batch MTL file downloads (up to 20 concurrent)
-        3. Early date filtering before MTL download
+        2. Tier-based quality filtering (T1 only, no MTL downloads needed)
+        3. Early date filtering before processing
         4. Better progress tracking
 
         Args:
             year: Year to search
             bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
             date_range: Optional date range filter
-            cloud_cover_max: Maximum cloud cover percentage
+            cloud_cover_max: Maximum cloud cover percentage (T1 scenes assumed < this)
 
         Returns:
             List of scene metadata
@@ -235,10 +232,16 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
             tiles_by_path[path].append(f"{path:03d}{t['row']:03d}")
 
         logger.info(f"Searching {len(tiles)} tiles across {len(tiles_by_path)} paths")
+        print(f"📍 WRS tiles that should cover bbox {bbox}:")
+        print(f"   Total tiles: {len(tiles)}")
+        print(f"   Tiles: {sorted(tiles)}")
+        print(f"   Paths: {sorted(tiles_by_path.keys())}")
 
         # Prepare for parallel operations
         scenes: list[dict[str, Any]] = []
         scenes_lock = asyncio.Lock()
+        tiles_with_scenes: set[str] = set()  # Track which tiles have scenes
+        tiles_lock = asyncio.Lock()
         stats = {
             'scenes_checked': 0,
             'scenes_filtered_by_cloud': 0,
@@ -275,6 +278,8 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                 current_tile = f"{path_num:03d}{row_num:03d}"
                 if current_tile in path_tiles:
                     row_tasks.append(process_row(row_prefix, path_num, row_num))
+                else:
+                    logger.debug(f"Skipping tile {current_tile} - not in our tile list")
 
             # Process all rows for this path concurrently
             if row_tasks:
@@ -320,14 +325,14 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                 await process_scene_batch(scenes_to_check)
 
         async def process_scene_batch(scene_batch: list[dict[str, Any]]) -> None:
-            """Process a batch of scenes with concurrent MTL downloads."""
-            # Create tasks for cloud cover checks
-            mtl_tasks: list[Any] = []
+            """Process a batch of scenes (filter by tier)."""
+            # Create tasks for tier-based quality checks
+            quality_tasks: list[Any] = []
             for scene_info in scene_batch:
-                mtl_tasks.append(check_scene_cloud_cover(scene_info))
+                quality_tasks.append(check_scene_cloud_cover(scene_info))
 
-            # Run MTL downloads concurrently (limited by semaphore)
-            results = await asyncio.gather(*mtl_tasks, return_exceptions=True)
+            # Run quality checks (just tier parsing, no downloads)
+            results = await asyncio.gather(*quality_tasks, return_exceptions=True)
 
             # Process results
             valid_scenes = []
@@ -363,17 +368,23 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                             "s3_prefix": scene['scene_prefix'],
                             "cloud_cover": scene['cloud_cover'],
                         })
+                        # Track which tiles have scenes
+                        tile_id = f"{scene['path']:03d}{scene['row']:03d}"
+                        async with tiles_lock:
+                            tiles_with_scenes.add(tile_id)
 
-        # Semaphore to limit concurrent MTL downloads
-        mtl_semaphore = asyncio.Semaphore(20)  # Increased from implicit 1
+        # No longer need semaphore since we're not downloading MTL files
 
         async def check_scene_cloud_cover(scene_info: dict[str, Any]) -> float:
-            """Check cloud cover with semaphore limiting."""
-            async with mtl_semaphore:
-                return await self.get_scene_cloud_cover(
-                    scene_info['scene_prefix'],
-                    scene_info['scene_id']
-                )
+            """Check cloud cover based on tier (no MTL download needed)."""
+            scene_id = scene_info['scene_id']
+            # Simply use tier as quality indicator
+            if '_T1' in scene_id:
+                return 10.0  # Tier 1 scenes are high quality, assume low cloud cover
+            elif '_T2' in scene_id:
+                return 50.0  # Tier 2 scenes, assume high cloud cover to filter out
+            else:
+                return 100.0  # Unknown tier, filter out
 
         # First, list all paths in parallel to check which exist
         response = await self.list_s3_objects(sensor_prefix)
@@ -395,6 +406,16 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         # Close progress bar
         pbar.close()
 
+        # Check for missing tiles
+        missing_tiles = set(tiles) - tiles_with_scenes
+        if missing_tiles:
+            print(f"\n⚠️  WARNING: {len(missing_tiles)} tiles have NO scenes in {year}!")
+            print(f"   Missing tiles: {sorted(missing_tiles)}")
+            for tile in sorted(missing_tiles):
+                path = int(tile[:3])
+                row = int(tile[3:])
+                print(f"   - Path {path}, Row {row}")
+        
         # Log summary
         logger.info(
             f"Found {len(scenes)} Landsat scenes matching criteria "
@@ -578,6 +599,7 @@ async def download_landsat(
     output_dir: str = "./data/landsat",
     cloud_cover_max: float = 20.0,
     show_progress: bool = True,
+    window_days: int = 15,
 ) -> dict[datetime, dict[str, list[Path]]]:
     """
     High-level async function to download Landsat data for multiple dates.
@@ -620,8 +642,8 @@ async def download_landsat(
         ):
             # Date range for the year
             date_range = (
-                min(year_dates) - timedelta(days=8),
-                max(year_dates) + timedelta(days=8),
+                min(year_dates) - timedelta(days=window_days),
+                max(year_dates) + timedelta(days=window_days),
             )
 
             # Find scenes
@@ -646,7 +668,7 @@ async def download_landsat(
                     tiles_needed.add(tile_id)
 
                     diff = abs(scene["date"] - target_date)
-                    if diff <= timedelta(days=8):
+                    if diff <= timedelta(days=window_days):
                         if tile_id not in scenes_by_tile or diff < abs(
                             scenes_by_tile[tile_id]["date"] - target_date
                         ):

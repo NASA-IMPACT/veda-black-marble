@@ -21,8 +21,7 @@ def run(
     year: int = typer.Option(..., "--year", help="Target year for data."),
     month: int = typer.Option(..., "--month", help="Target month for data."),
     day: int = typer.Option(..., "--day", help="Target day for data."),
-    earthdata_token: str
-    | None = typer.Option(
+    earthdata_token: str | None = typer.Option(
         None,
         "--earthdata-token",
         "-t",
@@ -48,6 +47,16 @@ def run(
         "-d",
         help="Save diagnostic intermediate outputs to data/diagnostics/",
     ),
+    diagnostic_bands: str = typer.Option(
+        "B3,B4,B5",
+        "--diagnostic-bands",
+        help="Comma-separated list of Landsat bands to save as diagnostics (e.g., 'B3,B4,B5')",
+    ),
+    landsat_composite_method: str = typer.Option(
+        "mean",
+        "--composite-method",
+        help="Method for creating Landsat composites: 'mean' (smooth, no edges) or 'median' (robust but hard edges)",
+    ),
     cache_downloads: bool = typer.Option(
         False,
         "--cache-downloads",
@@ -57,6 +66,11 @@ def run(
         False,
         "--fractional-roads",
         help="Use fractional road rasterization with multi-scale urban fields (experimental).",
+    ),
+    permissive_compositing: bool = typer.Option(
+        False,
+        "--permissive-compositing",
+        help="Use less aggressive cloud masking for temporal compositing (reduces NaN regions).",
     ),
     ntl_enhancement: str = typer.Option(
         "hybrid",
@@ -140,6 +154,12 @@ def run(
         # Create diagnostics directory
         os.makedirs("data/diagnostics", exist_ok=True)
 
+        # Parse diagnostic bands
+        if diagnostic_bands:
+            bands = [b.strip() for b in diagnostic_bands.split(",") if b.strip()]
+            config.diagnostic_bands = bands
+            typer.echo(f"   Composite bands to save: {', '.join(bands)}")
+
     # Enable download caching if requested
     if cache_downloads:
         config.cache_downloads = True
@@ -182,6 +202,17 @@ def run(
         typer.echo(f"🌃 NTL enhancement: Urban field ({ntl_enhancement} mode)")
         if fractional_roads:
             typer.echo(f"   Urban field scales: {config.analysis.urban_field_sigmas} pixels")
+
+    # Set compositing method
+    config.landsat_composite_method = landsat_composite_method
+    
+    # Enable permissive compositing if requested
+    if permissive_compositing:
+        config.preparation.qa_composite_strategy = "permissive"
+        config.preparation.qa_composite_dilation = 0  # No dilation for compositing
+        config.log_composite_coverage = True  # Enable coverage logging
+        typer.echo("🌤️  Using permissive cloud masking for compositing (less NaN regions)")
+        typer.echo("   Final output will still have proper cloud masking applied")
 
     # Display processing info
     typer.echo("\nStarting Black Marble pipeline:")

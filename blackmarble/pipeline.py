@@ -7,6 +7,7 @@ for maximum performance.
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -16,6 +17,7 @@ from osgeo import gdal
 
 from . import acquire, analyze, enhance, export, prepare
 from .config import PipelineConfig
+from .prepare.diagnostic import save_temporal_stack
 
 # Create logger for spatial debugging
 log = logging.getLogger("bm.spatial")
@@ -36,7 +38,7 @@ def quick_stats(data: ArrayLike, label: str) -> None:
     if data is None:
         logger.debug(f"{label}: None")
         return
-        
+
     logger.debug(f"{label}:")
     logger.debug(f"  Shape: {data.shape}, Dtype: {data.dtype}")
     logger.debug(f"  Min: {np.nanmin(data):.6f}, Max: {np.nanmax(data):.6f}")
@@ -133,18 +135,19 @@ async def black_marble_pipeline(
     viirs_files = download_results.viirs_data
     landsat_files_by_date = download_results.landsat_data
     road_network = download_results.osm_data
-    
+
     # Log OSM road network info
     if road_network is not None:
         log.debug("OSM road network loaded:")
         log.debug(f"  - Nodes: {len(road_network.nodes)}")
         log.debug(f"  - Edges: {len(road_network.edges)}")
-        if hasattr(road_network, 'graph') and 'crs' in road_network.graph:
+        if hasattr(road_network, "graph") and "crs" in road_network.graph:
             log.debug(f"  - CRS: {road_network.graph.get('crs', 'Unknown')}")
-        
+
         # Try to get bounds from the graph
         try:
             import osmnx as ox
+
             # Use edges instead of nodes to avoid MultiIndex issues with tuple node IDs
             edges_gdf = ox.graph_to_gdfs(road_network, nodes=False)
             if len(edges_gdf) > 0:
@@ -180,6 +183,13 @@ async def black_marble_pipeline(
                 os.makedirs(f"{data_dir}/temp", exist_ok=True)
                 vrt_ds = gdal.BuildVRT(viirs_ntl_vrt, [str(f) for f in viirs_ntl_files])
                 vrt_ds = None  # Close to write to disk
+                
+                # Save VRT to diagnostics if requested
+                if config and getattr(config, "save_diagnostics", False):
+                    os.makedirs(f"{data_dir}/diagnostics/vrts", exist_ok=True)
+                    import shutil
+                    shutil.copy(viirs_ntl_vrt, f"{data_dir}/diagnostics/vrts/viirs_gap_filled_ntl_mosaic.vrt")
+                    print(f"  Saved VRT to: data/diagnostics/vrts/viirs_gap_filled_ntl_mosaic.vrt")
 
                 with rasterio.open(viirs_ntl_vrt) as src:
                     viirs_ntl = src.read(1)
@@ -193,16 +203,20 @@ async def black_marble_pipeline(
             logger.debug(f"Cropping VIIRS data to bbox: {bbox}")
             logger.debug(f"Original VIIRS shape: {viirs_ntl.shape}")
             logger.debug(f"Original VIIRS CRS: {viirs_profile['crs']}")
-            orig_bounds = rasterio.transform.array_bounds(viirs_ntl.shape[0], viirs_ntl.shape[1], viirs_profile['transform'])
+            orig_bounds = rasterio.transform.array_bounds(
+                viirs_ntl.shape[0], viirs_ntl.shape[1], viirs_profile["transform"]
+            )
             logger.debug(f"Original VIIRS bounds: {orig_bounds}")
-            
+
             viirs_ntl, viirs_transform, viirs_bounds = prepare.crop_to_bounds(
                 data=viirs_ntl, src_transform=viirs_profile["transform"], bounds=bbox
             )
-            
+
             logger.debug(f"Cropped VIIRS shape: {viirs_ntl.shape}")
             logger.debug(f"Cropped VIIRS bounds: {viirs_bounds}")
-            logger.debug(f"Non-zero pixels after crop: {(viirs_ntl > 0).sum()} ({(viirs_ntl > 0).sum() / viirs_ntl.size * 100:.1f}%)")
+            logger.debug(
+                f"Non-zero pixels after crop: {(viirs_ntl > 0).sum()} ({(viirs_ntl > 0).sum() / viirs_ntl.size * 100:.1f}%)"
+            )
 
             # Resample to finer resolution
             target_resolution = 0.00011111111  # ~12 meters
@@ -264,7 +278,7 @@ async def black_marble_pipeline(
         f"Using projection: {target_crs} "
         f"(UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'})"
     )
-    
+
     log.debug(f"Target CRS determined from bbox center:")
     log.debug(f"  - BBox: {bbox}")
     log.debug(f"  - Center: ({center_lon:.6f}, {center_lat:.6f})")
@@ -287,12 +301,20 @@ async def black_marble_pipeline(
         config.preparation.qa_dilation_radius if config and hasattr(config, "preparation") else 3
     )
 
-    # Initialize band stacks
+    # Initialize band stacks and index stacks
     band_stacks = {"B3": [], "B4": [], "B5": []}
+    band_dates = {"B3": [], "B4": [], "B5": []}  # Track dates for diagnostics
+    
+    # Initialize index stacks for index-first calculation
+    index_stacks = {"ndvi": [], "ndwi": []}
+    index_dates = []  # Dates for index composites
     reference_profile = None
 
     # Track all landsat files for metadata
     all_landsat_files = {"B3": [], "B4": [], "B5": []}
+    
+    # Track which tiles we actually have data for
+    tiles_with_data = set()
 
     # Add memory monitoring if available
     monitor_memory = False
@@ -308,7 +330,7 @@ async def black_marble_pipeline(
 
     # Original in-memory processing
     print(f"\n💾 Processing {len(landsat_files_by_date)} Landsat dates")
-    
+
     # Debug: Print structure of landsat_files_by_date
     if not landsat_files_by_date:
         print("WARNING: landsat_files_by_date is empty!")
@@ -337,8 +359,26 @@ async def black_marble_pipeline(
         missing_bands = [b for b in REQUIRED_BANDS if b not in date_files or not date_files.get(b)]
         if missing_bands:
             print(f"  Skipping - missing bands: {missing_bands}")
-            print(f"  Available: {[b for b in REQUIRED_BANDS if b in date_files and date_files.get(b)]}")
+            print(
+                f"  Available: {[b for b in REQUIRED_BANDS if b in date_files and date_files.get(b)]}"
+            )
             continue
+            
+        # Track which tiles this date has
+        date_tiles = set()
+        for band, paths in date_files.items():
+            for path in paths:
+                # Extract path/row from filename
+                filename = Path(path).stem
+                parts = filename.split('_')
+                if len(parts) >= 3:
+                    pathrow = parts[2]
+                    if len(pathrow) == 6 and pathrow.isdigit():
+                        date_tiles.add(pathrow)
+                        tiles_with_data.add(pathrow)
+        
+        if date_tiles:
+            print(f"  Tiles for this date: {sorted(date_tiles)}")
 
         # Convert paths to tuple format expected by process_landsat_date
         # Format is: (band_files, qa_pixel_files, qa_radsat_files, qa_aerosol_files)
@@ -349,40 +389,181 @@ async def black_marble_pipeline(
                 bands_data[band] = ([str(p) for p in paths], [], [], [])
 
         # Process this date's data
+        # Use less aggressive masking for compositing if configured
+        composite_strategy = getattr(config.preparation, "qa_composite_strategy", None) if config else None
+        composite_dilation = getattr(config.preparation, "qa_composite_dilation", None) if config else None
+        
+        actual_strategy = composite_strategy or getattr(config.preparation, "qa_cloud_strategy", "moderate") if config else "moderate"
+        actual_dilation = composite_dilation if composite_dilation is not None else dilate_pixels
+        
         processed_data = prepare.process_landsat_date(
             bands_data=bands_data,
             bbox=bbox,
             apply_qa_mask=True,
-            dilate_pixels=dilate_pixels,
-            cloud_strategy="moderate",
+            dilate_pixels=actual_dilation,
+            cloud_strategy=actual_strategy,
         )
 
-        # Add to stacks
-        for band_name in ["B3", "B4", "B5"]:
-            if band_name in processed_data:
-                masked_data, profile = processed_data[band_name]
-                band_stacks[band_name].append(masked_data)
-
+        # Check if we should calculate indices first (new approach)
+        if config and config.analysis.calculate_indices_first and not config.analysis.use_legacy_indices:
+            # Calculate indices for this date BEFORE temporal compositing
+            if "B5" in processed_data and "B4" in processed_data and "B3" in processed_data:
+                # Get the masked data
+                b3_data, _ = processed_data["B3"]
+                b4_data, _ = processed_data["B4"]
+                b5_data, profile = processed_data["B5"]
+                
                 if reference_profile is None:
                     reference_profile = profile
+                
+                # Calculate NDVI for this date
+                ndvi_date = analyze.calculate_ndvi(
+                    nir=b5_data,
+                    red=b4_data,
+                    mask_low_denom=config.analysis.mask_low_denom
+                ).astype(np.float32)  # Control memory
+                
+                # Calculate NDWI for this date
+                ndwi_date = analyze.calculate_ndwi(
+                    green=b3_data,
+                    nir=b5_data,
+                    mask_low_denom=config.analysis.mask_low_denom
+                ).astype(np.float32)  # Control memory
+                
+                # Add to index stacks
+                index_stacks["ndvi"].append(ndvi_date)
+                index_stacks["ndwi"].append(ndwi_date)
+                index_dates.append(target_date)
+                
+                # Optional: Delete bands to save memory
+                if config.memory.delete_bands_after_indices:
+                    del b3_data, b4_data, b5_data
+                    import gc
+                    gc.collect()
+                    
+                # Track files for metadata
+                for band_name in ["B3", "B4", "B5"]:
+                    if band_name in bands_data:
+                        band_files, _, _, _ = bands_data[band_name]
+                        all_landsat_files[band_name].extend(band_files)
+            else:
+                print(f"  Skipping index calculation - missing required bands")
+        else:
+            # Legacy approach: Store bands for later
+            for band_name in ["B3", "B4", "B5"]:
+                if band_name in processed_data:
+                    masked_data, profile = processed_data[band_name]
+                    band_stacks[band_name].append(masked_data)
 
-                # Track downloaded files for metadata
-                if band_name in bands_data:
-                    band_files, _, _, _ = bands_data[band_name]
-                    all_landsat_files[band_name].extend(band_files)
+                    if reference_profile is None:
+                        reference_profile = profile
+
+                    # Track downloaded files for metadata
+                    if band_name in bands_data:
+                        band_files, _, _, _ = bands_data[band_name]
+                        all_landsat_files[band_name].extend(band_files)
+
+                    band_dates[band_name].append(target_date)  # NEW: track date
 
         # Log memory after processing date
-        if monitor_memory and process is not None and any(band_stacks.values()):
+        if monitor_memory and process is not None:
             memory_gb = process.memory_info().rss / 1024 / 1024 / 1024
-            total_arrays = sum(len(stack) for stack in band_stacks.values())
-            print(
-                f"  Memory after date: {memory_gb:.1f} GB (total arrays in memory: {total_arrays})"
-            )
+            if config and config.analysis.calculate_indices_first and not config.analysis.use_legacy_indices:
+                total_arrays = sum(len(stack) for stack in index_stacks.values())
+                print(
+                    f"  Memory after date: {memory_gb:.1f} GB (index arrays in memory: {total_arrays})"
+                )
+            else:
+                total_arrays = sum(len(stack) for stack in band_stacks.values())
+                print(
+                    f"  Memory after date: {memory_gb:.1f} GB (band arrays in memory: {total_arrays})"
+                )
+
+    # Persist per-date arrays for diagnostics
+    if config and getattr(config, "save_temporal_stack", False) and reference_profile is not None:
+        for bn, stack in band_stacks.items():
+            if stack:
+                save_temporal_stack(
+                    stack=stack,
+                    band_name=bn,
+                    dates=band_dates[bn],
+                    reference_profile=reference_profile,
+                )
+
+    # Check which tiles we got vs expected
+    if tiles_with_data:
+        from .acquire.wrs_utils import get_wrs_tiles_for_bbox_tuple
+        expected_tiles = get_wrs_tiles_for_bbox_tuple(bbox)
+        expected_pathrows = {f"{t['path']:03d}{t['row']:03d}" for t in expected_tiles}
+        
+        print(f"\n📊 Tile coverage summary:")
+        print(f"  Expected tiles for bbox: {sorted(expected_pathrows)}")
+        print(f"  Tiles with data: {sorted(tiles_with_data)}")
+        
+        missing_tiles = expected_pathrows - tiles_with_data
+        if missing_tiles:
+            print(f"  ⚠️  MISSING TILES: {sorted(missing_tiles)}")
+            for pr in sorted(missing_tiles):
+                path = int(pr[:3])
+                row = int(pr[3:])
+                print(f"     - Path {path}, Row {row}")
+        else:
+            print(f"  ✅ All expected tiles have data!")
 
     # Create temporal composites
     print("\n⏳ Creating Landsat temporal composites...")
 
-    if not any(band_stacks.values()):
+    if config and config.analysis.calculate_indices_first and not config.analysis.use_legacy_indices and any(index_stacks.values()):
+        # NEW APPROACH: Create index composites (indices already calculated per-date)
+        print("  Using index-first calculation (mathematically correct)")
+        
+        # Create NDVI composite
+        if index_stacks["ndvi"]:
+            print(f"  Creating NDVI composite from {len(index_stacks['ndvi'])} dates")
+            ndvi_composite = analyze.create_index_temporal_composite(
+                index_stacks["ndvi"],
+                method=config.analysis.ndvi_composite_method,
+                percentile=config.analysis.ndvi_composite_percentile,
+                min_valid_observations=config.analysis.min_valid_observations
+            )
+            print(f"    NDVI composite range: [{np.nanmin(ndvi_composite):.3f}, {np.nanmax(ndvi_composite):.3f}]")
+            print(f"    Valid pixels: {(~np.isnan(ndvi_composite)).sum() / ndvi_composite.size * 100:.1f}%")
+        else:
+            ndvi_composite = None
+            
+        # Create NDWI composite  
+        if index_stacks["ndwi"]:
+            print(f"  Creating NDWI composite from {len(index_stacks['ndwi'])} dates")
+            ndwi_composite = analyze.create_index_temporal_composite(
+                index_stacks["ndwi"],
+                method=config.analysis.ndwi_composite_method,
+                percentile=config.analysis.ndwi_composite_percentile,
+                min_valid_observations=config.analysis.min_valid_observations
+            )
+            print(f"    NDWI composite range: [{np.nanmin(ndwi_composite):.3f}, {np.nanmax(ndwi_composite):.3f}]")
+            print(f"    Valid pixels: {(~np.isnan(ndwi_composite)).sum() / ndwi_composite.size * 100:.1f}%")
+        else:
+            ndwi_composite = None
+            
+        # For NDUI, we also want a high-percentile NDVI
+        if index_stacks["ndvi"] and config.analysis.ndvi_composite_method == "percentile":
+            print(f"  Creating 85th percentile NDVI for NDUI vegetation correction")
+            ndvi_for_ndui = analyze.create_index_temporal_composite(
+                index_stacks["ndvi"],
+                method="percentile",
+                percentile=85.0,
+                min_valid_observations=config.analysis.min_valid_observations
+            )
+        else:
+            ndvi_for_ndui = ndvi_composite  # Use the regular composite
+            
+        # We still need to reproject indices to target CRS
+        # Create a dummy "landsat_reprojected" dict for compatibility
+        landsat_reprojected = {}
+        
+        # Skip band compositing entirely
+        
+    elif not any(band_stacks.values()):
         print("⚠️  No valid Landsat data found - skipping index calculations")
         landsat_reprojected = {}
     else:
@@ -394,16 +575,31 @@ async def black_marble_pipeline(
             if stack:
                 print(f"  Creating temporal composite for {band_name} from {len(stack)} dates")
 
-                # Create median composite from pre-masked data with scaling
-                logger.debug(f"Creating composite with scale_factor={scale_factor}, add_offset={add_offset}")
-                composite = analyze.create_landsat_median_composite(
-                    stack, scale_factor=scale_factor, add_offset=add_offset
+                # Create composite from pre-masked data with scaling
+                # Use mean instead of median to avoid hard edges at scene boundaries
+                composite_method = getattr(config, "landsat_composite_method", "mean")
+                logger.debug(
+                    f"Creating composite with scale_factor={scale_factor}, add_offset={add_offset}, method={composite_method}"
                 )
+                # Check if we should log coverage
+                log_coverage = getattr(config, "log_composite_coverage", False) if config else False
                 
+                composite = analyze.create_landsat_median_composite(
+                    stack, 
+                    scale_factor=scale_factor, 
+                    add_offset=add_offset, 
+                    method=composite_method,
+                    log_coverage=log_coverage
+                )
+
                 logger.debug(f"Composite stats for {band_name}:")
                 logger.debug(f"  Min: {np.nanmin(composite):.3f}, Max: {np.nanmax(composite):.3f}")
-                logger.debug(f"  NaN pixels: {np.isnan(composite).sum()} ({np.isnan(composite).sum() / composite.size * 100:.1f}%)")
-                logger.debug(f"  Non-zero pixels: {(composite != 0).sum()} ({(composite != 0).sum() / composite.size * 100:.1f}%)")
+                logger.debug(
+                    f"  NaN pixels: {np.isnan(composite).sum()} ({np.isnan(composite).sum() / composite.size * 100:.1f}%)"
+                )
+                logger.debug(
+                    f"  Non-zero pixels: {(composite != 0).sum()} ({(composite != 0).sum() / composite.size * 100:.1f}%)"
+                )
 
                 landsat_bands[band_name] = (composite, reference_profile)
                 landsat_profiles[band_name] = reference_profile
@@ -413,7 +609,9 @@ async def black_marble_pipeline(
                     f"coverage={(composite > 0).sum() / composite.size * 100:.1f}%"
                 )
                 # DEBUG: Check if composite is scaled properly
-                print(f"    Composite range: [{np.nanmin(composite):.3f}, {np.nanmax(composite):.3f}]")
+                print(
+                    f"    Composite range: [{np.nanmin(composite):.3f}, {np.nanmax(composite):.3f}]"
+                )
             else:
                 print(f"  Warning: No data found for {band_name}")
 
@@ -454,9 +652,11 @@ async def black_marble_pipeline(
         logger.debug(f"VIIRS Reprojection:")
         logger.debug(f"  Original VIIRS shape: {viirs_corrected.shape}")
         logger.debug(f"  Original VIIRS CRS: {viirs_profile['crs']}")
-        logger.debug(f"  Original VIIRS bounds: {rasterio.transform.array_bounds(viirs_corrected.shape[0], viirs_corrected.shape[1], viirs_profile['transform'])}")
+        logger.debug(
+            f"  Original VIIRS bounds: {rasterio.transform.array_bounds(viirs_corrected.shape[0], viirs_corrected.shape[1], viirs_profile['transform'])}"
+        )
         logger.debug(f"  Target CRS: {target_crs}")
-        
+
         viirs_reprojected, viirs_transform, viirs_bounds = prepare.reproject_image(
             data=viirs_corrected,
             src_transform=viirs_profile["transform"],
@@ -464,7 +664,7 @@ async def black_marble_pipeline(
             dst_crs=target_crs,
             resampling="bilinear",  # Use bilinear like sync pipeline
         )
-        
+
         logger.debug(f"  Reprojected VIIRS shape: {viirs_reprojected.shape}")
         logger.debug(f"  Reprojected VIIRS bounds: {viirs_bounds}")
 
@@ -476,16 +676,16 @@ async def black_marble_pipeline(
             print(f"📍 Using VIIRS as reference grid (no Landsat reference available)")
             print(f"   Reference CRS: {target_crs} (UTM)")
             print(f"   Reference shape: {reference_shape}")
-        
+
         # Align VIIRS to Landsat grid for consistent processing
         if reference_transform is not None and reference_shape is not None:
             if not landsat_reprojected:
                 print("⚠️  WARNING: No Landsat data available for NDVI calculation!")
                 print("    Pipeline will continue but NDUI calculation will be limited")
-            
+
             print(f"VIIRS shape before alignment: {viirs_reprojected.shape}")
             print(f"Reference Landsat shape: {reference_shape}")
-            
+
             # Debug stats before alignment
             quick_stats(viirs_reprojected, "VIIRS before alignment")
 
@@ -497,26 +697,36 @@ async def black_marble_pipeline(
             logger.debug(f"Aligning VIIRS to Landsat")
             logger.debug(f"  Reference transform: {reference_transform}")
             logger.debug(f"  VIIRS transform: {viirs_transform}")
-            ref_bounds = rasterio.transform.array_bounds(reference_shape[0], reference_shape[1], reference_transform)
-            viirs_bounds = rasterio.transform.array_bounds(viirs_reprojected.shape[0], viirs_reprojected.shape[1], viirs_transform)
+            ref_bounds = rasterio.transform.array_bounds(
+                reference_shape[0], reference_shape[1], reference_transform
+            )
+            viirs_bounds = rasterio.transform.array_bounds(
+                viirs_reprojected.shape[0], viirs_reprojected.shape[1], viirs_transform
+            )
             logger.debug(f"  Reference bounds: {ref_bounds}")
             logger.debug(f"  VIIRS bounds: {viirs_bounds}")
-            
+
             # Check coverage
             x_coverage = min(viirs_bounds[2], ref_bounds[2]) - max(viirs_bounds[0], ref_bounds[0])
             y_coverage = min(viirs_bounds[3], ref_bounds[3]) - max(viirs_bounds[1], ref_bounds[1])
             x_total = ref_bounds[2] - ref_bounds[0]
             y_total = ref_bounds[3] - ref_bounds[1]
-            
+
             logger.debug(f"  Coverage Analysis:")
-            logger.debug(f"    X-axis coverage: {x_coverage/1000:.1f} km of {x_total/1000:.1f} km ({x_coverage/x_total*100:.1f}%)")
-            logger.debug(f"    Y-axis coverage: {y_coverage/1000:.1f} km of {y_total/1000:.1f} km ({y_coverage/y_total*100:.1f}%)")
-            
+            logger.debug(
+                f"    X-axis coverage: {x_coverage/1000:.1f} km of {x_total/1000:.1f} km ({x_coverage/x_total*100:.1f}%)"
+            )
+            logger.debug(
+                f"    Y-axis coverage: {y_coverage/1000:.1f} km of {y_total/1000:.1f} km ({y_coverage/y_total*100:.1f}%)"
+            )
+
             if x_coverage < x_total * 0.95:
-                logger.warning(f"VIIRS is missing {(x_total-x_coverage)/1000:.1f} km on the east side!")
+                logger.warning(
+                    f"VIIRS is missing {(x_total-x_coverage)/1000:.1f} km on the east side!"
+                )
             if y_coverage < y_total * 0.95:
                 logger.warning(f"VIIRS has incomplete Y coverage!")
-            
+
             aligned_rasters = prepare.align_rasters(
                 rasters=[reference_band, viirs_reprojected],
                 transforms=[reference_transform, viirs_transform],
@@ -527,21 +737,20 @@ async def black_marble_pipeline(
             # Extract the aligned VIIRS data
             viirs_reprojected = aligned_rasters[1][0]
             viirs_transform = aligned_rasters[1][1]
-            
+
             # Debug stats after alignment
             quick_stats(viirs_reprojected, "VIIRS after alignment")
 
             print(f"Aligned VIIRS shape: {viirs_reprojected.shape}")
             nonzero_count = (viirs_reprojected > 0).sum()
             nonzero_pct = nonzero_count / viirs_reprojected.size * 100
-            print(
-                f"Aligned VIIRS non-zero pixels: {nonzero_count} "
-                f"({nonzero_pct:.1f}%)"
-            )
-            
+            print(f"Aligned VIIRS non-zero pixels: {nonzero_count} " f"({nonzero_pct:.1f}%)")
+
             # Critical assertion - stop if alignment produced all zeros
             if nonzero_pct < 10.0:  # Less than 10% non-zero is suspicious
-                logger.error(f"CRITICAL: VIIRS alignment produced only {nonzero_pct:.1f}% non-zero pixels!")
+                logger.error(
+                    f"CRITICAL: VIIRS alignment produced only {nonzero_pct:.1f}% non-zero pixels!"
+                )
                 logger.error("This likely indicates incorrect tile selection or alignment failure.")
                 raise RuntimeError(
                     f"VIIRS alignment failed - only {nonzero_pct:.1f}% non-zero pixels. "
@@ -649,22 +858,100 @@ async def black_marble_pipeline(
                 "This indicates no Landsat or VIIRS data was successfully processed."
             )
 
+    # Save diagnostic composite bands if requested
+    if config and getattr(config, "save_diagnostics", False) and landsat_reprojected:
+        diagnostic_bands = getattr(config, "diagnostic_bands", ["B3", "B4", "B5"])
+        print(f"\n💾 Saving diagnostic composite bands: {diagnostic_bands}")
+
+        for band_name in diagnostic_bands:
+            if band_name in landsat_reprojected:
+                band_data = landsat_reprojected[band_name]
+                output_path = f"data/diagnostics/composite_{band_name}.tif"
+
+                prepare.save_diagnostic(
+                    band_data,
+                    reference_transform,
+                    output_path,
+                    f"Landsat {band_name} Temporal Composite",
+                    crs=target_crs,
+                )
+
+                # Log statistics
+                valid_pixels = ~np.isnan(band_data)
+                if valid_pixels.any():
+                    print(
+                        f"  {band_name}: min={np.nanmin(band_data):.3f}, max={np.nanmax(band_data):.3f}, "
+                        f"coverage={valid_pixels.sum() / band_data.size * 100:.1f}%"
+                    )
+                else:
+                    print(f"  {band_name}: No valid pixels")
+
     # ==================== ANALYZE PHASE ====================
     print("\n📈 Calculating indices...")
 
     # Calculate spectral indices
     ndvi = None
     ndwi = None
-
-    # Use the reprojected data (already in UTM)
-    if "B5" in landsat_reprojected and "B4" in landsat_reprojected:
+    
+    # Check if we already have indices from index-first calculation
+    if config and config.analysis.calculate_indices_first and not config.analysis.use_legacy_indices:
+        # We already have composited indices - just need to reproject them
+        if 'ndvi_composite' in locals() and ndvi_composite is not None and reference_profile is not None:
+            print("  Reprojecting pre-calculated NDVI composite...")
+            ndvi, ndvi_transform, _ = prepare.reproject_image(
+                data=ndvi_composite,
+                src_transform=reference_profile["transform"],
+                src_crs=reference_profile["crs"],
+                dst_crs=target_crs,
+                resampling="bilinear",
+            )
+            print(f"    Reprojected NDVI shape: {ndvi.shape}")
+            
+            # Also reproject the high-percentile NDVI for NDUI if different
+            if 'ndvi_for_ndui' in locals() and ndvi_for_ndui is not None and ndvi_for_ndui is not ndvi_composite:
+                ndvi_for_ndui_reprojected, _, _ = prepare.reproject_image(
+                    data=ndvi_for_ndui,
+                    src_transform=reference_profile["transform"],
+                    src_crs=reference_profile["crs"],
+                    dst_crs=target_crs,
+                    resampling="bilinear",
+                )
+            else:
+                ndvi_for_ndui_reprojected = ndvi
+                
+        if 'ndwi_composite' in locals() and ndwi_composite is not None and reference_profile is not None:
+            print("  Reprojecting pre-calculated NDWI composite...")
+            ndwi, ndwi_transform, _ = prepare.reproject_image(
+                data=ndwi_composite,
+                src_transform=reference_profile["transform"],
+                src_crs=reference_profile["crs"],
+                dst_crs=target_crs,
+                resampling="bilinear",
+            )
+            print(f"    Reprojected NDWI shape: {ndwi.shape}")
+            
+        # Update reference transform if we have it
+        if 'ndvi_transform' in locals() and reference_transform is None:
+            reference_transform = ndvi_transform
+            reference_shape = ndvi.shape
+            
+    # Legacy approach: calculate from band composites
+    elif "B5" in landsat_reprojected and "B4" in landsat_reprojected:
         # DEBUG: Check Landsat values before NDVI
         logger.debug("Landsat Values Before NDVI:")
-        logger.debug(f"  B4 (red): min={np.nanmin(landsat_reprojected['B4']):.3f}, max={np.nanmax(landsat_reprojected['B4']):.3f}")
-        logger.debug(f"  B4 negative pixels: {(landsat_reprojected['B4'] < 0).sum()} ({(landsat_reprojected['B4'] < 0).sum() / landsat_reprojected['B4'].size * 100:.1f}%)")
-        logger.debug(f"  B5 (NIR): min={np.nanmin(landsat_reprojected['B5']):.3f}, max={np.nanmax(landsat_reprojected['B5']):.3f}")
-        logger.debug(f"  B5 negative pixels: {(landsat_reprojected['B5'] < 0).sum()} ({(landsat_reprojected['B5'] < 0).sum() / landsat_reprojected['B5'].size * 100:.1f}%)")
-        
+        logger.debug(
+            f"  B4 (red): min={np.nanmin(landsat_reprojected['B4']):.3f}, max={np.nanmax(landsat_reprojected['B4']):.3f}"
+        )
+        logger.debug(
+            f"  B4 negative pixels: {(landsat_reprojected['B4'] < 0).sum()} ({(landsat_reprojected['B4'] < 0).sum() / landsat_reprojected['B4'].size * 100:.1f}%)"
+        )
+        logger.debug(
+            f"  B5 (NIR): min={np.nanmin(landsat_reprojected['B5']):.3f}, max={np.nanmax(landsat_reprojected['B5']):.3f}"
+        )
+        logger.debug(
+            f"  B5 negative pixels: {(landsat_reprojected['B5'] < 0).sum()} ({(landsat_reprojected['B5'] < 0).sum() / landsat_reprojected['B5'].size * 100:.1f}%)"
+        )
+
         ndvi = analyze.calculate_ndvi(nir=landsat_reprojected["B5"], red=landsat_reprojected["B4"])
 
         # Save diagnostic output if requested
@@ -677,7 +964,8 @@ async def black_marble_pipeline(
                 crs=target_crs,
             )
 
-    if "B3" in landsat_reprojected and "B5" in landsat_reprojected:
+    # Legacy NDWI calculation
+    if ndwi is None and "B3" in landsat_reprojected and "B5" in landsat_reprojected:
         ndwi = analyze.calculate_ndwi(
             green=landsat_reprojected["B3"], nir=landsat_reprojected["B5"]
         )
@@ -917,14 +1205,22 @@ async def black_marble_pipeline(
     # Calculate urban index combining NTL and vegetation
     ndui = None
     if ntl_composite is not None and ndvi is not None:
+        # Use the appropriate NDVI for NDUI calculation
+        ndvi_for_ndui_final = ndvi  # Default to regular NDVI
+        
+        # Check if we have a special high-percentile NDVI for NDUI
+        if 'ndvi_for_ndui_reprojected' in locals() and ndvi_for_ndui_reprojected is not None:
+            ndvi_for_ndui_final = ndvi_for_ndui_reprojected
+            print("  Using 85th percentile NDVI for NDUI vegetation correction")
+        
         # Verify shapes match before calculating NDUI
-        if ntl_composite.shape != ndvi.shape:
+        if ntl_composite.shape != ndvi_for_ndui_final.shape:
             print("WARNING: Shape mismatch after alignment!")
             print(f"  NTL shape: {ntl_composite.shape}")
-            print(f"  NDVI shape: {ndvi.shape}")
+            print(f"  NDVI shape: {ndvi_for_ndui_final.shape}")
             raise ValueError(
                 f"NTL and NDVI shapes still don't match after alignment: "
-                f"{ntl_composite.shape} vs {ndvi.shape}. This indicates a problem "
+                f"{ntl_composite.shape} vs {ndvi_for_ndui_final.shape}. This indicates a problem "
                 f"with the spatial alignment step."
             )
 
@@ -937,14 +1233,14 @@ async def black_marble_pipeline(
         )
         print(f"  NTL range: [{np.nanmin(ntl_composite):.3f}, {np.nanmax(ntl_composite):.3f}]")
         print(
-            f"  NDVI non-NaN pixels: {(~np.isnan(ndvi)).sum()} "
-            f"({(~np.isnan(ndvi)).sum() / ndvi.size * 100:.1f}%)"
+            f"  NDVI non-NaN pixels: {(~np.isnan(ndvi_for_ndui_final)).sum()} "
+            f"({(~np.isnan(ndvi_for_ndui_final)).sum() / ndvi_for_ndui_final.size * 100:.1f}%)"
         )
-        print(f"  NDVI range: [{np.nanmin(ndvi):.3f}, {np.nanmax(ndvi):.3f}]")
+        print(f"  NDVI range: [{np.nanmin(ndvi_for_ndui_final):.3f}, {np.nanmax(ndvi_for_ndui_final):.3f}]")
 
         ndui = analyze.calculate_ndui(
             ntl=ntl_composite,
-            ndvi=ndvi,
+            ndvi=ndvi_for_ndui_final,
             ndwi=ndwi,  # Optional, can be None
             ntl_floor=config.analysis.ntl_floor if config and hasattr(config, "analysis") else 0.1,
             ntl_ceiling=config.analysis.ntl_ceiling
@@ -1249,8 +1545,10 @@ async def black_marble_pipeline(
         "statistics": statistics,
     }
 
+
 # Sync wrapper for CLI convenience
 def black_marble_pipeline_sync(**kwargs):
     """Synchronous wrapper for the async pipeline."""
     import asyncio
+
     return asyncio.run(black_marble_pipeline(**kwargs))
