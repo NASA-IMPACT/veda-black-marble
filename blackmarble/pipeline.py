@@ -1049,13 +1049,15 @@ async def black_marble_pipeline(
         # We already have composited indices - just need to reproject them
         if ndvi_composite is not None and reference_profile is not None:
             print("  Reprojecting pre-calculated NDVI composite...")
+            print(f"    Using reference grid: {reference_shape}")
             ndvi, ndvi_transform, _ = prepare.reproject_image(
                 data=ndvi_composite,
                 src_transform=reference_profile["transform"],
                 src_crs=reference_profile["crs"],
                 dst_crs=target_crs,
+                dst_transform=reference_transform,
+                dst_shape=reference_shape,
                 resampling="bilinear",
-                resolution=target_resolution_landsat,
             )
             print(f"    Reprojected NDVI shape: {ndvi.shape}")
             
@@ -1066,21 +1068,24 @@ async def black_marble_pipeline(
                     src_transform=reference_profile["transform"],
                     src_crs=reference_profile["crs"],
                     dst_crs=target_crs,
+                    dst_transform=reference_transform,
+                    dst_shape=reference_shape,
                     resampling="bilinear",
-                    resolution=target_resolution_landsat,
                 )
             else:
                 ndvi_for_ndui_reprojected = ndvi
                 
         if ndwi_composite is not None and reference_profile is not None:
             print("  Reprojecting pre-calculated NDWI composite...")
+            print(f"    Using reference grid: {reference_shape}")
             ndwi, ndwi_transform, _ = prepare.reproject_image(
                 data=ndwi_composite,
                 src_transform=reference_profile["transform"],
                 src_crs=reference_profile["crs"],
                 dst_crs=target_crs,
+                dst_transform=reference_transform,
+                dst_shape=reference_shape,
                 resampling="bilinear",
-                resolution=target_resolution_landsat,
             )
             print(f"    Reprojected NDWI shape: {ndwi.shape}")
             
@@ -1359,70 +1364,29 @@ async def black_marble_pipeline(
 
             ntl_composite = ntl_enhanced
 
-    # Align NDVI/NDWI to reference grid if needed (especially important when VIIRS is the reference)
+    # Verify all arrays are aligned to the reference grid
     if reference_transform is not None and reference_shape is not None:
-        # Align NDVI if it exists and hasn't been aligned yet
-        if ndvi is not None and hasattr(ndvi, 'shape'):
-            # Check if NDVI needs alignment (different shape from reference)
-            if ndvi.shape != reference_shape:
-                print(f"\\n📐 Aligning NDVI to reference grid...")
-                print(f"  NDVI shape: {ndvi.shape}")
-                print(f"  Reference shape: {reference_shape}")
-                
-                # We need the NDVI transform - it should have been set during reprojection
-                if 'ndvi_transform' in locals() and ndvi_transform is not None:
-                    # Create a dummy reference array with the correct shape
-                    ref_array = np.zeros(reference_shape, dtype=np.float32)
-                    aligned_rasters = prepare.align_rasters(
-                        rasters=[ref_array, ndvi],
-                        transforms=[reference_transform, ndvi_transform],
-                        reference_idx=0,
-                        resampling="bilinear",
-                    )
-                    ndvi = aligned_rasters[1][0]
-                    ndvi_transform = aligned_rasters[1][1]
-                    print(f"  Aligned NDVI shape: {ndvi.shape}")
-                else:
-                    print("  ⚠️  WARNING: Cannot align NDVI - no transform available")
+        print(f"\\n✅ Verifying spatial alignment to reference grid {reference_shape}:")
         
-        # Align NDWI similarly
-        if ndwi is not None and hasattr(ndwi, 'shape'):
-            if ndwi.shape != reference_shape:
-                print(f"\\n📐 Aligning NDWI to reference grid...")
-                print(f"  NDWI shape: {ndwi.shape}")
-                print(f"  Reference shape: {reference_shape}")
-                
-                if 'ndwi_transform' in locals() and ndwi_transform is not None:
-                    # Create a dummy reference array with the correct shape
-                    ref_array = np.zeros(reference_shape, dtype=np.float32)
-                    aligned_rasters = prepare.align_rasters(
-                        rasters=[ref_array, ndwi],
-                        transforms=[reference_transform, ndwi_transform],
-                        reference_idx=0,
-                        resampling="bilinear",
-                    )
-                    ndwi = aligned_rasters[1][0]
-                    ndwi_transform = aligned_rasters[1][1]
-                    print(f"  Aligned NDWI shape: {ndwi.shape}")
-                else:
-                    print("  ⚠️  WARNING: Cannot align NDWI - no transform available")
+        if ndvi is not None and ndvi.shape != reference_shape:
+            raise ValueError(
+                f"NDVI shape {ndvi.shape} does not match reference {reference_shape}. "
+                "This indicates a reprojection error."
+            )
         
-        # Align high-percentile NDVI for NDUI if it exists
-        if ndvi_for_ndui_reprojected is not None and hasattr(ndvi_for_ndui_reprojected, 'shape'):
-            if ndvi_for_ndui_reprojected.shape != reference_shape:
-                print(f"\\n📐 Aligning high-percentile NDVI to reference grid...")
-                # Use the same transform as regular NDVI
-                if 'ndvi_transform' in locals() and ndvi_transform is not None:
-                    # Create a dummy reference array with correct shape
-                    ref_array = np.zeros(reference_shape, dtype=np.float32)
-                    aligned_rasters = prepare.align_rasters(
-                        rasters=[ref_array, ndvi_for_ndui_reprojected],
-                        transforms=[reference_transform, ndvi_transform],
-                        reference_idx=0,
-                        resampling="bilinear",
-                    )
-                    ndvi_for_ndui_reprojected = aligned_rasters[1][0]
-                    print(f"  Aligned high-percentile NDVI shape: {ndvi_for_ndui_reprojected.shape}")
+        if ndwi is not None and ndwi.shape != reference_shape:
+            raise ValueError(
+                f"NDWI shape {ndwi.shape} does not match reference {reference_shape}. "
+                "This indicates a reprojection error."
+            )
+            
+        if ndvi_for_ndui_reprojected is not None and ndvi_for_ndui_reprojected.shape != reference_shape:
+            raise ValueError(
+                f"High-percentile NDVI shape {ndvi_for_ndui_reprojected.shape} does not match "
+                f"reference {reference_shape}. This indicates a reprojection error."
+            )
+        
+        print("  All arrays properly aligned!")
 
     # Calculate urban index combining NTL and vegetation
     ndui = None
