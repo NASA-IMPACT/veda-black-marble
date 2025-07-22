@@ -19,18 +19,16 @@ def streaming_percentile_85(
     loading all arrays into memory. Handles per-pixel rank selection
     based on actual valid observation count.
     
-    Handles arrays of different shapes by padding smaller arrays with NaN
-    to the maximum dimensions found in the stack. This ensures compatibility
-    with temporal composites from different-sized Landsat scenes.
+    Requires all input arrays to have the same shape. This is ensured
+    by using boundless windowed reads in the Landsat processing pipeline.
     
     Args:
         array_stack: Sequence of 2D arrays (e.g., NDVI values per date).
-                    Arrays can have different shapes.
+                    All arrays must have identical shapes.
         min_valid_observations: Minimum valid pixels required for computation
         
     Returns:
-        Tuple of (percentile_85_array, valid_count_array) with shape
-        equal to the maximum dimensions found in the input stack
+        Tuple of (percentile_85_array, valid_count_array)
         
     Algorithm:
         - Maintains top-3 values per pixel using a rolling insertion sort
@@ -50,34 +48,28 @@ def streaming_percentile_85(
     if not array_stack:
         raise ValueError("No data provided")
         
-    # Handle arrays of different shapes by finding the maximum dimensions
-    shapes = [arr.shape for arr in array_stack]
-    max_height = max(s[0] for s in shapes)
-    max_width = max(s[1] for s in shapes)
-    
-    # Log shape information
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(f"Streaming percentile 85: min shape=({min(s[0] for s in shapes)}, {min(s[1] for s in shapes)}), "
-                f"max shape=({max_height}, {max_width})")
+    # All arrays should have the same shape with boundless reads
+    # Get shape from first array
+    first = np.asarray(array_stack[0], dtype=np.float32)
+    height, width = first.shape
     
     # Track top 3 values per pixel (enough for up to ~20 observations)
     # Initialize with -inf so any real value will replace them
-    top_values = np.full((3, max_height, max_width), -np.inf, dtype=np.float32)
+    top_values = np.full((3, height, width), -np.inf, dtype=np.float32)
     
     # Count valid observations per pixel
-    valid_count = np.zeros((max_height, max_width), dtype=np.int32)
+    valid_count = np.zeros((height, width), dtype=np.int32)
     
     # Process each array in the stack
-    for i, arr in enumerate(array_stack):
+    for arr in array_stack:
         arr = np.asarray(arr, dtype=np.float32)
         
-        # Pad array if needed to match maximum dimensions
-        if arr.shape[0] < max_height or arr.shape[1] < max_width:
-            padded = np.full((max_height, max_width), np.nan, dtype=np.float32)
-            padded[:arr.shape[0], :arr.shape[1]] = arr
-            logger.debug(f"  Padded array {i}: {arr.shape} -> {padded.shape}")
-            arr = padded
+        # Verify shape consistency
+        if arr.shape != (height, width):
+            raise ValueError(
+                f"Shape mismatch in array stack. Expected {(height, width)}, got {arr.shape}. "
+                f"This suggests the Landsat windowed reads are not using consistent bounds."
+            )
         
         # Find valid (non-NaN) pixels
         valid_mask = ~np.isnan(arr)
@@ -105,7 +97,7 @@ def streaming_percentile_85(
         top_values[2] = np.where(mask3, arr_safe, top_values[2])
     
     # Compute result based on per-pixel observation count
-    result = np.full((max_height, max_width), np.nan, dtype=np.float32)
+    result = np.full((height, width), np.nan, dtype=np.float32)
     
     # For pixels with enough observations
     has_data = valid_count >= min_valid_observations

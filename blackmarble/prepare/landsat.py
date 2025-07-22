@@ -67,21 +67,23 @@ def _read_windowed(file_path: str, bbox: BBox | None, transform_bbox: bool = Tru
                     f"width={window.width:.1f}, height={window.height:.1f}")
         logger.debug(f"    Requested bbox (src CRS): {bbox_in_src_crs}")
         
-        # Ensure window is within the raster bounds
-        window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
+        # Don't clip to raster bounds - use boundless read for consistent shapes
+        # This ensures all dates have the same array dimensions
+        logger.debug(f"    Using boundless read with original window")
         
-        logger.debug(f"    Window AFTER intersection: col_off={window.col_off:.1f}, row_off={window.row_off:.1f}, "
-                    f"width={window.width:.1f}, height={window.height:.1f}")
+        # Convert window to integer bounds for the read
+        window_int = window.round_lengths().round_offsets()
         
-        # Read only the windowed data
-        data = src.read(1, window=window)
+        # Read the windowed data with boundless=True to get consistent shapes
+        # Areas outside the raster bounds will be filled with NaN
+        data = src.read(1, window=window_int, boundless=True, fill_value=np.nan)
         
-        # Create profile for the windowed data
+        # Create profile for the windowed data using the original requested window
         profile = src.profile.copy()
         profile.update({
-            'height': window.height,
-            'width': window.width,
-            'transform': rasterio.windows.transform(window, src.transform)
+            'height': int(window_int.height),
+            'width': int(window_int.width),
+            'transform': rasterio.windows.transform(window_int, src.transform)
         })
         
         logger.debug(f"    Output shape: {data.shape}")

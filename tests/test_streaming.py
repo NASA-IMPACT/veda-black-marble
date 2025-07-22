@@ -166,33 +166,17 @@ class TestStreamingPercentile85:
         output_values = set(result.flatten())
         assert output_values.issubset(all_input_values)
     
-    def test_different_shapes(self):
-        """Test handling arrays of different shapes (padding behavior)."""
-        # This tests the fix for the broadcasting error
+    def test_shape_consistency_required(self):
+        """Test that different shapes raise an error."""
+        # The streaming implementation requires consistent shapes
+        # which should be ensured by boundless reads in the pipeline
         arrays = [
-            np.ones((100, 200), dtype=np.float32),  # Wide
-            np.ones((100, 150), dtype=np.float32) * 2,  # Narrower
-            np.ones((80, 200), dtype=np.float32) * 3,   # Shorter
-            np.ones((80, 150), dtype=np.float32) * 4,   # Shorter and narrower
+            np.ones((100, 200), dtype=np.float32),
+            np.ones((100, 150), dtype=np.float32) * 2,  # Different width
         ]
         
-        result, valid_count = streaming_percentile_85(arrays)
-        
-        # Result should have the maximum dimensions
-        assert result.shape == (100, 200)
-        assert valid_count.shape == (100, 200)
-        
-        # Check valid counts in different regions
-        assert valid_count[0, 0] == 4      # Top-left: all arrays cover
-        assert valid_count[0, 199] == 2    # Top-right: only wide arrays
-        assert valid_count[99, 0] == 2     # Bottom-left: only tall arrays  
-        assert valid_count[99, 199] == 1   # Bottom-right: only first array
-        
-        # Values should be preserved correctly
-        assert result[0, 0] == 4.0   # All 4 arrays, highest is 4
-        assert result[0, 199] == 3.0  # Only arrays 1 and 3, highest is 3
-        assert result[99, 0] == 2.0   # Only arrays 1 and 2, highest is 2
-        assert result[99, 199] == 1.0 # Only array 1
+        with pytest.raises(ValueError, match="Shape mismatch in array stack"):
+            streaming_percentile_85(arrays)
     
     def test_integration_routing(self):
         """Test that create_index_temporal_composite routes to streaming."""
