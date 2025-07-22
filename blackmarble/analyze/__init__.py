@@ -4,11 +4,13 @@ This module provides analytical functions for:
 - Spectral indices calculation (NDVI, NDWI, NDUI)
 - Temporal compositing (median composite for Landsat)
 - Urban field computation from road networks
+- Streaming algorithms for memory-efficient processing
 """
 
 from .indices import calculate_ndui, calculate_ndvi, calculate_ndwi
 from .temporal import create_landsat_median_composite, create_index_temporal_composite
 from .urban_fields import compute_urban_fields, enhance_ntl_with_urban_field
+from .streaming import streaming_percentile_85
 
 __all__ = [
     "calculate_ndui",
@@ -18,4 +20,5 @@ __all__ = [
     "create_index_temporal_composite",
     "compute_urban_fields",
     "enhance_ntl_with_urban_field",
+    "streaming_percentile_85",
 ]

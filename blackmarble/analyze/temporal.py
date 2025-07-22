@@ -155,6 +155,14 @@ def create_index_temporal_composite(
     """
     if not index_stack:
         raise ValueError("No index data provided for compositing")
+    
+    # Use streaming algorithm for 85th percentile
+    if method == "percentile" and 84.5 <= percentile <= 85.5:
+        from .streaming import streaming_percentile_85
+        composite, valid_count = streaming_percentile_85(
+            index_stack, min_valid_observations
+        )
+        return composite
         
     shapes = [arr.shape for arr in index_stack]
     max_height = max(s[0] for s in shapes)
