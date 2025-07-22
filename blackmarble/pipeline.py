@@ -650,8 +650,8 @@ async def black_marble_pipeline(
         else:
             ndwi_composite = None
             
-        # For NDUI, we also want a high-percentile NDVI
-        if index_stacks["ndvi"] and config.analysis.ndvi_composite_method == "percentile":
+        # For NDUI, we always want a high-percentile NDVI (regardless of main composite method)
+        if index_stacks["ndvi"]:
             print(f"  Creating 85th percentile NDVI for NDUI vegetation correction")
             ndvi_for_ndui = analyze.create_index_temporal_composite(
                 index_stacks["ndvi"],
@@ -660,7 +660,7 @@ async def black_marble_pipeline(
                 min_valid_observations=config.analysis.min_valid_observations
             )
         else:
-            ndvi_for_ndui = ndvi_composite  # Use the regular composite
+            ndvi_for_ndui = ndvi_composite  # Fallback to regular composite if no stack
             
         if config and getattr(config, "save_diagnostics", False) and reference_profile is not None:
             if ndvi_composite is not None:
