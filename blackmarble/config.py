@@ -137,11 +137,15 @@ class AnalysisConfig:
     calculate_indices_first: bool = True  # Calculate indices per-date before compositing
     mask_low_denom: bool = True  # Return NaN for low denominators (preserves correctness)
     
-    # Index-specific composite methods (overrides composite_method for these indices)
-    ndvi_composite_method: Literal["median", "mean", "percentile"] = "percentile"
-    ndvi_composite_percentile: float = 85.0  # 85th percentile captures peak vegetation
+    # Index-specific composite methods for diagnostic/export purposes
+    # Note: These do NOT affect NDUI calculation - see ndvi_percentile_for_ndui below
+    ndvi_composite_method: Literal["median", "mean", "percentile"] = "median"
+    ndvi_composite_percentile: float = 50.0  # Only used when method="percentile"
     ndwi_composite_method: Literal["median", "mean", "percentile"] = "median"
     ndwi_composite_percentile: float = 50.0
+    
+    # NDUI-specific settings
+    ndvi_percentile_for_ndui: float = 85.0  # Always uses percentile method for vegetation correction
     
     # Legacy compatibility
     use_legacy_indices: bool = False  # If True, uses old band-first calculation

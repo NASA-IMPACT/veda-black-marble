@@ -652,11 +652,11 @@ async def black_marble_pipeline(
             
         # For NDUI, we always want a high-percentile NDVI (regardless of main composite method)
         if index_stacks["ndvi"]:
-            print(f"  Creating 85th percentile NDVI for NDUI vegetation correction")
+            print(f"  Creating {config.analysis.ndvi_percentile_for_ndui}th percentile NDVI for NDUI vegetation correction")
             ndvi_for_ndui = analyze.create_index_temporal_composite(
                 index_stacks["ndvi"],
                 method="percentile",
-                percentile=85.0,
+                percentile=config.analysis.ndvi_percentile_for_ndui,
                 min_valid_observations=config.analysis.min_valid_observations
             )
         else:
@@ -676,8 +676,8 @@ async def black_marble_pipeline(
                 prepare.save_diagnostic(
                     ndvi_for_ndui,
                     reference_profile["transform"],
-                    "data/diagnostics/ndvi_85th_percentile_original.tif",
-                    "NDVI 85th percentile for NDUI (original CRS)",
+                    f"data/diagnostics/ndvi_{config.analysis.ndvi_percentile_for_ndui}th_percentile_for_ndui_original.tif",
+                    f"NDVI {config.analysis.ndvi_percentile_for_ndui}th percentile for NDUI (original CRS)",
                     crs=reference_profile["crs"],
                 )
             
@@ -1433,7 +1433,7 @@ async def black_marble_pipeline(
         # Check if we have a special high-percentile NDVI for NDUI
         if ndvi_for_ndui_reprojected is not None:
             ndvi_for_ndui_final = ndvi_for_ndui_reprojected
-            print("  Using 85th percentile NDVI for NDUI vegetation correction")
+            print(f"  Using {config.analysis.ndvi_percentile_for_ndui}th percentile NDVI for NDUI vegetation correction")
         
         # Verify shapes match before calculating NDUI
         if ntl_composite.shape != ndvi_for_ndui_final.shape:
