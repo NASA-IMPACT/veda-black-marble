@@ -10,14 +10,84 @@ from typing import Any, Literal
 import numpy as np
 import numpy.typing as npt
 import rasterio
+import rasterio.windows
 from osgeo import gdal
+from pyproj import Transformer
 
 from .landsat_qa import create_landsat_cloud_mask, print_qa_pixel_summary
-from .spatial import crop_to_bounds
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
 BBox = tuple[float, float, float, float]
+
+
+def _read_windowed(file_path: str, bbox: BBox | None, transform_bbox: bool = True) -> tuple[ArrayLike, dict[str, Any]]:
+    """Read only the window that intersects bbox from a raster file.
+    
+    Args:
+        file_path: Path to the raster file (can be a VRT)
+        bbox: Bounding box in lon/lat (min_lon, min_lat, max_lon, max_lat)
+        transform_bbox: Whether to transform bbox from EPSG:4326 to file CRS
+        
+    Returns:
+        Tuple of (data array, profile dict with updated transform/dimensions)
+    """
+    with rasterio.open(file_path) as src:
+        if bbox is None:
+            # No bbox specified, read entire file
+            data = src.read(1)
+            return data, src.profile.copy()
+        
+        # Transform bbox to file CRS if needed
+        bbox_in_src_crs = bbox
+        if transform_bbox and src.crs and src.crs.to_epsg() != 4326:
+            try:
+                transformer = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
+                minx, miny = transformer.transform(bbox[0], bbox[1])
+                maxx, maxy = transformer.transform(bbox[2], bbox[3])
+                bbox_in_src_crs = (minx, miny, maxx, maxy)
+            except Exception as e:
+                print(f"  WARNING: Could not transform bbox: {e}")
+                bbox_in_src_crs = bbox
+        
+        # Get the window for this bbox
+        window = rasterio.windows.from_bounds(
+            bbox_in_src_crs[0], bbox_in_src_crs[1], 
+            bbox_in_src_crs[2], bbox_in_src_crs[3],
+            transform=src.transform
+        )
+        
+        # Log window details
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"  Windowed read from {os.path.basename(file_path)}:")
+        logger.debug(f"    File shape: {src.shape}")
+        logger.debug(f"    File bounds: {src.bounds}")
+        logger.debug(f"    Window BEFORE intersection: col_off={window.col_off:.1f}, row_off={window.row_off:.1f}, "
+                    f"width={window.width:.1f}, height={window.height:.1f}")
+        logger.debug(f"    Requested bbox (src CRS): {bbox_in_src_crs}")
+        
+        # Ensure window is within the raster bounds
+        window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
+        
+        logger.debug(f"    Window AFTER intersection: col_off={window.col_off:.1f}, row_off={window.row_off:.1f}, "
+                    f"width={window.width:.1f}, height={window.height:.1f}")
+        
+        # Read only the windowed data
+        data = src.read(1, window=window)
+        
+        # Create profile for the windowed data
+        profile = src.profile.copy()
+        profile.update({
+            'height': window.height,
+            'width': window.width,
+            'transform': rasterio.windows.transform(window, src.transform)
+        })
+        
+        logger.debug(f"    Output shape: {data.shape}")
+        logger.debug(f"    Non-zero pixels: {np.count_nonzero(data)} ({np.count_nonzero(data) / data.size * 100:.1f}%)")
+        
+        return data, profile
 
 
 def process_landsat_date(
@@ -68,82 +138,18 @@ def process_landsat_date(
                 # Allow projection differences for areas spanning UTM zones
                 vrt_options = gdal.BuildVRTOptions(allowProjectionDifference=True)
                 gdal.BuildVRT(qa_vrt, qa_files, options=vrt_options)
-
-                with rasterio.open(qa_vrt) as src:
-                    qa_data = src.read(1)
-                    qa_profile = src.profile
+                
+                # Use windowed read
+                qa_data, qa_profile = _read_windowed(qa_vrt, bbox)
             else:
-                with rasterio.open(qa_files[0]) as src:
-                    qa_data = src.read(1)
-                    qa_profile = src.profile
+                # Use windowed read for single file too
+                qa_data, qa_profile = _read_windowed(qa_files[0], bbox)
 
-            # Debug: check data before cropping
-            print(f"  QA data shape before crop: {qa_data.shape}")
+            # Debug: check data shape
+            print(f"  QA data shape: {qa_data.shape}")
             print(f"  QA data dtype: {qa_data.dtype}")
 
-            # Initialize bbox_transformed
-            bbox_transformed = bbox
-
-            # Debug: check bounds overlap
-            if bbox:
-                # Get the CRS from the profile
-                src_crs = qa_profile.get("crs")
-                print(f"  Data CRS: {src_crs}")
-
-                # Convert bbox to data CRS if needed
-                if src_crs and hasattr(src_crs, "to_epsg"):
-                    src_epsg = src_crs.to_epsg()
-                    if src_epsg != 4326:  # Data is not in lat/lon
-                        print(f"  Converting bbox from EPSG:4326 to EPSG:{src_epsg}")
-                        # Use pyproj to transform bbox
-                        try:
-                            from pyproj import Transformer
-
-                            transformer = Transformer.from_crs("EPSG:4326", src_crs, always_xy=True)
-                            # Transform corners
-                            minx, miny = transformer.transform(bbox[0], bbox[1])
-                            maxx, maxy = transformer.transform(bbox[2], bbox[3])
-                            bbox_transformed = (minx, miny, maxx, maxy)
-                            print(f"  Transformed bbox: {bbox_transformed}")
-                        except Exception as e:
-                            print(f"  WARNING: Could not transform bbox: {e}")
-                            bbox_transformed = bbox
-                    else:
-                        bbox_transformed = bbox
-                else:
-                    bbox_transformed = bbox
-
-                # Calculate tile bounds from transform and shape
-                tile_bounds = (
-                    qa_profile["transform"].c,  # west
-                    qa_profile["transform"].f
-                    + qa_profile["transform"].e * qa_data.shape[0],  # south
-                    qa_profile["transform"].c
-                    + qa_profile["transform"].a * qa_data.shape[1],  # east
-                    qa_profile["transform"].f,  # north
-                )
-                print(f"  Tile bounds: {tile_bounds}")
-
-                # Check if bounds overlap
-                overlap = (
-                    bbox_transformed[0] < tile_bounds[2]
-                    and bbox_transformed[2] > tile_bounds[0]
-                    and bbox_transformed[1] < tile_bounds[3]
-                    and bbox_transformed[3] > tile_bounds[1]
-                )
-                print(f"  Bounds overlap: {overlap}")
-
-            # Crop to bbox if specified
-            if bbox and bbox_transformed is not None:
-                qa_data, qa_transform, _ = crop_to_bounds(
-                    data=qa_data,
-                    src_transform=qa_profile["transform"],
-                    bounds=bbox_transformed,
-                )
-                qa_profile["transform"] = qa_transform
-                qa_profile["height"] = qa_data.shape[0]
-                qa_profile["width"] = qa_data.shape[1]
-                print(f"  QA data shape after crop: {qa_data.shape}")
+            # Data is already cropped by windowed read, no need for additional cropping
 
             # Print QA pixel summary for debugging
             print_qa_pixel_summary(qa_data)
@@ -179,55 +185,38 @@ def process_landsat_date(
         # Create VRT mosaic if multiple tiles
         if len(band_files) > 1:
             print(f"  Creating VRT mosaic from {len(band_files)} tiles...")
+            
+            # Log details about input files
+            import logging
+            logger = logging.getLogger(__name__)
+            for i, file_path in enumerate(band_files):
+                logger.debug(f"    Tile {i+1}: {os.path.basename(file_path)}")
+            
             band_vrt = f"data/temp/{band_name.lower()}_mosaic.vrt"
             os.makedirs("data/temp", exist_ok=True)
             # Allow projection differences for areas spanning UTM zones
             vrt_options = gdal.BuildVRTOptions(allowProjectionDifference=True)
-            gdal.BuildVRT(band_vrt, band_files, options=vrt_options)
+            vrt_ds = gdal.BuildVRT(band_vrt, band_files, options=vrt_options)
+            
+            if vrt_ds is not None:
+                # Log VRT details
+                vrt_bounds = [
+                    vrt_ds.GetGeoTransform()[0],  # left
+                    vrt_ds.GetGeoTransform()[3] + vrt_ds.GetGeoTransform()[5] * vrt_ds.RasterYSize,  # bottom
+                    vrt_ds.GetGeoTransform()[0] + vrt_ds.GetGeoTransform()[1] * vrt_ds.RasterXSize,  # right
+                    vrt_ds.GetGeoTransform()[3]  # top
+                ]
+                logger.info(f"    VRT bounds: {vrt_bounds}")
+                logger.info(f"    VRT size: {vrt_ds.RasterXSize} x {vrt_ds.RasterYSize}")
+                vrt_ds = None  # Close
 
-            # For many tiles, read in chunks to avoid memory issues
-            if len(band_files) > 10:
-                print(f"  Reading large VRT ({len(band_files)} tiles) - this may take a moment...")
-
-            with rasterio.open(band_vrt) as src:
-                band_data = src.read(1)
-                band_profile = src.profile
+            # Use windowed read
+            band_data, band_profile = _read_windowed(band_vrt, bbox)
         else:
-            with rasterio.open(band_files[0]) as src:
-                band_data = src.read(1)
-                band_profile = src.profile
+            # Use windowed read for single file too
+            band_data, band_profile = _read_windowed(band_files[0], bbox)
 
-        # Crop to bbox if specified
-        if bbox:
-            # Convert bbox to data CRS if needed (same as for QA)
-            src_crs = band_profile.get("crs")
-            if src_crs and hasattr(src_crs, "to_epsg"):
-                src_epsg = src_crs.to_epsg()
-                if src_epsg != 4326:  # Data is not in lat/lon
-                    try:
-                        from pyproj import Transformer
-
-                        transformer = Transformer.from_crs("EPSG:4326", src_crs, always_xy=True)
-                        # Transform corners
-                        minx, miny = transformer.transform(bbox[0], bbox[1])
-                        maxx, maxy = transformer.transform(bbox[2], bbox[3])
-                        bbox_for_crop = (minx, miny, maxx, maxy)
-                    except Exception as e:
-                        print(f"  WARNING: Could not transform bbox for {band_name}: {e}")
-                        bbox_for_crop = bbox
-                else:
-                    bbox_for_crop = bbox
-            else:
-                bbox_for_crop = bbox
-
-            band_data, band_transform, _ = crop_to_bounds(
-                data=band_data,
-                src_transform=band_profile["transform"],
-                bounds=bbox_for_crop,
-            )
-            band_profile["transform"] = band_transform
-            band_profile["height"] = band_data.shape[0]
-            band_profile["width"] = band_data.shape[1]
+        # Data is already cropped by windowed read, no need for additional cropping
 
         # Check if band data is empty
         if band_data.size == 0:
@@ -268,5 +257,20 @@ def process_landsat_date(
             masked_data = band_data
 
         result[band_name] = (masked_data, band_profile)
+
+    # Log summary of processed data
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("Processing summary:")
+    for band_name, (data, profile) in result.items():
+        if data is not None:
+            valid_pixels = ~np.isnan(data) if np.issubdtype(data.dtype, np.floating) else data != 0
+            coverage = np.sum(valid_pixels) / data.size * 100 if data.size > 0 else 0
+            logger.info(f"  {band_name}: shape={data.shape}, dtype={data.dtype}, coverage={coverage:.1f}%")
+            if coverage > 0:
+                valid_data = data[valid_pixels]
+                logger.info(f"    Range: [{np.min(valid_data):.3f}, {np.max(valid_data):.3f}]")
+        else:
+            logger.info(f"  {band_name}: None")
 
     return result

@@ -40,6 +40,7 @@ async def search_best_scenes(
     required_tiles = {(t['path'], t['row']) for t in tile_dicts}
     
     logger.info(f"Need {len(required_tiles)} tiles for bbox {bbox}")
+    logger.info(f"Required tiles (path/row): {sorted(required_tiles)}")
     
     # Setup search params
     params = SearchParams(
@@ -49,14 +50,15 @@ async def search_best_scenes(
         allow_incomplete=True,  # We'll check completeness ourselves
     )
     
+    # Get the find_scenes function
+    if find_scenes_func is None:
+        from .landsat import AsyncLandsatDownloader
+        downloader = AsyncLandsatDownloader(aws_unsigned=False)
+        find_scenes_func = downloader.find_landsat_scenes
+    
     # Run the search
     async def search_with_client(s3_client: S3Client) -> list[SceneMeta]:
-        # Get the find_scenes function
         scenes_func = find_scenes_func
-        if scenes_func is None:
-            from .landsat import AsyncLandsatDownloader
-            downloader = AsyncLandsatDownloader(aws_unsigned=False)
-            scenes_func = downloader.find_landsat_scenes
         
         # Get ALL scenes in time window
         all_scenes = await search_best_scenes_functional(
@@ -69,8 +71,10 @@ async def search_best_scenes(
             logger.warning("No scenes found")
             return []
         
-        # Group by date
+        logger.info(f"Found {len(all_scenes)} total scenes in time window")
+        
         from datetime import date as DateType
+        tolerance_days = config.tolerance_days
         scenes_by_date: dict[DateType, list[SceneMeta]] = {}
         for scene in all_scenes:
             date_key = scene.date.date()  # Just the date, no time
@@ -78,32 +82,67 @@ async def search_best_scenes(
                 scenes_by_date[date_key] = []
             scenes_by_date[date_key].append(scene)
         
-        # Find dates with complete coverage
-        complete_dates = []
-        for date, scenes in scenes_by_date.items():
-            tiles = {(s.path, s.row) for s in scenes}
-            if tiles >= required_tiles:  # Has all required tiles
-                avg_cloud = sum(s.cloud_cover for s in scenes) / len(scenes)
-                complete_dates.append((date, scenes, avg_cloud))
+        logger.info(f"Scenes grouped into {len(scenes_by_date)} unique dates")
+        logger.info(f"Using tolerance of {tolerance_days} days for grouping")
         
-        if not complete_dates:
-            logger.warning(f"No dates with complete coverage. Best coverage: {max(len(scenes) for scenes in scenes_by_date.values())} tiles")
+        # Find date groups with complete coverage (considering tolerance)
+        complete_groups = []
+        processed_dates = set()
+        
+        for base_date in sorted(scenes_by_date.keys()):
+            if base_date in processed_dates:
+                continue
+                
+            group_scenes = []
+            group_dates = []
+            
+            for date in scenes_by_date:
+                if abs((date - base_date).days) <= tolerance_days:
+                    group_scenes.extend(scenes_by_date[date])
+                    group_dates.append(date)
+                    processed_dates.add(date)
+            tiles = {(s.path, s.row) for s in group_scenes}
+            coverage_pct = len(tiles) / len(required_tiles) * 100
+            
+            date_range = f"{min(group_dates)} to {max(group_dates)}" if len(group_dates) > 1 else str(base_date)
+            logger.debug(f"  Group {date_range}: {len(tiles)} tiles ({coverage_pct:.0f}% coverage)")
+            
+            if tiles >= required_tiles:
+                avg_cloud = sum(s.cloud_cover for s in group_scenes) / len(group_scenes)
+                complete_groups.append((base_date, group_scenes, avg_cloud, group_dates))
+                logger.debug(f"    -> Complete coverage, avg cloud: {avg_cloud:.1f}%")
+        
+        if not complete_groups:
+            logger.warning(f"No date groups with complete coverage even with {tolerance_days} day tolerance")
+            
+            best_coverage = 0
+            for base_date in sorted(scenes_by_date.keys()):
+                group_scenes = []
+                for date in scenes_by_date:
+                    if abs((date - base_date).days) <= tolerance_days:
+                        group_scenes.extend(scenes_by_date[date])
+                tiles = {(s.path, s.row) for s in group_scenes}
+                coverage = len(tiles)
+                if coverage > best_coverage:
+                    best_coverage = coverage
+                    
+            logger.warning(f"Best coverage found: {best_coverage} tiles out of {len(required_tiles)} required")
+            
             if not allow_incomplete:
                 return []
-            # Fall back to best coverage we can get
             best_date = max(scenes_by_date.items(), key=lambda x: len(x[1]))
             return best_date[1]
         
-        # Pick date with lowest average cloud cover
-        best_date = min(complete_dates, key=lambda x: x[2])
-        logger.info(f"Selected {best_date[0]} with {len(best_date[1])} tiles, avg cloud {best_date[2]:.1f}%")
+        best_group = min(complete_groups, key=lambda x: x[2])
+        base_date, group_scenes, avg_cloud, group_dates = best_group
         
-        # Return best scene per tile from that date
+        date_desc = f"{min(group_dates)} to {max(group_dates)}" if len(group_dates) > 1 else str(base_date)
+        logger.info(f"Selected group {date_desc} with {len(group_scenes)} scenes from {len(group_dates)} dates, avg cloud {avg_cloud:.1f}%")
+        
         from .landsat_search import group_by_pathrow
-        tiles = group_by_pathrow(best_date[1])
+        tiles = group_by_pathrow(group_scenes)
         result = []
         for tile_scenes in tiles.values():
-            # Pick best scene for this tile
             best = min(tile_scenes, key=lambda s: s.cloud_cover)
             result.append(best)
         

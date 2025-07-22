@@ -250,7 +250,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         stats_lock = asyncio.Lock()
 
         sensor_prefix = f"{self.COLLECTION}/{self.LEVEL}/standard/oli-tirs/{year}/"
-
+        
         # Create progress bar
         pbar = tqdm(
             total=None,

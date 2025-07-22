@@ -308,6 +308,8 @@ class AsyncDownloadOrchestrator:
             len(plan.landsat_dates),
         )
         logger.debug("Plan bands: %s", plan.landsat_bands)
+        logger.info(f"Target dates: {[d.strftime('%Y-%m-%d') for d in plan.landsat_dates]}")
+        logger.info(f"Search bbox: {plan.bbox}")
 
         # Phase 1 ───────────────────────────────────────────────────────────
         # Discover best scenes (one coroutine per target date)
@@ -319,6 +321,7 @@ class AsyncDownloadOrchestrator:
                 logger.info("Using date-grouped scene selection for spatial consistency")
             else:
                 logger.info("Using per-tile scene selection (legacy mode)")
+        
         
         search_tasks: list[asyncio.Task[list[Any]]] = [
             asyncio.create_task(
@@ -340,6 +343,9 @@ class AsyncDownloadOrchestrator:
             if isinstance(result, Exception):
                 logger.error("Scene search failed for %s: %s", target_date.date(), result)
                 raise result
+            logger.info(f"Search result for {target_date.date()}: {len(result)} scenes found")
+            if not result:
+                logger.warning(f"No scenes found for {target_date.date()}")
             date_to_scenes[target_date] = result
 
         # Phase 2 ───────────────────────────────────────────────────────────

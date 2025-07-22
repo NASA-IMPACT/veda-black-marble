@@ -50,7 +50,7 @@ class LandsatAcquisitionConfig:
     # 2. Spatial completeness (require_complete_coverage=True) - no missing tiles
     # 3. Quality optimization - among complete dates, pick the one with lowest cloud cover
     selection_strategy: Literal["per_tile", "date_grouped"] = "date_grouped"  # New default for spatial consistency
-    tolerance_days: float = 0.0  # Max days between scenes in same group (0 = same date only)
+    tolerance_days: float = 7.0  # Max days between scenes in same group (allows up to 7 days apart)
     require_complete_coverage: bool = True  # Only consider dates with all required tiles
 
 

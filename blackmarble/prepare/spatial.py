@@ -27,6 +27,7 @@ def reproject_image(
     dst_transform: Transform | None = None,
     resampling: Literal["nearest", "bilinear", "cubic", "average"] = "nearest",
     nodata: float | None = None,
+    resolution: float | tuple[float, float] | None = None,
 ) -> tuple[ArrayLike, Transform, BBox]:
     """Reproject image data to target coordinate reference system.
 
@@ -39,6 +40,7 @@ def reproject_image(
         dst_transform: Optional destination transform
         resampling: Resampling method ('bilinear', 'cubic', 'nearest', 'average')
         nodata: Optional nodata value
+        resolution: Optional target resolution in units of dst_crs (single value or (x_res, y_res))
 
     Returns:
         Tuple of (reprojected_data, new_transform, new_bounds)
@@ -74,9 +76,14 @@ def reproject_image(
 
     # Calculate transform for target CRS if not provided
     if dst_transform is None or dst_shape is None:
-        dst_transform, dst_width, dst_height = calculate_default_transform(
-            source_crs, target_crs, width, height, *source_bounds
-        )
+        if resolution is not None:
+            dst_transform, dst_width, dst_height = calculate_default_transform(
+                source_crs, target_crs, width, height, *source_bounds, resolution=resolution
+            )
+        else:
+            dst_transform, dst_width, dst_height = calculate_default_transform(
+                source_crs, target_crs, width, height, *source_bounds
+            )
         if dst_shape is None:
             if dst_height is not None and dst_width is not None:
                 dst_shape = (int(dst_height), int(dst_width))
@@ -146,7 +153,7 @@ def resample_image(
     source_resolution = (abs(src_transform.a), abs(src_transform.e))
 
     if target_resolution is not None:
-        if isinstance(target_resolution, int | float):
+        if isinstance(target_resolution, (int, float)):
             target_resolution = (target_resolution, target_resolution)
 
     # Map resampling methods

@@ -26,9 +26,15 @@ def create_landsat_median_composite(
     1. Stacks all input arrays
     2. Computes per-pixel composite across time
     3. Handles NaN values from QA masking
+    
+    IMPORTANT: This function assumes all input arrays share the same coordinate
+    system and that their upper-left corners are aligned. Arrays of different
+    sizes will be padded with NaN to the maximum size, but spatial alignment
+    must be ensured by the caller through proper reprojection.
 
     Args:
-        data_list: List of 2D arrays (one per date) with NaN for masked pixels
+        data_list: List of 2D arrays (one per date) with NaN for masked pixels,
+                  all must be in the same CRS with aligned upper-left origins
         scale_factor: Scale factor for reflectance conversion
         add_offset: Offset for reflectance conversion
         method: Compositing method - "median" (hard edges) or "mean" (smooth blending)
@@ -44,25 +50,30 @@ def create_landsat_median_composite(
     if not data_list:
         raise ValueError("No data provided for compositing")
 
-    # Find common shape (they might be slightly different)
     shapes = [d.shape for d in data_list]
-    min_height = min(s[0] for s in shapes)
-    min_width = min(s[1] for s in shapes)
+    max_height = max(s[0] for s in shapes)
+    max_width = max(s[1] for s in shapes)
+    
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Band stack shapes: min=({min(s[0] for s in shapes)}, {min(s[1] for s in shapes)}), "
+                f"max=({max_height}, {max_width})")
+    padded_data = []
+    for i, data in enumerate(data_list):
+        if data.shape[0] < max_height or data.shape[1] < max_width:
+            padded = np.full((max_height, max_width), np.nan, dtype=data.dtype)
+            padded[:data.shape[0], :data.shape[1]] = data
+            logger.debug(f"  Padded array {i}: {data.shape} -> {padded.shape}")
+        else:
+            padded = data
+        padded_data.append(padded)
 
-    # Crop all arrays to common size
-    cropped_data = []
-    for data in data_list:
-        cropped = data[:min_height, :min_width]
-        cropped_data.append(cropped)
-
-    # Stack arrays along new time dimension
-    # Shape: (n_dates, height, width)
-    stacked = np.stack(cropped_data, axis=0)
+    stacked = np.stack(padded_data, axis=0)
     
     # Log per-scene valid pixel coverage if requested
     if log_coverage:
         print("\n📊 Per-scene valid pixel coverage:")
-        for i, data in enumerate(cropped_data):
+        for i, data in enumerate(padded_data):
             valid_pixels = np.sum(~np.isnan(data))
             total_pixels = data.size
             valid_pct = (valid_pixels / total_pixels * 100) if total_pixels > 0 else 0
@@ -70,7 +81,7 @@ def create_landsat_median_composite(
         
         # Check if any scene has very low coverage
         all_valid_pcts = []
-        for data in cropped_data:
+        for data in padded_data:
             valid_pct = np.sum(~np.isnan(data)) / data.size * 100 if data.size > 0 else 0
             all_valid_pcts.append(valid_pct)
         
@@ -122,8 +133,14 @@ def create_index_temporal_composite(
     (NDVI, NDWI) already calculated per date. This ensures mathematical
     correctness since median(ratio) ≠ ratio(median).
     
+    IMPORTANT: This function assumes all input arrays share the same coordinate
+    system and that their upper-left corners are aligned. Arrays of different
+    sizes will be padded with NaN to the maximum size, but spatial alignment
+    must be ensured by the caller through proper reprojection.
+    
     Args:
-        index_stack: List of 2D arrays containing pre-calculated indices
+        index_stack: List of 2D arrays containing pre-calculated indices,
+                    all must be in the same CRS with aligned upper-left origins
         method: Compositing method - "median", "mean", or "percentile"
         percentile: Percentile value if method="percentile" (0-100)
         mask_nan: Whether to mask output where insufficient observations
@@ -139,22 +156,24 @@ def create_index_temporal_composite(
     if not index_stack:
         raise ValueError("No index data provided for compositing")
         
-    # Find common shape
     shapes = [arr.shape for arr in index_stack]
-    min_height = min(s[0] for s in shapes)
-    min_width = min(s[1] for s in shapes)
+    max_height = max(s[0] for s in shapes)
+    max_width = max(s[1] for s in shapes)
     
-    # Crop all arrays to common size
-    cropped_stack = []
-    for arr in index_stack:
-        cropped = arr[:min_height, :min_width].astype(np.float32)  # Ensure float32
-        cropped_stack.append(cropped)
-    
-    # Stack arrays along time dimension
-    # Shape: (n_dates, height, width)
-    stacked = np.stack(cropped_stack, axis=0)
-    
-    # Count valid observations per pixel
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Index stack shapes: min=({min(s[0] for s in shapes)}, {min(s[1] for s in shapes)}), "
+                f"max=({max_height}, {max_width})")
+    padded_stack = []
+    for i, arr in enumerate(index_stack):
+        if arr.shape[0] < max_height or arr.shape[1] < max_width:
+            padded = np.full((max_height, max_width), np.nan, dtype=np.float32)
+            padded[:arr.shape[0], :arr.shape[1]] = arr.astype(np.float32)
+            logger.debug(f"  Padded array {i}: {arr.shape} -> {padded.shape}")
+        else:
+            padded = arr.astype(np.float32)
+        padded_stack.append(padded)
+    stacked = np.stack(padded_stack, axis=0)
     valid_count = np.sum(~np.isnan(stacked), axis=0)
     
     # Compute composite along time axis

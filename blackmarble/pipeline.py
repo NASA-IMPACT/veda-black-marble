@@ -218,14 +218,6 @@ async def black_marble_pipeline(
                 f"Non-zero pixels after crop: {(viirs_ntl > 0).sum()} ({(viirs_ntl > 0).sum() / viirs_ntl.size * 100:.1f}%)"
             )
 
-            # Resample to finer resolution
-            target_resolution = 0.00011111111  # ~12 meters
-            viirs_ntl, viirs_transform = prepare.resample_image(
-                data=viirs_ntl,
-                src_transform=viirs_transform,
-                target_resolution=target_resolution,
-                resampling="bilinear",
-            )
 
             # Update profile
             viirs_profile["transform"] = viirs_transform
@@ -255,11 +247,8 @@ async def black_marble_pipeline(
                     "VIIRS final (gap-filled NTL)",
                 )
 
-    # Set default resolution and profile for case when VIIRS is not available
-    target_resolution = 0.00011111111  # ~12 meters
     if viirs_corrected is None:
         print("⚠️  No VIIRS data - using Landsat as reference")
-        # We'll set the reference profile from the first Landsat scene
 
     # Determine appropriate UTM zone for the area (like sync pipeline)
     center_lon = (bbox[0] + bbox[2]) / 2
@@ -276,7 +265,8 @@ async def black_marble_pipeline(
 
     print(
         f"Using projection: {target_crs} "
-        f"(UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'})"
+        f"(UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'}) "
+        f"with {target_resolution_landsat}m resolution"
     )
 
     log.debug(f"Target CRS determined from bbox center:")
@@ -352,6 +342,29 @@ async def black_marble_pipeline(
         print(f"  Keys: {list(landsat_files_by_date[sample_date].keys())}")
         for band, paths in landsat_files_by_date[sample_date].items():
             print(f"  {band}: {len(paths)} files")
+    
+    print("\n📊 Analyzing tile coverage across dates:")
+    all_tiles_by_date = {}
+    for date, date_files in landsat_files_by_date.items():
+        date_tiles = set()
+        for band, paths in date_files.items():
+            for path in paths:
+                filename = Path(path).stem
+                parts = filename.split('_')
+                if len(parts) >= 3:
+                    pathrow = parts[2]
+                    if len(pathrow) == 6 and pathrow.isdigit():
+                        date_tiles.add(pathrow)
+        all_tiles_by_date[date] = date_tiles
+    all_possible_tiles = set()
+    for tiles in all_tiles_by_date.values():
+        all_possible_tiles.update(tiles)
+    
+    print(f"  Total unique tiles across all dates: {sorted(all_possible_tiles)}")
+    for date, tiles in sorted(all_tiles_by_date.items()):
+        missing = all_possible_tiles - tiles
+        if missing:
+            print(f"  {date.strftime('%Y-%m-%d')}: Missing tiles {sorted(missing)}")
 
     # Process each date's Landsat data
     for idx, target_date in enumerate(sorted(landsat_files_by_date.keys())):
@@ -391,6 +404,15 @@ async def black_marble_pipeline(
         
         if date_tiles:
             print(f"  Tiles for this date: {sorted(date_tiles)}")
+            
+        logger.info(f"Processing {target_date.strftime('%Y-%m-%d')} with tiles: {sorted(date_tiles)}")
+        for band, paths in date_files.items():
+            if paths:
+                logger.info(f"  {band}: {len(paths)} files")
+                for path in paths[:3]:
+                    logger.debug(f"    - {Path(path).name}")
+                if len(paths) > 3:
+                    logger.debug(f"    ... and {len(paths) - 3} more")
 
         # Convert paths to tuple format expected by process_landsat_date
         # Format is: (band_files, qa_pixel_files, qa_radsat_files, qa_aerosol_files)
@@ -428,6 +450,10 @@ async def black_marble_pipeline(
                 
                 if reference_profile is None:
                     reference_profile = profile
+                    logger.info(f"Set reference profile from B5: shape={profile['height']}x{profile['width']}, crs={profile['crs']}")
+                elif profile['width'] * profile['height'] > reference_profile['width'] * reference_profile['height']:
+                    logger.info(f"Updating reference profile to larger area: {reference_profile['height']}x{reference_profile['width']} -> {profile['height']}x{profile['width']}")
+                    reference_profile = profile
                 
                 # Calculate NDVI for this date
                 ndvi_date = analyze.calculate_ndvi(
@@ -447,6 +473,50 @@ async def black_marble_pipeline(
                 index_stacks["ndvi"].append(ndvi_date)
                 index_stacks["ndwi"].append(ndwi_date)
                 index_dates.append(target_date)
+                
+                if config and getattr(config, "save_diagnostics", False):
+                    date_str = target_date.strftime('%Y%m%d')
+                    os.makedirs("data/diagnostics/per_date", exist_ok=True)
+                    
+                    prepare.save_diagnostic(
+                        ndvi_date,
+                        profile,
+                        f"data/diagnostics/per_date/ndvi_{date_str}.tif",
+                        f"NDVI for {date_str}"
+                    )
+                    
+                    prepare.save_diagnostic(
+                        ndwi_date,
+                        profile,
+                        f"data/diagnostics/per_date/ndwi_{date_str}.tif",
+                        f"NDWI for {date_str}"
+                    )
+                    
+                    prepare.save_diagnostic(
+                        b3_data,
+                        profile,
+                        f"data/diagnostics/per_date/B3_{date_str}.tif",
+                        f"Band 3 (Green) for {date_str}"
+                    )
+                    prepare.save_diagnostic(
+                        b4_data,
+                        profile,
+                        f"data/diagnostics/per_date/B4_{date_str}.tif",
+                        f"Band 4 (Red) for {date_str}"
+                    )
+                    prepare.save_diagnostic(
+                        b5_data,
+                        profile,
+                        f"data/diagnostics/per_date/B5_{date_str}.tif",
+                        f"Band 5 (NIR) for {date_str}"
+                    )
+                    
+                    valid_ndvi = ndvi_date[~np.isnan(ndvi_date)]
+                    if valid_ndvi.size > 0:
+                        print(f"    NDVI stats: min={np.min(valid_ndvi):.3f}, max={np.max(valid_ndvi):.3f}, "
+                              f"mean={np.mean(valid_ndvi):.3f}, coverage={valid_ndvi.size/ndvi_date.size*100:.1f}%")
+                    else:
+                        print(f"    NDVI: No valid pixels!")
                 
                 # Optional: Delete bands to save memory
                 if config.memory.delete_bands_after_indices:
@@ -477,6 +547,24 @@ async def black_marble_pipeline(
                         all_landsat_files[band_name].extend(band_files)
 
                     band_dates[band_name].append(target_date)  # NEW: track date
+                    
+                    if config and getattr(config, "save_diagnostics", False):
+                        date_str = target_date.strftime('%Y%m%d')
+                        os.makedirs("data/diagnostics/per_date", exist_ok=True)
+                        
+                        prepare.save_diagnostic(
+                            masked_data,
+                            profile,
+                            f"data/diagnostics/per_date/{band_name}_{date_str}.tif",
+                            f"Band {band_name} for {date_str}"
+                        )
+                        
+                        valid_data = masked_data[~np.isnan(masked_data)]
+                        if valid_data.size > 0:
+                            print(f"    {band_name} stats: min={np.min(valid_data):.3f}, max={np.max(valid_data):.3f}, "
+                                  f"mean={np.mean(valid_data):.3f}, coverage={valid_data.size/masked_data.size*100:.1f}%")
+                        else:
+                            print(f"    {band_name}: No valid pixels!")
 
         # Log memory after processing date
         if monitor_memory and process is not None:
@@ -574,6 +662,34 @@ async def black_marble_pipeline(
         else:
             ndvi_for_ndui = ndvi_composite  # Use the regular composite
             
+        if config and getattr(config, "save_diagnostics", False) and reference_profile is not None:
+            if ndvi_composite is not None:
+                prepare.save_diagnostic(
+                    ndvi_composite,
+                    reference_profile["transform"],
+                    "data/diagnostics/ndvi_composite_original.tif",
+                    f"NDVI {config.analysis.ndvi_composite_method} composite (original CRS)",
+                    crs=reference_profile["crs"],
+                )
+            
+            if ndvi_for_ndui is not None and ndvi_for_ndui is not ndvi_composite:
+                prepare.save_diagnostic(
+                    ndvi_for_ndui,
+                    reference_profile["transform"],
+                    "data/diagnostics/ndvi_85th_percentile_original.tif",
+                    "NDVI 85th percentile for NDUI (original CRS)",
+                    crs=reference_profile["crs"],
+                )
+            
+            if ndwi_composite is not None:
+                prepare.save_diagnostic(
+                    ndwi_composite,
+                    reference_profile["transform"],
+                    "data/diagnostics/ndwi_composite_original.tif",
+                    f"NDWI {config.analysis.ndwi_composite_method} composite (original CRS)",
+                    crs=reference_profile["crs"],
+                )
+            
         # Validate that we have a reference profile for reprojection
         if reference_profile is None and (ndvi_composite is not None or ndwi_composite is not None):
             print("⚠️  WARNING: No reference profile available for index reprojection")
@@ -583,8 +699,6 @@ async def black_marble_pipeline(
                 # We need to construct a minimal profile for reprojection
                 # This is a fallback - ideally we should have saved profiles with indices
                 print("    Creating fallback reference profile from index shape")
-                # For now, we'll have to skip reprojection
-                reference_profile = None
         
         # We still need to reproject indices to target CRS
         # Create a dummy "landsat_reprojected" dict for compatibility
@@ -661,6 +775,7 @@ async def black_marble_pipeline(
                 src_crs=profile["crs"],
                 dst_crs=target_crs,
                 resampling="bilinear",  # Use bilinear for smoother results
+                resolution=target_resolution_landsat,
             )
             landsat_reprojected[band_name] = reprojected
 
@@ -696,6 +811,7 @@ async def black_marble_pipeline(
             src_crs=viirs_profile["crs"],
             dst_crs=target_crs,
             resampling="bilinear",  # Use bilinear like sync pipeline
+            resolution=target_resolution_landsat,
         )
 
         logger.debug(f"  Reprojected VIIRS shape: {viirs_reprojected.shape}")
@@ -788,7 +904,7 @@ async def black_marble_pipeline(
                 )
         else:
             # No Landsat data to align to
-            if not landsat_reprojected:
+            if not landsat_reprojected and not (config and config.analysis.calculate_indices_first):
                 print("⚠️  WARNING: No Landsat data available for NDVI calculation!")
                 print("    Pipeline will continue but NDUI calculation will be limited")
 
@@ -939,6 +1055,7 @@ async def black_marble_pipeline(
                 src_crs=reference_profile["crs"],
                 dst_crs=target_crs,
                 resampling="bilinear",
+                resolution=target_resolution_landsat,
             )
             print(f"    Reprojected NDVI shape: {ndvi.shape}")
             
@@ -950,6 +1067,7 @@ async def black_marble_pipeline(
                     src_crs=reference_profile["crs"],
                     dst_crs=target_crs,
                     resampling="bilinear",
+                    resolution=target_resolution_landsat,
                 )
             else:
                 ndvi_for_ndui_reprojected = ndvi
@@ -962,6 +1080,7 @@ async def black_marble_pipeline(
                 src_crs=reference_profile["crs"],
                 dst_crs=target_crs,
                 resampling="bilinear",
+                resolution=target_resolution_landsat,
             )
             print(f"    Reprojected NDWI shape: {ndwi.shape}")
             
@@ -998,7 +1117,7 @@ async def black_marble_pipeline(
                 ndvi,
                 reference_transform,
                 "data/diagnostics/ndvi.tif",
-                "NDVI (Normalized Difference Vegetation Index)",
+                "NDVI (reprojected to target CRS)",
                 crs=target_crs,
             )
 
@@ -1014,7 +1133,7 @@ async def black_marble_pipeline(
                 ndwi,
                 reference_transform,
                 "data/diagnostics/ndwi.tif",
-                "NDWI (Normalized Difference Water Index)",
+                "NDWI (reprojected to target CRS)",
                 crs=target_crs,
             )
 
