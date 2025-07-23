@@ -3,7 +3,7 @@
 import numpy as np
 
 from blackmarble.analyze.indices import calculate_ndvi
-from blackmarble.analyze.temporal import create_landsat_median_composite, create_index_temporal_composite
+from blackmarble.analyze.temporal import create_index_temporal_composite
 
 
 def test_median_of_ratios_vs_ratio_of_medians():
@@ -23,18 +23,18 @@ def test_median_of_ratios_vs_ratio_of_medians():
     red_date3 = np.array([[0.10, 0.12], [0.11, 0.13]])
     
     # Stack the bands
-    nir_stack = [nir_date1, nir_date2, nir_date3]
-    red_stack = [red_date1, red_date2, red_date3]
+    nir_stack = np.stack([nir_date1, nir_date2, nir_date3])
+    red_stack = np.stack([red_date1, red_date2, red_date3])
     
     # Method 1: Calculate median of bands first, then NDVI (WRONG)
-    nir_composite = create_landsat_median_composite(nir_stack, scale_factor=1.0, add_offset=0.0)
-    red_composite = create_landsat_median_composite(red_stack, scale_factor=1.0, add_offset=0.0)
+    nir_composite = np.median(nir_stack, axis=0)
+    red_composite = np.median(red_stack, axis=0)
     ndvi_from_medians = calculate_ndvi(nir_composite, red_composite)
     
     # Method 2: Calculate NDVI per date, then median (CORRECT)
     ndvi_stack = []
-    for nir, red in zip(nir_stack, red_stack):
-        ndvi = calculate_ndvi(nir, red)
+    for i in range(3):
+        ndvi = calculate_ndvi(nir_stack[i], red_stack[i])
         ndvi_stack.append(ndvi)
     ndvi_median_correct = create_index_temporal_composite(ndvi_stack, method="median")
     
@@ -148,7 +148,7 @@ def test_agricultural_area_ndvi_difference():
         nir_stack.append(nir)
         red_stack.append(red)
     
-    # Method 1: Band-first (legacy)
+    # Method 1: Band-first (using numpy median directly)
     nir_median = np.median(np.stack(nir_stack), axis=0)
     red_median = np.median(np.stack(red_stack), axis=0)
     ndvi_legacy = calculate_ndvi(nir_median, red_median)
@@ -165,7 +165,7 @@ def test_agricultural_area_ndvi_difference():
     
     # Compare results
     print("\nAgricultural area NDVI comparison:")
-    print(f"  Legacy (band-first) mean: {np.nanmean(ndvi_legacy):.3f}")
+    print(f"  Band-first mean: {np.nanmean(ndvi_legacy):.3f}")
     print(f"  Index-first median mean: {np.nanmean(ndvi_median):.3f}")
     print(f"  Index-first 85th percentile mean: {np.nanmean(ndvi_p85):.3f}")
     
