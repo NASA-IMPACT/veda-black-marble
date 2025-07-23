@@ -5,12 +5,11 @@ of raster data to prepare it for analysis.
 """
 
 from typing import Any, Literal
+
 import numpy as np
 import numpy.typing as npt
-from osgeo import gdal
-import rasterio
-from rasterio.warp import reproject, Resampling, calculate_default_transform
 from rasterio.transform import Affine
+from rasterio.warp import Resampling, calculate_default_transform, reproject
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -28,6 +27,7 @@ def reproject_image(
     dst_transform: Transform | None = None,
     resampling: Literal["nearest", "bilinear", "cubic", "average"] = "nearest",
     nodata: float | None = None,
+    resolution: float | tuple[float, float] | None = None,
 ) -> tuple[ArrayLike, Transform, BBox]:
     """Reproject image data to target coordinate reference system.
 
@@ -40,6 +40,7 @@ def reproject_image(
         dst_transform: Optional destination transform
         resampling: Resampling method ('bilinear', 'cubic', 'nearest', 'average')
         nodata: Optional nodata value
+        resolution: Optional target resolution in units of dst_crs (single value or (x_res, y_res))
 
     Returns:
         Tuple of (reprojected_data, new_transform, new_bounds)
@@ -75,9 +76,14 @@ def reproject_image(
 
     # Calculate transform for target CRS if not provided
     if dst_transform is None or dst_shape is None:
-        dst_transform, dst_width, dst_height = calculate_default_transform(
-            source_crs, target_crs, width, height, *source_bounds
-        )
+        if resolution is not None:
+            dst_transform, dst_width, dst_height = calculate_default_transform(
+                source_crs, target_crs, width, height, *source_bounds, resolution=resolution
+            )
+        else:
+            dst_transform, dst_width, dst_height = calculate_default_transform(
+                source_crs, target_crs, width, height, *source_bounds
+            )
         if dst_shape is None:
             if dst_height is not None and dst_width is not None:
                 dst_shape = (int(dst_height), int(dst_width))
@@ -86,9 +92,7 @@ def reproject_image(
     else:
         # Ensure dst_shape is set if it was None but dst_transform was provided
         if dst_shape is None:
-            raise ValueError(
-                "dst_shape must be provided when dst_transform is provided"
-            )
+            raise ValueError("dst_shape must be provided when dst_transform is provided")
 
     # Create output array
     assert dst_shape is not None  # Type checker hint
@@ -260,7 +264,7 @@ def crop_to_bounds(
     """
     try:
         # Use rasterio for exact cropping
-        import rasterio
+        import rasterio  # noqa: F401
         from rasterio.windows import from_bounds
 
         # Apply buffer to bounds

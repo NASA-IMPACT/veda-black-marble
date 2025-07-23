@@ -1,0 +1,15 @@
+path,function_name,start_line,end_line,called_object,wrapper_type,LOC,initial_status,decision,notes,call_sites,priority
+blackmarble/acquire/osm.py,get_osm_cache_dir,105,107,Path,path,3,potential_wrapper,INLINE,Just returns hardcoded path,7,P0
+blackmarble/config.py,for_bm_parity,206,232,cls,misc,27,potential_wrapper,KEEP,Factory method with important defaults,5,N/A
+blackmarble/config.py,for_enhanced_quality,235,268,cls,misc,34,potential_wrapper,KEEP,Factory method with important defaults,3,N/A
+blackmarble/prepare/spatial.py,convert_to_wgs84,,,reproject_image,io,10,wrapper,INLINE,Simple wrapper with fixed CRS parameter,1,P2
+blackmarble/export/cog.py,batch_export_cogs,,,N/A,io,40,unused,DELETE,Not exported and not used anywhere,0,P0
+blackmarble/export/cog.py,create_overviews,,,N/A,io,20,unused,DELETE,Not exported and not used anywhere,0,P0
+blackmarble/export/cog.py,optimize_for_web,,,N/A,io,50,unused,DELETE,Not exported and not used anywhere,0,P0
+blackmarble/enhance/features.py,enhance_roads,,,N/A,misc,30,unused,DELETE,Commented out in pipeline,0,P1
+blackmarble/enhance/features.py,enhance_urban_features,,,N/A,misc,40,unused,DELETE,Commented out in pipeline,0,P1
+blackmarble/enhance/visualize.py,create_false_color_composite,,,N/A,misc,25,unused,DELETE,Commented out in pipeline,0,P1
+blackmarble/export/cog.py,export_single_band,120,135,create_cog,io,16,thin_wrapper,INLINE,Just adds band_name to metadata,2,P1
+blackmarble/export/cog.py,export_multi_band,138,,,create_cog,io,40,thin_wrapper,INLINE,Stacks arrays and adds metadata,1,P2
+blackmarble/acquire/landsat.py,get_wrs_tiles_for_bbox,240,248,get_wrs_tiles_for_bbox_tuple,misc,9,wrapper,INLINE,Just unpacks bbox tuple,3,P1
+blackmarble/acquire/viirs.py,coordinates_to_viirs_tile_string,239,242,coordinates_to_viirs_tile,misc,4,unused_wrapper,DELETE,Not used anywhere,0,P0

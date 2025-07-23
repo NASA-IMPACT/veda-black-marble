@@ -1,7 +1,7 @@
 """Metadata creation - ONLY WHAT'S USED."""
 
-from typing import Any
 from datetime import datetime
+from typing import Any
 
 
 def create_metadata(

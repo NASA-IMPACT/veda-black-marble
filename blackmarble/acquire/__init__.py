@@ -6,48 +6,29 @@ This module handles fetching data from various sources:
 - OpenStreetMap road networks
 """
 
-from .landsat import (
-    filter_landsat_scenes,
-    download_all_bands_for_date,
-)
-
-from .osm import (
-    fetch_road_network,
-    buffer_and_rasterize_roads,
-    clear_osm_cache,
-    get_osm_cache_dir,
-)
-
-from .osm_fractional import (
-    buffer_and_rasterize_roads_fractional,
-)
-
-from .viirs import (
-    download_viirs_h5,
-    download_vnp46a2_tiles,
-)
-
-from .async_orchestrator import (
-    download_all_data_sync,
-    DownloadPlan,
-    DownloadResults,
-)
+from .async_orchestrator import DownloadPlan, DownloadResults, download_all_data_sync
+from .landsat import download_landsat
+from .osm import buffer_and_rasterize_roads, clear_osm_cache, fetch_road_network
+from .osm_fractional import buffer_and_rasterize_roads_fractional
+from .viirs import download_viirs, download_viirs_h5
+from .landsat_search import search_best_scenes, SceneMeta
 
 __all__ = [
     # Landsat functions (used by pipeline)
-    "filter_landsat_scenes",
-    "download_all_bands_for_date",
+    "download_landsat",
     # OSM functions (used by pipeline)
     "fetch_road_network",
     "buffer_and_rasterize_roads",
     "buffer_and_rasterize_roads_fractional",
     "clear_osm_cache",
-    "get_osm_cache_dir",
     # VIIRS functions (used by pipeline)
     "download_viirs_h5",
-    "download_vnp46a2_tiles",
+    "download_viirs",
     # Async download orchestration
     "download_all_data_sync",
     "DownloadPlan",
     "DownloadResults",
+    # Time-window selection
+    "search_best_scenes",
+    "SceneMeta",
 ]

@@ -1,11 +1,10 @@
 """Tests for urban field computation and fractional road rasterization."""
 
+import networkx as nx
 import numpy as np
 import pytest
 from numpy.testing import assert_array_almost_equal
-import rasterio
 from rasterio.transform import from_bounds
-import networkx as nx
 
 # Import the actual implementations
 from blackmarble.acquire.osm_fractional import buffer_and_rasterize_roads_fractional
@@ -47,13 +46,11 @@ class TestFractionalRoadRasterization:
         # - Road covering 1 of 25 sub-pixels → 0.04 coverage
         # - Road covering 5 of 25 sub-pixels → 0.20 coverage
         # - Road covering 25 of 25 sub-pixels → 1.00 coverage
-        pass
 
     def test_sub_pixel_alignment(self):
         """Verify 6m sub-pixels align perfectly with 30m pixels."""
         # 5x5 sub-pixels should exactly fill one 30m pixel
         # No gaps or overlaps at boundaries
-        pass
 
     def test_hierarchical_not_supported(self):
         """Hierarchical mode should raise NotImplementedError."""
@@ -177,9 +174,7 @@ class TestNTLEnhancement:
         assert_array_almost_equal(enhanced[0, 0], 0.5 / 1.15, decimal=5)
 
         # Full roads → full enhancement then rescaled
-        assert_array_almost_equal(
-            enhanced[0, 1], (0.5 * 1.15) / 1.15, decimal=5
-        )  # = 0.5
+        assert_array_almost_equal(enhanced[0, 1], (0.5 * 1.15) / 1.15, decimal=5)  # = 0.5
 
         # Half roads → partial enhancement then rescaled
         assert_array_almost_equal(enhanced[1, 0], (0.5 * 1.075) / 1.15, decimal=5)
@@ -247,11 +242,9 @@ class TestNTLEnhancement:
         urban_field = np.zeros((10, 10), dtype=np.float32)
 
         for mode in ["multiplicative", "additive", "hybrid"]:
-            from typing import cast, Literal
+            from typing import Literal, cast
 
-            enhancement_mode = cast(
-                Literal["multiplicative", "additive", "hybrid"], mode
-            )
+            enhancement_mode = cast(Literal["multiplicative", "additive", "hybrid"], mode)
             enhanced = enhance_ntl_with_urban_field(
                 ntl=ntl, urban_field=urban_field, enhancement_mode=enhancement_mode
             )
@@ -306,9 +299,7 @@ class TestIntegration:
 
         # Enhancement should follow urban field pattern
         enhancement_map = enhanced - ntl
-        correlation = np.corrcoef(urban_field.flatten(), enhancement_map.flatten())[
-            0, 1
-        ]
+        correlation = np.corrcoef(urban_field.flatten(), enhancement_map.flatten())[0, 1]
         assert (
             correlation > 0.75
         )  # Strong positive correlation (reduced threshold for conservative enhancement)

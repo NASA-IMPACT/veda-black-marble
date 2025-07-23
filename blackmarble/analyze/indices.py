@@ -12,10 +12,11 @@ import numpy.typing as npt
 # Type aliases
 ArrayLike = npt.NDArray[Any]
 
+# Constants
+LANDSAT_EPSILON = 0.02  # 2% reflectance threshold for Landsat C2 SR data
 
-def calculate_ndvi(
-    nir: ArrayLike, red: ArrayLike, epsilon: float = 0.0001
-) -> ArrayLike:
+
+def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSILON, mask_low_denom: bool = False) -> ArrayLike:
     """Calculate Normalized Difference Vegetation Index (NDVI).
 
     The NDVI is a fundamental vegetation index that measures the health and density
@@ -23,10 +24,12 @@ def calculate_ndvi(
     Healthy vegetation strongly reflects NIR light while absorbing red light,
     resulting in high NDVI values.
 
-    Formula: NDVI = (NIR - Red) / (NIR + Red + epsilon)
+    Formula: NDVI = (NIR - Red) / (NIR + Red)
+    
+    Note: Negative reflectance values are masked as NaN to handle Landsat offset artifacts.
+    A minimum denominator threshold is applied to prevent extreme values.
 
     NDVI values interpretation:
-    - [-1, 0]: Water, clouds, snow, bare soil
     - [0, 0.2]: Sparse vegetation, bare soil
     - [0.2, 0.4]: Shrubs and grasslands
     - [0.4, 0.8]: Dense vegetation, forests
@@ -37,9 +40,12 @@ def calculate_ndvi(
             Expected range: [0, 1] for surface reflectance.
         red: Red band reflectance (Band 4 for Landsat 8/9).
             Expected range: [0, 1] for surface reflectance.
-        epsilon: Small value to prevent division by zero in areas where
-            NIR + Red approaches zero. Default 1e-4 provides stability
-            when reflectance values are near zero.
+        epsilon: Minimum denominator threshold to prevent extreme NDVI values.
+            Default is 0.02 (2% reflectance), which prevents artifacts from
+            snow/cloud edges and near-zero denominators.
+        mask_low_denom: If True, return NaN for pixels with denominator < epsilon
+            instead of using a safe denominator. This preserves mathematical
+            correctness for temporal compositing.
 
     Returns:
         NDVI array with values mathematically bounded to [-1, 1].
@@ -57,36 +63,73 @@ def calculate_ndvi(
         This function preserves NaN values in the input arrays, making it
         suitable for masked data. Output is NOT clamped to [-1, 1] to
         preserve extreme values that may indicate processing issues.
+        
+        For NDUI calculations in the Black Marble pipeline, negative NDVI 
+        values (water/bare soil/artificial surfaces) should be clamped to 0
+        as they should not contribute to the vegetation signal.
     """
 
     # Input validation
     if nir.shape != red.shape:
-        raise ValueError(
-            f"NIR and Red arrays must have same shape: {nir.shape} vs {red.shape}"
+        raise ValueError(f"NIR and Red arrays must have same shape: {nir.shape} vs {red.shape}")
+
+    # Calculate numerator and denominator
+    numerator = nir - red
+    denominator = nir + red
+    
+    if mask_low_denom:
+        # Return NaN for low denominators to preserve mathematical correctness
+        # This is crucial for index-first temporal compositing
+        ndvi = np.where(
+            np.abs(denominator) < epsilon,
+            np.nan,
+            numerator / denominator
         )
-
-    # Calculate denominator with epsilon to prevent division by zero
-    # The epsilon prevents NaN/inf when both bands are zero (e.g., no-data regions)
-    denominator = nir + red + epsilon
-
-    # Calculate NDVI using the standard formula: (NIR - Red) / (NIR + Red)
-    # No explicit clamping - let mathematical bounds apply naturally
-    # Result is mathematically bounded to [-1, 1] when inputs are non-negative
-    ndvi = (nir - red) / denominator
-
+    else:
+        # Use adaptive denominator floor to handle near-zero denominators
+        # This prevents division instability while preserving valid edge pixels
+        # The floor combines absolute noise floor with relative signal threshold
+        epsilon_rel = 0.05  # 5% of signal magnitude
+        
+        # Calculate adaptive floor based on signal magnitude
+        signal_magnitude = (np.abs(nir) + np.abs(red)) / 2
+        adaptive_floor = np.maximum(epsilon, epsilon_rel * signal_magnitude)
+        
+        # Apply floor to denominator while preserving sign
+        safe_denominator = np.where(
+            np.abs(denominator) < adaptive_floor,
+            np.copysign(adaptive_floor, denominator),
+            denominator
+        )
+        
+        # Calculate NDVI using the safe denominator
+        ndvi = numerator / safe_denominator
+    
+    # Clamp to valid NDVI range [-1, 1]
+    # This handles any remaining edge cases where the calculation
+    # produces values slightly outside the theoretical bounds
+    # Important: preserve NaN values during clipping
+    if mask_low_denom:
+        # Only clip non-NaN values
+        mask = ~np.isnan(ndvi)
+        ndvi[mask] = np.clip(ndvi[mask], -1.0, 1.0)
+    else:
+        ndvi = np.clip(ndvi, -1.0, 1.0)
+    
     return ndvi
 
 
-def calculate_ndwi(
-    green: ArrayLike, nir: ArrayLike, epsilon: float = 0.0001
-) -> ArrayLike:
+def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = LANDSAT_EPSILON, mask_low_denom: bool = False) -> ArrayLike:
     """Calculate Normalized Difference Water Index (NDWI).
 
     The NDWI is designed to detect water features and measure water content
     in vegetation. Water strongly absorbs near-infrared radiation while
     reflecting green light, resulting in positive NDWI values for water bodies.
 
-    Formula: NDWI = (Green - NIR) / (Green + NIR + epsilon)
+    Formula: NDWI = (Green - NIR) / (Green + NIR)
+    
+    Note: Negative reflectance values are masked as NaN to handle Landsat offset artifacts.
+    A minimum denominator threshold is applied to prevent extreme values.
 
     NDWI values interpretation:
     - [0.3, 1.0]: Open water, wet surfaces
@@ -103,9 +146,12 @@ def calculate_ndwi(
             Expected range: [0, 1] for surface reflectance.
         nir: Near-infrared band reflectance (Band 5 for Landsat 8/9).
             Expected range: [0, 1] for surface reflectance.
-        epsilon: Small value to prevent division by zero in areas where
-            Green + NIR approaches zero. Default 1e-4 provides stability
-            when reflectance values are near zero.
+        epsilon: Minimum denominator threshold to prevent extreme NDWI values.
+            Default is 0.02 (2% reflectance), which prevents artifacts from
+            sunglint/cloud edges and near-zero denominators.
+        mask_low_denom: If True, return NaN for pixels with denominator < epsilon
+            instead of using a safe denominator. This preserves mathematical
+            correctness for temporal compositing.
 
     Returns:
         NDWI array with values mathematically bounded to [-1, 1].
@@ -124,22 +170,55 @@ def calculate_ndwi(
     Note:
         NDWI is used extensively in the prepare.quality module for
         water masking operations. Positive values indicate water presence.
+        
+        For the Black Marble pipeline, negative NDWI values (dry soil,
+        built-up areas) should be clamped to 0 to focus on water features
+        and prevent negative values from affecting subsequent analysis.
     """
 
     # Input validation
     if green.shape != nir.shape:
-        raise ValueError(
-            f"Green and NIR arrays must have same shape: {green.shape} vs {nir.shape}"
+        raise ValueError(f"Green and NIR arrays must have same shape: {green.shape} vs {nir.shape}")
+
+    # Calculate numerator and denominator
+    numerator = green - nir
+    denominator = green + nir
+    
+    if mask_low_denom:
+        # Return NaN for low denominators to preserve mathematical correctness
+        # This is crucial for index-first temporal compositing
+        ndwi = np.where(
+            np.abs(denominator) < epsilon,
+            np.nan,
+            numerator / denominator
         )
-
-    # Calculate denominator with epsilon to prevent division by zero
-    # Water absorbs NIR strongly, so denominator can approach zero over water
-    denominator = green + nir + epsilon
-
-    # Calculate NDWI using the standard formula: (Green - NIR) / (Green + NIR)
-    # Water reflects green but absorbs NIR, resulting in positive values
-    ndwi = (green - nir) / denominator
-
+    else:
+        # Use adaptive denominator floor (same approach as NDVI)
+        epsilon_rel = 0.05  # 5% of signal magnitude
+        
+        # Calculate adaptive floor based on signal magnitude
+        signal_magnitude = (np.abs(green) + np.abs(nir)) / 2
+        adaptive_floor = np.maximum(epsilon, epsilon_rel * signal_magnitude)
+        
+        # Apply floor to denominator while preserving sign
+        safe_denominator = np.where(
+            np.abs(denominator) < adaptive_floor,
+            np.copysign(adaptive_floor, denominator),
+            denominator
+        )
+        
+        # Calculate NDWI using the safe denominator
+        ndwi = numerator / safe_denominator
+    
+    # Clamp to valid NDWI range [-1, 1]
+    # Important: preserve NaN values during clipping
+    if mask_low_denom:
+        # Only clip non-NaN values
+        mask = ~np.isnan(ndwi)
+        ndwi[mask] = np.clip(ndwi[mask], -1.0, 1.0)
+    else:
+        ndwi = np.clip(ndwi, -1.0, 1.0)
+    
     return ndwi
 
 
@@ -172,9 +251,8 @@ def calculate_ndui(
     handle the wide dynamic range of nighttime lights data.
 
     Args:
-        ntl: Nighttime light radiance values.
-            Can be either raw DN values (0-5000) or scaled nW/cm²/sr (0-50).
-            Function auto-detects based on range and scales if needed.
+        ntl: Nighttime light radiance values (raw DN values).
+            Values are divided by 10 to convert to nW/cm²/sr units.
         ndvi: NDVI values from calculate_ndvi(), range [-1, 1].
             Used to suppress vegetation areas.
         ndwi: Optional NDWI values for water masking.
@@ -215,28 +293,34 @@ def calculate_ndui(
 
     # Input validation
     if ntl.shape != ndvi.shape:
-        raise ValueError(
-            f"NTL and NDVI arrays must have same shape: {ntl.shape} vs {ndvi.shape}"
-        )
+        raise ValueError(f"NTL and NDVI arrays must have same shape: {ntl.shape} vs {ndvi.shape}")
 
     if ndwi is not None and ndwi.shape != ntl.shape:
         raise ValueError(f"NDWI shape {ndwi.shape} must match NTL shape {ntl.shape}")
 
-    # Step 1: Handle raw DN values if needed (auto-detect based on range)
-    # If max value > 100, assume raw DN values and scale by /10
-    if np.nanmax(ntl) > 100:
-        # Raw DN values - scale to nW/cm²/sr
-        ntl_scaled = ntl.astype(np.float32) / 10.0
-    else:
-        # Already scaled to nW/cm²/sr
-        ntl_scaled = ntl
+    # Step 1: Scale raw DN values to nW/cm²/sr (always divide by 10 like bm.py)
+    ntl_scaled = ntl.astype(np.float32) / 10.0
+    
+    # DEBUG: Print scaling info
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"NDUI DEBUG: ntl_ceiling = {ntl_ceiling}, ntl_floor = {ntl_floor}")
+    logger.info(f"NDUI DEBUG: Raw NTL range: [{np.nanmin(ntl):.1f}, {np.nanmax(ntl):.1f}]")
+    logger.info(f"NDUI DEBUG: Scaled NTL range: [{np.nanmin(ntl_scaled):.1f}, {np.nanmax(ntl_scaled):.1f}]")
 
     # Step 2: Apply floor/ceiling and normalize by ceiling (like bm.py)
     # First clip to ceiling
     ntl_clipped = np.where(ntl_scaled > ntl_ceiling, ntl_ceiling, ntl_scaled)
     # Then apply floor
     ntl_clipped = np.where(ntl_clipped < ntl_floor, 0.0, ntl_clipped)
+    
+    # DEBUG: Check clipping effect
+    num_clipped = np.sum(ntl_scaled > ntl_ceiling)
+    logger.info(f"NDUI DEBUG: Pixels clipped at ceiling: {num_clipped} ({num_clipped/ntl.size*100:.1f}%)")
+    
     # Normalize by dividing by ceiling (not range)
+    # This ceiling-only normalization keeps the 0-1 scale invariant when ceiling
+    # is tuned year-to-year, as physical zero is unambiguous unlike the floor
     ntl_normalized = ntl_clipped / ntl_ceiling
 
     # Step 2: Calculate NDUI using original Black Marble formula
@@ -255,7 +339,7 @@ def calculate_ndui(
 
     # Step 5: Transform to [0, 1] range using bm.py formula
     # Transform: abs((ndui + 1.0)) / 2.0
-    ndui = np.abs((ndui + 1.0)) / 2.0
+    ndui = np.abs(ndui + 1.0) / 2.0
 
     # Step 6: Apply floor threshold
     ndui = np.where(ndui < ndui_floor, 0.0, ndui)

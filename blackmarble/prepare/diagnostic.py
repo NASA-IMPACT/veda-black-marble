@@ -1,9 +1,12 @@
 """Diagnostic output functions for debugging pipeline issues."""
 
+import json
 import os
-import rasterio
+from datetime import datetime
 from typing import Any
+
 import numpy.typing as npt
+import rasterio
 
 ArrayLike = npt.NDArray[Any]
 
@@ -47,11 +50,22 @@ def save_diagnostic(
         if crs is not None:
             profile["crs"] = crs
     else:
-        # Update profile for single band
-        profile = profile.copy()
-        profile.update(
-            {"driver": "GTiff", "count": 1, "dtype": data.dtype, "compress": "lzw"}
-        )
+        # Handle case where profile is None
+        if profile is None:
+            profile = {
+                "driver": "GTiff",
+                "height": data.shape[0],
+                "width": data.shape[1],
+                "count": 1,
+                "dtype": data.dtype,
+                "compress": "lzw",
+            }
+            if crs is not None:
+                profile["crs"] = crs
+        else:
+            # Update profile for single band
+            profile = profile.copy()
+            profile.update({"driver": "GTiff", "count": 1, "dtype": data.dtype, "compress": "lzw"})
 
         # Ensure height and width are set
         if "height" not in profile or profile["height"] is None:
@@ -67,9 +81,7 @@ def save_diagnostic(
 
     # Validate required fields
     required_fields = ["driver", "height", "width", "count", "dtype", "transform"]
-    missing_fields = [
-        f for f in required_fields if f not in profile or profile[f] is None
-    ]
+    missing_fields = [f for f in required_fields if f not in profile or profile[f] is None]
     if missing_fields:
         raise ValueError(f"Missing required fields in profile: {missing_fields}")
 

@@ -1,6 +1,7 @@
-import boto3
-import pprint
 import math
+
+import boto3
+
 
 class OperationalCredentials:
     def __init__(self, access_key, secret_key, earth_data_token):
@@ -18,7 +19,8 @@ class DestinationStorageCredentials:
 class BlackMarbleRunner:
 
     def __init__(self, operational_credentials, destination_credentials,
-                 task_arn = 'arn:aws:ecs:us-west-2:018923174646:task-definition/black-marble-executions:6',
+                 task_arn='arn:aws:ecs:us-west-2:018923174646:'
+                         'task-definition/black-marble-executions:6',
                  cluster ='BMWorkloadCluster', subnets = [
                         'subnet-6c1d0c15',
                         'subnet-6304e43e',
@@ -45,7 +47,9 @@ class BlackMarbleRunner:
                     upload_file = 'hd-blackmarble-nightlights-temp/sample.tif',
                     ):
 
-        ecs_client = boto3.client('ecs', aws_access_key_id=self.access_key, aws_secret_access_key=self.secret_key, region_name='us-west-2')
+        ecs_client = boto3.client('ecs', aws_access_key_id=self.access_key,
+                                  aws_secret_access_key=self.secret_key,
+                                  region_name='us-west-2')
 
         response = ecs_client.run_task(
             cluster=self.cluster,
@@ -143,7 +147,9 @@ class BlackMarbleRunner:
         return response['tasks'][0]['taskArn']
 
     def get_bm_task_status(self, task_arn):
-        ecs_client = boto3.client('ecs', aws_access_key_id=self.access_key, aws_secret_access_key=self.secret_key, region_name='us-west-2')
+        ecs_client = boto3.client('ecs', aws_access_key_id=self.access_key,
+                                  aws_secret_access_key=self.secret_key,
+                                  region_name='us-west-2')
         response = ecs_client.describe_tasks(
             cluster=self.cluster,
             tasks=[
@@ -158,9 +164,11 @@ class BlackMarbleRunner:
 
     def stop_bm_task(self, task_arn):
 
-        ecs_client = boto3.client('ecs', aws_access_key_id=self.access_key, aws_secret_access_key=self.secret_key, region_name='us-west-2')
+        ecs_client = boto3.client('ecs', aws_access_key_id=self.access_key,
+                                  aws_secret_access_key=self.secret_key,
+                                  region_name='us-west-2')
 
-        response = ecs_client.stop_task(
+        ecs_client.stop_task(
             cluster=self.cluster,
             task=task_arn,
             reason='Manually stopping'
@@ -179,7 +187,8 @@ class BlackMarbleRunner:
         nw = (math.ceil(max(lat1, lat2)) , math.floor(min(long1,long2)))
         se = (math.floor(min(lat1, lat2)), math.ceil(max(long1, long2)))
 
-        file_name = 'hdnightlights_' + str(year) + '-' + str(month).zfill(2) + '-' + str(day).zfill(2) + '_'
+        file_name = ('hdnightlights_' + str(year) + '-' +
+                     str(month).zfill(2) + '-' + str(day).zfill(2) + '_')
         file_name = file_name +  str(nw[0]) + 'N' if nw[0] > 0 else str(-nw[0]) + 'S'
         file_name = file_name +  str(nw[1]) + 'E' if nw[1] > 0 else str(-nw[1]) + 'W'
 
@@ -192,14 +201,19 @@ class BlackMarbleRunner:
     def download_file(self, source_bucket, source_path, destination_path):
         session = self.assumed_role_session()
         s3 = session.client('s3')
-        with open(destination_path, 'wb') as f:
-            s3.download_file(source_bucket, source_path,
-            destination_path, ExtraArgs = {"RequestPayer": "requester"})
+        s3.download_file(source_bucket, source_path,
+                         destination_path, ExtraArgs={"RequestPayer": "requester"})
 
     def assumed_role_session(self):
-        role = boto3.client('sts').assume_role_with_web_identity(RoleArn=self.aws_role_arn, RoleSessionName='assume-role', WebIdentityToken=self.aws_id_token)
+        role = boto3.client('sts').assume_role_with_web_identity(
+            RoleArn=self.aws_role_arn,
+            RoleSessionName='assume-role',
+            WebIdentityToken=self.aws_id_token)
         credentials = role['Credentials']
         aws_access_key_id = credentials['AccessKeyId']
         aws_secret_access_key = credentials['SecretAccessKey']
         aws_session_token = credentials['SessionToken']
-        return boto3.session.Session(aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, aws_session_token=aws_session_token)
+        return boto3.session.Session(
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
+            aws_session_token=aws_session_token)

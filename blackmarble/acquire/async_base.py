@@ -1,15 +1,15 @@
 """Base classes for async downloading with rate limiting and retry logic."""
 
 import asyncio
+import logging
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Optional, Dict, List, Callable
-import logging
 from enum import Enum
+from pathlib import Path
+from typing import Any
 
-import aiohttp
 from aiohttp import ClientSession, ClientTimeout
 
 
@@ -30,9 +30,9 @@ class DownloadResult:
     url: str
     local_path: Path
     status: DownloadStatus
-    size_bytes: Optional[int] = None
-    duration_seconds: Optional[float] = None
-    error: Optional[str] = None
+    size_bytes: int | None = None
+    duration_seconds: float | None = None
+    error: str | None = None
     attempt_count: int = 1
 
 
@@ -46,7 +46,7 @@ class DownloadConfig:
     max_retries: int = 3
     retry_delay: float = 1.0
     retry_backoff: float = 2.0
-    headers: Dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class RateLimiter:
@@ -85,9 +85,9 @@ class AsyncDownloaderBase(ABC):
 
     def __init__(
         self,
-        config: Optional[DownloadConfig] = None,
-        rate_limiter: Optional[RateLimiter] = None,
-        progress_callback: Optional[Callable[[DownloadResult], None]] = None,
+        config: DownloadConfig | None = None,
+        rate_limiter: RateLimiter | None = None,
+        progress_callback: Callable[[DownloadResult], None] | None = None,
     ):
         """
         Args:
@@ -104,7 +104,7 @@ class AsyncDownloaderBase(ABC):
         self._semaphore = asyncio.Semaphore(self.config.max_concurrent)
 
         # Session will be created in async context
-        self._session: Optional[ClientSession] = None
+        self._session: ClientSession | None = None
 
     async def __aenter__(self):
         """Async context manager entry"""
@@ -112,7 +112,7 @@ class AsyncDownloaderBase(ABC):
         self._session = ClientSession(timeout=timeout, headers=self.config.headers)
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, _exc_type: Any, _exc_val: Any, _exc_tb: Any) -> None:
         """Async context manager exit"""
         if self._session:
             await self._session.close()
@@ -129,11 +129,8 @@ class AsyncDownloaderBase(ABC):
         Returns:
             Tuple of (download_url, local_path)
         """
-        pass
 
-    async def download_file(
-        self, url: str, output_path: Path, **kwargs
-    ) -> DownloadResult:
+    async def download_file(self, url: str, output_path: Path, **kwargs: Any) -> DownloadResult:
         """
         Download a single file with retry logic.
 
@@ -145,9 +142,7 @@ class AsyncDownloaderBase(ABC):
         Returns:
             DownloadResult with status and metadata
         """
-        result = DownloadResult(
-            url=url, local_path=output_path, status=DownloadStatus.PENDING
-        )
+        result = DownloadResult(url=url, local_path=output_path, status=DownloadStatus.PENDING)
 
         # Check if file already exists
         if output_path.exists() and output_path.stat().st_size > 0:
@@ -177,9 +172,7 @@ class AsyncDownloaderBase(ABC):
 
                 # Download with semaphore for concurrency control
                 async with self._semaphore:
-                    await self._download_with_progress(
-                        url, output_path, result, **kwargs
-                    )
+                    await self._download_with_progress(url, output_path, result, **kwargs)
 
                 result.status = DownloadStatus.COMPLETED
                 result.duration_seconds = time.time() - start_time
@@ -191,16 +184,12 @@ class AsyncDownloaderBase(ABC):
                 return result
 
             except Exception as e:
-                self.logger.warning(
-                    f"Download attempt {attempt + 1} failed for {url}: {e}"
-                )
+                self.logger.warning(f"Download attempt {attempt + 1} failed for {url}: {e}")
                 result.error = str(e)
 
                 if attempt < self.config.max_retries - 1:
                     result.status = DownloadStatus.RETRYING
-                    delay = self.config.retry_delay * (
-                        self.config.retry_backoff**attempt
-                    )
+                    delay = self.config.retry_delay * (self.config.retry_backoff**attempt)
                     await asyncio.sleep(delay)
                 else:
                     result.status = DownloadStatus.FAILED
@@ -211,8 +200,8 @@ class AsyncDownloaderBase(ABC):
         return result
 
     async def _download_with_progress(
-        self, url: str, output_path: Path, result: DownloadResult, **kwargs
-    ):
+        self, url: str, output_path: Path, result: DownloadResult, **kwargs: Any
+    ) -> None:
         """Download file with progress tracking"""
         if not self._session:
             raise RuntimeError("Session not initialized. Use async context manager.")
@@ -244,14 +233,10 @@ class AsyncDownloaderBase(ABC):
                 downloaded = 0
                 first_chunk = True
                 with open(temp_path, "wb") as f:
-                    async for chunk in response.content.iter_chunked(
-                        self.config.chunk_size
-                    ):
+                    async for chunk in response.content.iter_chunked(self.config.chunk_size):
                         # Extra check on first chunk for HTML content
                         if first_chunk:
-                            if chunk.startswith(b"<!DOCTYPE") or chunk.startswith(
-                                b"<html"
-                            ):
+                            if chunk.startswith(b"<!DOCTYPE") or chunk.startswith(b"<html"):
                                 temp_path.unlink()  # Clean up
                                 raise RuntimeError(
                                     f"Downloaded file appears to be HTML, not expected file type. "
@@ -274,9 +259,7 @@ class AsyncDownloaderBase(ABC):
                 temp_path.unlink()
             raise
 
-    async def download_batch(
-        self, items: List[Any], output_dir: Path
-    ) -> List[DownloadResult]:
+    async def download_batch(self, items: list[Any], output_dir: Path) -> list[DownloadResult]:
         """
         Download multiple items concurrently.
 
@@ -316,42 +299,57 @@ class AsyncDownloaderBase(ABC):
 
 
 class DownloadProgressTracker:
-    """Track progress across multiple downloads"""
+    """Track progress across multiple downloads with tqdm progress bar"""
 
-    def __init__(self, total_files: int, description: str = "Downloading"):
+    def __init__(self, total_files: int, description: str = "Downloading", parent_task=None):
+        """
+        Args:
+            total_files: Total number of files to download
+            description: Description for the progress bar
+            parent_task: Optional parent task for nested progress (future use)
+        """
+        from tqdm import tqdm
+
         self.total = total_files
         self.completed = 0
         self.failed = 0
         self.in_progress = 0
         self.description = description
-        self._lock = asyncio.Lock()
+        self.parent_task = parent_task
 
-    async def update(self, result: DownloadResult):
+        # Create tqdm progress bar
+        self.pbar = tqdm(
+            total=total_files,
+            desc=description,
+            unit="files",
+            leave=False
+        )
+
+    def update(self, result: DownloadResult):
         """Update progress based on download result"""
-        async with self._lock:
-            if result.status == DownloadStatus.IN_PROGRESS:
-                self.in_progress += 1
-            elif result.status == DownloadStatus.COMPLETED:
-                self.completed += 1
-                self.in_progress = max(0, self.in_progress - 1)
-            elif result.status == DownloadStatus.FAILED:
-                self.failed += 1
-                self.in_progress = max(0, self.in_progress - 1)
+        if result.status == DownloadStatus.IN_PROGRESS:
+            self.in_progress += 1
+        elif result.status == DownloadStatus.COMPLETED:
+            self.completed += 1
+            self.in_progress = max(0, self.in_progress - 1)
+            self.pbar.update(1)
+        elif result.status == DownloadStatus.FAILED:
+            self.failed += 1
+            self.in_progress = max(0, self.in_progress - 1)
+            self.pbar.update(1)  # Still advance progress even for failures
 
-            # Print progress (could be replaced with tqdm or rich)
-            print(
-                f"\r{self.description}: "
-                f"{self.completed}/{self.total} completed, "
-                f"{self.failed} failed, "
-                f"{self.in_progress} in progress",
-                end="",
-                flush=True,
-            )
+        # Update postfix with status
+        self.pbar.set_postfix({
+            "completed": self.completed,
+            "failed": self.failed,
+            "in_progress": self.in_progress
+        })
 
     def finish(self):
-        """Print final summary"""
-        print()  # New line after progress
-        print(
-            f"{self.description} complete: "
-            f"{self.completed} succeeded, {self.failed} failed"
-        )
+        """Print final summary and close progress bar"""
+        self.pbar.close()
+
+        # Print summary
+        status = "✅" if self.failed == 0 else "⚠️"
+        print(f"{status} {self.description} complete: "
+              f"{self.completed} succeeded, {self.failed} failed")

@@ -1,11 +1,11 @@
 """Pytest configuration and shared fixtures for Black Marble tests."""
 
-import pytest
-import numpy as np
-from pathlib import Path
-from datetime import datetime
 import tempfile
-from typing import Dict, Any
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import pytest
 
 
 @pytest.fixture
@@ -94,7 +94,7 @@ def enhanced_pipeline_config(manhattan_bbox, test_date, temp_dir):
 @pytest.fixture
 def mock_cog_generator():
     """Mock COG generator for testing."""
-    from unittest.mock import Mock, MagicMock
+    from unittest.mock import MagicMock, Mock
 
     # Create a mock COGProfile
     COGProfile = Mock()
@@ -118,6 +118,42 @@ def mock_cog_generator():
     generator.process = mock_process
 
     return generator
+
+
+@pytest.fixture(scope="session")
+def reference_data_paths():
+    """Verify and return paths to reference data files.
+    
+    This fixture runs once per test session and ensures all reference
+    data is present and valid before tests run.
+    """
+    import subprocess
+    import sys
+    
+    # Get reference data directory
+    test_dir = Path(__file__).parent
+    reference_dir = test_dir / "data" / "reference"
+    
+    # Run verification
+    result = subprocess.run(
+        [sys.executable, str(test_dir.parent / "tools" / "fetch_reference_data.py")],
+        capture_output=True,
+        text=True
+    )
+    
+    if result.returncode != 0:
+        pytest.fail(
+            f"Reference data verification failed!\n"
+            f"stdout: {result.stdout}\n"
+            f"stderr: {result.stderr}\n"
+            f"Run 'python tools/fetch_reference_data.py --force' to regenerate"
+        )
+    
+    # Return paths
+    return {
+        "viirs": reference_dir / "viirs" / "VNP46A2_h08v05_20231015.tif",
+        "osm": reference_dir / "osm" / "test_roads.gpkg"
+    }
 
 
 # Pytest configuration

@@ -1,31 +1,23 @@
 #!/usr/bin/env python3
 import os
+import traceback
 from datetime import datetime
 from pathlib import Path
-import typer
-import traceback
-from blackmarble.pipeline import black_marble_pipeline
-from blackmarble.config import PipelineConfig
 
-app = typer.Typer(
-    help="Command-line interface for the VEDA Black Marble processing pipeline."
-)
+import typer
+
+from blackmarble.config import PipelineConfig
+from blackmarble.pipeline import black_marble_pipeline_sync
+
+app = typer.Typer(help="Command-line interface for the VEDA Black Marble processing pipeline.")
 
 
 @app.command()
 def run(
-    lat1: float = typer.Option(
-        ..., "--lat1", help="Latitude of the first corner (e.g., North)."
-    ),
-    lon1: float = typer.Option(
-        ..., "--lon1", help="Longitude of the first corner (e.g., West)."
-    ),
-    lat2: float = typer.Option(
-        ..., "--lat2", help="Latitude of the second corner (e.g., South)."
-    ),
-    lon2: float = typer.Option(
-        ..., "--lon2", help="Longitude of the second corner (e.g., East)."
-    ),
+    lat1: float = typer.Option(..., "--lat1", help="Latitude of the first corner (e.g., North)."),
+    lon1: float = typer.Option(..., "--lon1", help="Longitude of the first corner (e.g., West)."),
+    lat2: float = typer.Option(..., "--lat2", help="Latitude of the second corner (e.g., South)."),
+    lon2: float = typer.Option(..., "--lon2", help="Longitude of the second corner (e.g., East)."),
     year: int = typer.Option(..., "--year", help="Target year for data."),
     month: int = typer.Option(..., "--month", help="Target month for data."),
     day: int = typer.Option(..., "--day", help="Target day for data."),
@@ -33,13 +25,9 @@ def run(
         None,
         "--earthdata-token",
         "-t",
-        help="NASA Earthdata token for VIIRS downloads. If not provided, reads from EARTHDATA_TOKEN environment variable.",
+        help="NASA Earthdata token for VIIRS downloads. "
+        "If not provided, reads from EARTHDATA_TOKEN environment variable.",
         envvar="EARTHDATA_TOKEN",
-    ),
-    use_async: bool = typer.Option(
-        True,
-        "--async/--no-async",
-        help="Use async downloads for better performance (default: True).",
     ),
     output_path: str = typer.Option(
         "black_marble_output.tif",
@@ -59,6 +47,16 @@ def run(
         "-d",
         help="Save diagnostic intermediate outputs to data/diagnostics/",
     ),
+    diagnostic_bands: str = typer.Option(
+        "B3,B4,B5",
+        "--diagnostic-bands",
+        help="Comma-separated list of Landsat bands to save as diagnostics (e.g., 'B3,B4,B5')",
+    ),
+    landsat_composite_method: str = typer.Option(
+        "mean",
+        "--composite-method",
+        help="Method for creating Landsat composites: 'mean' (smooth, no edges) or 'median' (robust but hard edges)",
+    ),
     cache_downloads: bool = typer.Option(
         False,
         "--cache-downloads",
@@ -69,10 +67,16 @@ def run(
         "--fractional-roads",
         help="Use fractional road rasterization with multi-scale urban fields (experimental).",
     ),
+    permissive_compositing: bool = typer.Option(
+        False,
+        "--permissive-compositing",
+        help="Use less aggressive cloud masking for temporal compositing (reduces NaN regions).",
+    ),
     ntl_enhancement: str = typer.Option(
         "hybrid",
         "--ntl-enhancement",
-        help="NTL enhancement method: 'hybrid' (urban field with dynamic scaling), 'multiplicative' (urban field), 'additive' (urban field), or 'legacy' (direct burn-in).",
+        help="NTL enhancement method: 'hybrid' (urban field with dynamic scaling), "
+        "'multiplicative' (urban field), 'additive' (urban field), or 'legacy' (direct burn-in).",
     ),
 ):
     """
@@ -87,7 +91,7 @@ def run(
     """
 
     # Handle Earthdata token
-    if not earthdata_token and use_async:
+    if not earthdata_token:
         typer.echo(
             "Warning: No Earthdata token provided. VIIRS downloads will be skipped.\n"
             "Provide token via --earthdata-token or set EARTHDATA_TOKEN environment variable.",
@@ -137,7 +141,8 @@ def run(
         )
     else:
         typer.echo(
-            f"Error: Unknown config preset '{config_preset}'. Use 'default', 'high_quality', or 'fast'.",
+            f"Error: Unknown config preset '{config_preset}'. "
+            f"Use 'default', 'high_quality', or 'fast'.",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -148,6 +153,12 @@ def run(
         typer.echo("📊 Diagnostic outputs will be saved to data/diagnostics/")
         # Create diagnostics directory
         os.makedirs("data/diagnostics", exist_ok=True)
+
+        # Parse diagnostic bands
+        if diagnostic_bands:
+            bands = [b.strip() for b in diagnostic_bands.split(",") if b.strip()]
+            config.diagnostic_bands = bands
+            typer.echo(f"   Composite bands to save: {', '.join(bands)}")
 
     # Enable download caching if requested
     if cache_downloads:
@@ -162,7 +173,7 @@ def run(
     # Enable fractional roads if requested
     if fractional_roads:
         config.analysis.osm_fractional = True
-        typer.echo(f"🛣️  Fractional road rasterization enabled")
+        typer.echo("🛣️  Fractional road rasterization enabled")
         typer.echo(
             f"   Sub-pixels: {config.analysis.osm_sub_pixels}x{config.analysis.osm_sub_pixels}"
         )
@@ -171,29 +182,37 @@ def run(
     valid_enhancements = ["hybrid", "additive", "multiplicative", "legacy"]
     if ntl_enhancement not in valid_enhancements:
         typer.echo(
-            f"Error: Invalid NTL enhancement '{ntl_enhancement}'. Must be one of: {', '.join(valid_enhancements)}",
+            f"Error: Invalid NTL enhancement '{ntl_enhancement}'. "
+            f"Must be one of: {', '.join(valid_enhancements)}",
             err=True,
         )
         raise typer.Exit(code=1)
 
     if ntl_enhancement == "legacy":
         config.analysis.ntl_enhancement_approach = "legacy_burn"
-        typer.echo(
-            f"🔥 NTL enhancement: Legacy burn-in (1.3x major roads, 1.1x minor roads)"
-        )
+        typer.echo("🔥 NTL enhancement: Legacy burn-in (1.3x major roads, 1.1x minor roads)")
     else:
         config.analysis.ntl_enhancement_approach = "urban_field"
         # Type narrow the enhancement mode
-        from typing import cast, Literal
+        from typing import Literal, cast
 
         config.analysis.ntl_enhancement_mode = cast(
             Literal["multiplicative", "additive", "hybrid"], ntl_enhancement
         )
         typer.echo(f"🌃 NTL enhancement: Urban field ({ntl_enhancement} mode)")
         if fractional_roads:
-            typer.echo(
-                f"   Urban field scales: {config.analysis.urban_field_sigmas} pixels"
-            )
+            typer.echo(f"   Urban field scales: {config.analysis.urban_field_sigmas} pixels")
+
+    # Set compositing method
+    config.landsat_composite_method = landsat_composite_method
+    
+    # Enable permissive compositing if requested
+    if permissive_compositing:
+        config.preparation.qa_composite_strategy = "permissive"
+        config.preparation.qa_composite_dilation = 0  # No dilation for compositing
+        config.log_composite_coverage = True  # Enable coverage logging
+        typer.echo("🌤️  Using permissive cloud masking for compositing (less NaN regions)")
+        typer.echo("   Final output will still have proper cloud masking applied")
 
     # Display processing info
     typer.echo("\nStarting Black Marble pipeline:")
@@ -201,24 +220,21 @@ def run(
     typer.echo(f"  Date: {date.strftime('%Y-%m-%d')}")
     typer.echo(f"  Config Preset: {config_preset}")
     typer.echo(
-        f"  Road Rasterization: {'Fractional (5x5)' if fractional_roads else 'Binary (hierarchical)'}"
+        f"  Road Rasterization: "
+        f"{'Fractional (5x5)' if fractional_roads else 'Binary (hierarchical)'}"
     )
     typer.echo(f"  NTL Enhancement: {ntl_enhancement}")
     typer.echo(f"  Output Path: {output_path_obj}")
 
     try:
         typer.echo("\nRunning pipeline...")
-        if use_async:
-            typer.echo("🚀 Using async downloads for maximum performance")
-        else:
-            typer.echo("🐌 Using sequential downloads (legacy mode)")
+        typer.echo("🚀 Using async I/O for maximum performance")
 
-        result = black_marble_pipeline(
+        result = black_marble_pipeline_sync(
             bbox=bbox,
             date=date,
             output_path=str(output_path_obj),
             config=config,
-            use_async=use_async,
             earthdata_token=earthdata_token,
         )
 

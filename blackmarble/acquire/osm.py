@@ -4,24 +4,26 @@ This module handles fetching road network data from OpenStreetMap using OSMnx,
 and converting it to raster format for integration with satellite imagery.
 """
 
-from typing import Any, Literal
-import numpy.typing as npt
-import numpy as np
-import rasterio
-import rasterio.features
-from rasterio.crs import CRS
-from rasterio.warp import transform_geom, transform_bounds
-from shapely.geometry import shape, mapping
-from shapely.geometry import mapping as geom_to_dict
-from shapely.ops import transform
-import pyproj
-import shapely
-import osmnx as ox
-import networkx as nx
-import os
 import hashlib
 from pathlib import Path
+from typing import Any, Literal
+
 import geopandas as gpd
+import networkx as nx
+import numpy as np
+import numpy.typing as npt
+import osmnx as ox
+import pyproj
+import rasterio
+import rasterio.features
+import shapely
+from rasterio.crs import CRS
+from rasterio.warp import transform_geom
+from shapely.geometry import mapping, shape
+from shapely.geometry import mapping as geom_to_dict
+from shapely.ops import transform
+
+# Import default buffer sizes from fractional module
 
 # Type aliases
 BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
@@ -37,42 +39,50 @@ def download_osm_roads(
     road_filter: str | None = None,
 ) -> nx.MultiDiGraph:
     """Download OSM road network for a bounding box."""
+    from tqdm import tqdm
+
     print(f"Downloading roads for bbox: N={north}, S={south}, E={east}, W={west}")
     if road_filter:
         print(f"Using filter: {road_filter}")
 
-    try:
-        # osmnx expects bbox as (west, south, east, north)
-        G = ox.graph_from_bbox(
-            bbox=(west, south, east, north),
-            retain_all=True,
-            truncate_by_edge=True,
-            simplify=True,
-            network_type="all",
-            custom_filter=road_filter if road_filter else None,
-        )
-        print(f"Downloaded {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
-        return G
-    except Exception as e:
-        print(f"Error downloading roads: {type(e).__name__}: {e}")
-        raise
+    # Create progress bar for OSM download
+    with tqdm(total=None, desc="🗺️ Fetching OSM road network", unit="nodes", leave=False) as pbar:
+        try:
+            # osmnx expects bbox as (west, south, east, north)
+            G = ox.graph_from_bbox(
+                bbox=(west, south, east, north),
+                retain_all=True,
+                truncate_by_edge=True,
+                simplify=True,
+                network_type="all",
+                custom_filter=road_filter if road_filter else None,
+            )
+
+            # Update progress with node count
+            pbar.update(1)
+            pbar.set_postfix({"nodes": G.number_of_nodes(), "edges": G.number_of_edges()})
+
+            print(f"Downloaded {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+
+            # Add CRS attribute to graph to avoid warnings
+            G.graph["crs"] = "EPSG:4326"
+
+            return G
+        except Exception as e:
+            print(f"Error downloading roads: {type(e).__name__}: {e}")
+            raise
 
 
-def graph_to_shapes(
-    G: nx.MultiDiGraph, buffer_distance: float = 0.00005
-) -> list[dict[str, Any]]:
+def graph_to_shapes(G: nx.MultiDiGraph, buffer_distance: float = 0.00005) -> list[dict[str, Any]]:
     """Convert road graph to buffered shapes."""
     if G.number_of_edges() == 0:
         return []
 
-    _, edges_gdf = ox.graph_to_gdfs(G)
+    # Only get edges - we don't need nodes and this avoids MultiIndex issues
+    edges_gdf = ox.graph_to_gdfs(G, nodes=False)
     shapes = []
     for _, edge in edges_gdf.iterrows():
-        geom = (
-            edge.geometry.buffer(buffer_distance)
-            if buffer_distance > 0
-            else edge.geometry
-        )
+        geom = edge.geometry.buffer(buffer_distance) if buffer_distance > 0 else edge.geometry
         shapes.append(shapely.geometry.mapping(geom))
 
     print(f"Created {len(shapes)} buffered road shapes")
@@ -108,14 +118,9 @@ def rasterize_shapes(
     return mask
 
 
-def get_osm_cache_dir() -> Path:
-    """Get the OSM cache directory path."""
-    return Path("data/osm_cache")
-
-
 def clear_osm_cache() -> None:
     """Clear all cached OSM data."""
-    cache_dir = get_osm_cache_dir()
+    cache_dir = Path("data/osm_cache")
     if cache_dir.exists():
         import shutil
 
@@ -123,16 +128,14 @@ def clear_osm_cache() -> None:
         print(f"Cleared OSM cache directory: {cache_dir}")
 
 
-def get_osm_cache_path(
-    bbox: BBox, network_type: str, custom_filter: str | None
-) -> Path:
+def get_osm_cache_path(bbox: BBox, network_type: str, custom_filter: str | None) -> Path:
     """Generate a cache file path for OSM data based on parameters."""
     # Create a unique hash for the parameters
     params_str = f"{bbox}_{network_type}_{custom_filter}"
     params_hash = hashlib.md5(params_str.encode()).hexdigest()[:12]
 
     # Create cache directory
-    cache_dir = get_osm_cache_dir()
+    cache_dir = Path("data/osm_cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate filename with bbox info for readability
@@ -195,14 +198,17 @@ def fetch_road_network(
 
                         # Add edge with attributes
                         edge_attrs = row.to_dict()
-                        edge_attrs.pop(
-                            "geometry", None
-                        )  # Remove geometry from attributes
+                        edge_attrs.pop("geometry", None)  # Remove geometry from attributes
                         graph.add_edge(u, v, **edge_attrs)
 
                 print(
-                    f"Loaded {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges from cache"
+                    f"Loaded {graph.number_of_nodes()} nodes, "
+                    f"{graph.number_of_edges()} edges from cache"
                 )
+
+                # Add CRS attribute to graph to avoid warnings
+                graph.graph["crs"] = "EPSG:4326"
+
                 return graph
             except Exception as e:
                 print(f"Failed to load cache: {e}. Downloading fresh data...")
@@ -244,12 +250,8 @@ def buffer_roads_in_utm(
     zone, hemisphere = calculate_utm_zone(lon_center, lat_center)
     epsg_code = 32600 + zone if hemisphere == "north" else 32700 + zone
 
-    wgs84_to_utm = pyproj.Transformer.from_crs(
-        "EPSG:4326", f"EPSG:{epsg_code}", always_xy=True
-    )
-    utm_to_wgs84 = pyproj.Transformer.from_crs(
-        f"EPSG:{epsg_code}", "EPSG:4326", always_xy=True
-    )
+    wgs84_to_utm = pyproj.Transformer.from_crs("EPSG:4326", f"EPSG:{epsg_code}", always_xy=True)
+    utm_to_wgs84 = pyproj.Transformer.from_crs(f"EPSG:{epsg_code}", "EPSG:4326", always_xy=True)
 
     geom = shape(geometry)
     geom_utm = transform(wgs84_to_utm.transform, geom)
@@ -307,11 +309,34 @@ def buffer_and_rasterize_roads(
     transform: Transform,
     crs: str | CRS,
     shape: tuple[int, int],
-    buffer_meters: float = 30.0,
+    buffer_meters: float | dict[str, float] = 30.0,
     hierarchical: bool = True,
 ) -> ArrayLike:
-    """Buffer and rasterize an existing road network graph."""
-    _, edges_gdf = ox.graph_to_gdfs(graph)
+    """Buffer and rasterize an existing road network graph.
+
+    Args:
+        graph: NetworkX graph of road network
+        bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
+        transform: Target transform
+        crs: Target CRS
+        shape: Target shape (height, width)
+        buffer_meters: Buffer distance in meters (float) or dict mapping road types to buffer distances
+        hierarchical: If True, use hierarchical road values; if False, use binary
+
+    Returns:
+        Array with road values (hierarchical or binary)
+    """
+    # Check if graph has CRS info (fix for cached graphs without CRS)
+    if not hasattr(graph, "graph") or "crs" not in graph.graph:
+        import logging
+
+        logging.warning("Graph missing CRS attribute, assuming EPSG:4326")
+        if not hasattr(graph, "graph"):
+            graph.graph = {}
+        graph.graph["crs"] = "EPSG:4326"
+
+    # Only get edges - we don't need nodes and this avoids MultiIndex issues
+    edges_gdf = ox.graph_to_gdfs(graph, nodes=False)
 
     if len(edges_gdf) == 0:
         return np.zeros(shape, dtype=np.uint8)
@@ -320,6 +345,16 @@ def buffer_and_rasterize_roads(
     lat_center = (bbox[1] + bbox[3]) / 2
 
     buffered_shapes = []
+
+    # Set up buffer logic
+    if isinstance(buffer_meters, dict):
+        # Use type-specific buffers
+        buffer_dict = buffer_meters
+        default_buffer = 3.0  # Default for unknown types
+    else:
+        # Use uniform buffer
+        buffer_dict = None
+        default_buffer = buffer_meters
 
     if hierarchical:
         road_hierarchy = {
@@ -348,19 +383,36 @@ def buffer_and_rasterize_roads(
             value = road_hierarchy.get(str(highway_type), 6)
             geom_dict = geom_to_dict(edge.geometry)
 
+            # Get buffer size for this road type
+            if buffer_dict:
+                buffer_size = buffer_dict.get(str(highway_type), default_buffer)
+            else:
+                buffer_size = default_buffer
+
             buffered_geom = buffer_roads_in_utm(
                 geometry=geom_dict,
-                buffer_meters=buffer_meters,
+                buffer_meters=buffer_size,
                 lon_center=lon_center,
                 lat_center=lat_center,
             )
             buffered_shapes.append({"geometry": buffered_geom, "value": value})
     else:
         for _, edge in edges_gdf.iterrows():
+            highway_type = edge["highway"] if "highway" in edge else "unclassified"
+            if isinstance(highway_type, list):
+                highway_type = highway_type[0]
+
             geom_dict = geom_to_dict(edge.geometry)
+
+            # Get buffer size for this road type
+            if buffer_dict:
+                buffer_size = buffer_dict.get(str(highway_type), default_buffer)
+            else:
+                buffer_size = default_buffer
+
             buffered_geom = buffer_roads_in_utm(
                 geometry=geom_dict,
-                buffer_meters=buffer_meters,
+                buffer_meters=buffer_size,
                 lon_center=lon_center,
                 lat_center=lat_center,
             )

@@ -3,66 +3,94 @@
 This module provides the median composite function used in the pipeline.
 """
 
-from typing import Any
-import numpy.typing as npt
+import warnings
+from typing import Any, Literal
+
 import numpy as np
+import numpy.typing as npt
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
 
 
-def create_landsat_median_composite(
-    data_list: list[ArrayLike],
-    scale_factor: float = 0.0000275,
-    add_offset: float = -0.2,
+def create_index_temporal_composite(
+    index_stack: list[ArrayLike],
+    method: Literal["median", "mean", "percentile"] = "median",
+    percentile: float = 50.0,
+    mask_nan: bool = True,
+    min_valid_observations: int = 1,
 ) -> ArrayLike:
-    """Create temporal median composite from Landsat scenes.
-
-    This is a simplified compositing function that:
-    1. Stacks all input arrays
-    2. Computes per-pixel median across time
-    3. Handles NaN values from QA masking
-
-    The median composite approach is robust to outliers from clouds,
-    shadows, and other transient artifacts that weren't caught by QA.
-
+    """Create temporal composite from pre-calculated spectral indices.
+    
+    This expects indices (NDVI, NDWI) already calculated per date. 
+    This ensures mathematical correctness since median(ratio) ≠ ratio(median).
+    
+    IMPORTANT: This function assumes all input arrays share the same coordinate
+    system and that their upper-left corners are aligned. Arrays of different
+    sizes will be padded with NaN to the maximum size, but spatial alignment
+    must be ensured by the caller through proper reprojection.
+    
     Args:
-        data_list: List of 2D arrays (one per date) with NaN for masked pixels
-        scale_factor: Scale factor for reflectance conversion
-        add_offset: Offset for reflectance conversion
-
+        index_stack: List of 2D arrays containing pre-calculated indices,
+                    all must be in the same CRS with aligned upper-left origins
+        method: Compositing method - "median", "mean", or "percentile"
+        percentile: Percentile value if method="percentile" (0-100)
+        mask_nan: Whether to mask output where insufficient observations
+        min_valid_observations: Minimum valid observations required
+        
     Returns:
-        Median composite array with same shape as inputs
+        Composite array with same shape as inputs
+        
+    Note:
+        For NDUI calculations, using 85th percentile NDVI better captures
+        vegetation's light-dimming potential than median values.
     """
-
-    if not data_list:
-        raise ValueError("No data provided for compositing")
-
-    # Find common shape (they might be slightly different)
-    shapes = [d.shape for d in data_list]
-    min_height = min(s[0] for s in shapes)
-    min_width = min(s[1] for s in shapes)
-
-    # Crop all arrays to common size
-    cropped_data = []
-    for data in data_list:
-        cropped = data[:min_height, :min_width]
-        cropped_data.append(cropped)
-
-    # Stack arrays along new time dimension
-    # Shape: (n_dates, height, width)
-    stacked = np.stack(cropped_data, axis=0)
-
-    # Apply scaling to the raw DN values
-    # This converts from raw digital numbers to surface reflectance
-    scaled_stack = stacked * scale_factor + add_offset
-
-    # Compute median along time axis, ignoring NaN
-    # nanmedian handles NaN values gracefully
-    composite = np.nanmedian(scaled_stack, axis=0)
-
-    # Keep NaN values for pixels with no valid observations
-    # This preserves the distinction between "no data" and "dark surface"
-    # The downstream code should handle NaN appropriately
-
+    if not index_stack:
+        raise ValueError("No index data provided for compositing")
+    
+    # Use streaming algorithm for 85th percentile
+    if method == "percentile" and 84.5 <= percentile <= 85.5:
+        from .streaming import streaming_percentile_85
+        composite, valid_count = streaming_percentile_85(
+            index_stack, min_valid_observations
+        )
+        return composite
+        
+    shapes = [arr.shape for arr in index_stack]
+    max_height = max(s[0] for s in shapes)
+    max_width = max(s[1] for s in shapes)
+    
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Index stack shapes: min=({min(s[0] for s in shapes)}, {min(s[1] for s in shapes)}), "
+                f"max=({max_height}, {max_width})")
+    padded_stack = []
+    for i, arr in enumerate(index_stack):
+        if arr.shape[0] < max_height or arr.shape[1] < max_width:
+            padded = np.full((max_height, max_width), np.nan, dtype=np.float32)
+            padded[:arr.shape[0], :arr.shape[1]] = arr.astype(np.float32)
+            logger.debug(f"  Padded array {i}: {arr.shape} -> {padded.shape}")
+        else:
+            padded = arr.astype(np.float32)
+        padded_stack.append(padded)
+    stacked = np.stack(padded_stack, axis=0)
+    valid_count = np.sum(~np.isnan(stacked), axis=0)
+    
+    # Compute composite along time axis
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", r"All-NaN slice encountered")
+        
+        if method == "median":
+            composite = np.nanmedian(stacked, axis=0)
+        elif method == "mean":
+            composite = np.nanmean(stacked, axis=0)
+        elif method == "percentile":
+            composite = np.nanpercentile(stacked, percentile, axis=0)
+        else:
+            raise ValueError(f"Unknown method: {method}. Use 'median', 'mean', or 'percentile'.")
+    
+    # Mask pixels with insufficient observations
+    if mask_nan and min_valid_observations > 1:
+        composite[valid_count < min_valid_observations] = np.nan
+    
     return composite

@@ -1,9 +1,10 @@
 """Visualization - ONLY WHAT'S USED."""
 
 from typing import Any
+
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
-import matplotlib.pyplot as plt
 
 ArrayLike = npt.NDArray[Any]
 
