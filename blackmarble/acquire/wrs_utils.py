@@ -1,33 +1,7 @@
 """WRS-2 utilities for Landsat tile calculations using real USGS data."""
 
-import json
-
 # Type alias
 BBox = tuple[float, float, float, float]
-
-# Load WRS-2 lookup table at import time
-_wrs_table: list[dict[str, int]]
-try:
-    import importlib.resources
-    with importlib.resources.open_text("blackmarble.static", "wrs2_lookup.json") as f:
-        _wrs_table = json.load(f)
-except (FileNotFoundError, ImportError):
-    # Fallback for development/testing
-    try:
-        from pathlib import Path
-        lookup_path = Path(__file__).parent.parent / "static" / "wrs2_lookup.json"
-        if lookup_path.exists():
-            _wrs_table = json.loads(lookup_path.read_text())
-        else:
-            # Emergency fallback - create minimal set for common areas
-            _wrs_table = [
-                {"path": path, "row": row}
-                for path in range(100, 150)
-                for row in range(20, 80)
-            ]
-    except Exception:
-        # Last resort - empty table
-        _wrs_table = []
 
 
 def get_wrs_tiles_for_bbox_tuple(
@@ -48,16 +22,13 @@ def get_wrs_tiles_for_bbox_tuple(
     from shapely.geometry import box
     from pathlib import Path
     
-    # Try to load WRS-2 shapefile
+    # Load WRS-2 shapefile from data directory
     wrs_path = Path(__file__).parent.parent / "data" / "WRS2_descending_0" / "WRS2_descending.shp"
-    if not wrs_path.exists():
-        # Fallback to docker path
-        wrs_path = Path(__file__).parent.parent.parent / "docker" / "WRS2_descending_0" / "WRS2_descending.shp"
     
     if not wrs_path.exists():
         raise FileNotFoundError(
             f"WRS-2 shapefile not found. Expected at: {wrs_path}\n"
-            "Please ensure the WRS2_descending shapefile is available."
+            "Please ensure the WRS2_descending shapefile is available in blackmarble/data/"
         )
     
     # Load shapefile and find intersecting tiles
