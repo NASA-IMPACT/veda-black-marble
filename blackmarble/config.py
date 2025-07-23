@@ -46,18 +46,17 @@ class LandsatAcquisitionConfig:
     allow_incomplete_coverage: bool = False  # Allow partial tile coverage
 
     # Date-grouped selection settings
-    # Design: With 12 dates × ±8 day windows throughout the year, we ensure catching
-    # opportunities to find dates with complete coverage. Therefore we prioritize:
-    # 1. Temporal consistency (tolerance_days=16) - all tiles from within 16 days
-    # 2. Spatial completeness (require_complete_coverage=True) - no missing tiles
-    # 3. Quality optimization - among complete dates, pick the one with lowest cloud cover
+    # Design: With 12 dates × ±7 day windows throughout the year, we ensure catching
+    # opportunities to find good coverage. Therefore we prioritize:
+    # 1. Temporal consistency (tolerance_days=12) - all tiles from within 12 days
+    # 2. Spatial completeness - prefer dates with more tile coverage
+    # 3. Quality optimization - among available dates, pick the one with lowest cloud cover
     selection_strategy: Literal["per_tile", "date_grouped"] = (
         "date_grouped"  # New default for spatial consistency
     )
     tolerance_days: float = (
         12.0  # Max days between scenes in same group (balanced grouping)
     )
-    require_complete_coverage: bool = True  # Only consider dates with all required tiles
 
 
 @dataclass

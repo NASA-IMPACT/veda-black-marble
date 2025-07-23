@@ -345,7 +345,7 @@ class AsyncDownloadOrchestrator:
                     bbox=plan.bbox,
                     target_date=target_date,
                     config=plan.landsat_acquisition_config,  # Pass the functional config
-                    allow_incomplete=not (plan.landsat_acquisition_config.require_complete_coverage if plan.landsat_acquisition_config else False),
+                    allow_incomplete=True,  # Always allow partial coverage
                 )
             )
             for target_date in plan.landsat_dates
