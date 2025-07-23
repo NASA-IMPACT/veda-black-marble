@@ -21,7 +21,7 @@ class LandsatAcquisitionConfig:
 
     # Time window settings
     window_days: int = (
-        5  # Search ±5 days from each target date (balanced approach)
+        7  # Search ±7 days from each target date (balanced approach)
     )
 
     # Quality scoring weights (must sum to 1.0)
@@ -55,7 +55,7 @@ class LandsatAcquisitionConfig:
         "date_grouped"  # New default for spatial consistency
     )
     tolerance_days: float = (
-        10.0  # Max days between scenes in same group (balanced grouping)
+        12.0  # Max days between scenes in same group (balanced grouping)
     )
     require_complete_coverage: bool = True  # Only consider dates with all required tiles
 

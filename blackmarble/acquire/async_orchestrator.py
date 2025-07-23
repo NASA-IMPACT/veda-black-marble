@@ -345,7 +345,7 @@ class AsyncDownloadOrchestrator:
                     bbox=plan.bbox,
                     target_date=target_date,
                     config=plan.landsat_acquisition_config,  # Pass the functional config
-                    allow_incomplete=True,  # do not fail whole pipeline for sparse tiles
+                    allow_incomplete=not (plan.landsat_acquisition_config.require_complete_coverage if plan.landsat_acquisition_config else False),
                 )
             )
             for target_date in plan.landsat_dates
