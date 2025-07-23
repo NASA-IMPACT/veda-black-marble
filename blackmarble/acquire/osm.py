@@ -16,11 +16,9 @@ import osmnx as ox
 import pyproj
 import rasterio
 import rasterio.features
-import shapely
 from rasterio.crs import CRS
 from rasterio.warp import transform_geom
 from shapely.geometry import mapping, shape
-from shapely.geometry import mapping as geom_to_dict
 from shapely.ops import transform
 
 # Import default buffer sizes from fractional module
@@ -71,51 +69,6 @@ def download_osm_roads(
         except Exception as e:
             print(f"Error downloading roads: {type(e).__name__}: {e}")
             raise
-
-
-def graph_to_shapes(G: nx.MultiDiGraph, buffer_distance: float = 0.00005) -> list[dict[str, Any]]:
-    """Convert road graph to buffered shapes."""
-    if G.number_of_edges() == 0:
-        return []
-
-    # Only get edges - we don't need nodes and this avoids MultiIndex issues
-    edges_gdf = ox.graph_to_gdfs(G, nodes=False)
-    shapes = []
-    for _, edge in edges_gdf.iterrows():
-        geom = edge.geometry.buffer(buffer_distance) if buffer_distance > 0 else edge.geometry
-        shapes.append(shapely.geometry.mapping(geom))
-
-    print(f"Created {len(shapes)} buffered road shapes")
-    return shapes
-
-
-def rasterize_shapes(
-    shapes: list[dict[str, Any]],
-    height: int,
-    width: int,
-    transform: Any,
-    value: int = 1,
-    all_touched: bool = True,
-) -> np.ndarray:
-    """Rasterize polygon shapes to a numpy array."""
-    if not shapes:
-        print("No shapes to rasterize")
-        return np.zeros((height, width), dtype=np.uint8)
-
-    mask = rasterio.features.rasterize(
-        shapes,
-        out_shape=(height, width),
-        transform=transform,
-        fill=0,
-        all_touched=all_touched,
-        default_value=value,
-        dtype=np.uint8,
-    )
-
-    pixel_count = np.sum(mask > 0)
-    print(f"Rasterized {pixel_count} pixels ({100.0 * pixel_count / mask.size:.2f}%)")
-
-    return mask
 
 
 def clear_osm_cache() -> None:
@@ -303,128 +256,3 @@ def rasterize_road_shapes_with_crs(
     )
 
 
-def buffer_and_rasterize_roads(
-    graph: Any,  # NetworkX graph
-    bbox: BBox,
-    transform: Transform,
-    crs: str | CRS,
-    shape: tuple[int, int],
-    buffer_meters: float | dict[str, float] = 30.0,
-    hierarchical: bool = True,
-) -> ArrayLike:
-    """Buffer and rasterize an existing road network graph.
-
-    Args:
-        graph: NetworkX graph of road network
-        bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
-        transform: Target transform
-        crs: Target CRS
-        shape: Target shape (height, width)
-        buffer_meters: Buffer distance in meters (float) or dict mapping road types to buffer distances
-        hierarchical: If True, use hierarchical road values; if False, use binary
-
-    Returns:
-        Array with road values (hierarchical or binary)
-    """
-    # Check if graph has CRS info (fix for cached graphs without CRS)
-    if not hasattr(graph, "graph") or "crs" not in graph.graph:
-        import logging
-
-        logging.warning("Graph missing CRS attribute, assuming EPSG:4326")
-        if not hasattr(graph, "graph"):
-            graph.graph = {}
-        graph.graph["crs"] = "EPSG:4326"
-
-    # Only get edges - we don't need nodes and this avoids MultiIndex issues
-    edges_gdf = ox.graph_to_gdfs(graph, nodes=False)
-
-    if len(edges_gdf) == 0:
-        return np.zeros(shape, dtype=np.uint8)
-
-    lon_center = (bbox[0] + bbox[2]) / 2
-    lat_center = (bbox[1] + bbox[3]) / 2
-
-    buffered_shapes = []
-
-    # Set up buffer logic
-    if isinstance(buffer_meters, dict):
-        # Use type-specific buffers
-        buffer_dict = buffer_meters
-        default_buffer = 3.0  # Default for unknown types
-    else:
-        # Use uniform buffer
-        buffer_dict = None
-        default_buffer = buffer_meters
-
-    if hierarchical:
-        road_hierarchy = {
-            "primary": 1,
-            "primary_link": 1,
-            "secondary": 1,
-            "secondary_link": 1,
-            "tertiary": 1,
-            "tertiary_link": 1,
-            "motorway": 2,
-            "motorway_link": 2,
-            "residential": 3,
-            "trunk": 4,
-            "trunk_link": 4,
-            "service": 5,
-            "unclassified": 5,
-            "road": 5,
-            "busway": 5,
-        }
-
-        for _, edge in edges_gdf.iterrows():
-            highway_type = edge["highway"] if "highway" in edge else "unclassified"
-            if isinstance(highway_type, list):
-                highway_type = highway_type[0]
-
-            value = road_hierarchy.get(str(highway_type), 6)
-            geom_dict = geom_to_dict(edge.geometry)
-
-            # Get buffer size for this road type
-            if buffer_dict:
-                buffer_size = buffer_dict.get(str(highway_type), default_buffer)
-            else:
-                buffer_size = default_buffer
-
-            buffered_geom = buffer_roads_in_utm(
-                geometry=geom_dict,
-                buffer_meters=buffer_size,
-                lon_center=lon_center,
-                lat_center=lat_center,
-            )
-            buffered_shapes.append({"geometry": buffered_geom, "value": value})
-    else:
-        for _, edge in edges_gdf.iterrows():
-            highway_type = edge["highway"] if "highway" in edge else "unclassified"
-            if isinstance(highway_type, list):
-                highway_type = highway_type[0]
-
-            geom_dict = geom_to_dict(edge.geometry)
-
-            # Get buffer size for this road type
-            if buffer_dict:
-                buffer_size = buffer_dict.get(str(highway_type), default_buffer)
-            else:
-                buffer_size = default_buffer
-
-            buffered_geom = buffer_roads_in_utm(
-                geometry=geom_dict,
-                buffer_meters=buffer_size,
-                lon_center=lon_center,
-                lat_center=lat_center,
-            )
-            buffered_shapes.append({"geometry": buffered_geom, "value": 1})
-
-    print(f"Buffered {len(buffered_shapes)} road segments")
-
-    return rasterize_road_shapes_with_crs(
-        shapes=buffered_shapes,
-        reference_transform=transform,
-        shape=shape,
-        src_crs="EPSG:4326",
-        dst_crs=crs,
-        all_touched=False,
-    )

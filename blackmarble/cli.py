@@ -62,11 +62,6 @@ def run(
         "--cache-downloads",
         help="Cache downloaded files in data/cache/ for faster re-runs (development mode).",
     ),
-    fractional_roads: bool = typer.Option(
-        False,
-        "--fractional-roads",
-        help="Use fractional road rasterization with multi-scale urban fields (experimental).",
-    ),
     permissive_compositing: bool = typer.Option(
         False,
         "--permissive-compositing",
@@ -170,14 +165,6 @@ def run(
         # Create cache directory
         os.makedirs(config.cache_dir, exist_ok=True)
 
-    # Enable fractional roads if requested
-    if fractional_roads:
-        config.analysis.osm_fractional = True
-        typer.echo("🛣️  Fractional road rasterization enabled")
-        typer.echo(
-            f"   Sub-pixels: {config.analysis.osm_sub_pixels}x{config.analysis.osm_sub_pixels}"
-        )
-
     # Configure NTL enhancement
     valid_enhancements = ["hybrid", "additive", "multiplicative"]
     if ntl_enhancement not in valid_enhancements:
@@ -195,8 +182,7 @@ def run(
         Literal["multiplicative", "additive", "hybrid"], ntl_enhancement
     )
     typer.echo(f"🌃 NTL enhancement: Urban field ({ntl_enhancement} mode)")
-    if fractional_roads:
-        typer.echo(f"   Urban field scales: {config.analysis.urban_field_sigmas} pixels")
+    typer.echo(f"   Urban field scales: {config.analysis.urban_field_sigmas} pixels")
 
     # Set compositing method
     config.landsat_composite_method = landsat_composite_method
@@ -214,10 +200,7 @@ def run(
     typer.echo(f"  Bounding Box: {bbox}")
     typer.echo(f"  Date: {date.strftime('%Y-%m-%d')}")
     typer.echo(f"  Config Preset: {config_preset}")
-    typer.echo(
-        f"  Road Rasterization: "
-        f"{'Fractional (5x5)' if fractional_roads else 'Binary (hierarchical)'}"
-    )
+    typer.echo(f"  Road Rasterization: Fractional (5x5)")
     typer.echo(f"  NTL Enhancement: {ntl_enhancement}")
     typer.echo(f"  Output Path: {output_path_obj}")
 

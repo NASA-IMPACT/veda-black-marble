@@ -80,7 +80,6 @@ class AcquisitionConfig:
     road_types: list[str] = field(
         default_factory=lambda: ["motorway", "trunk", "primary", "secondary"]
     )
-    osm_buffer: float = 0.00005  # Buffer distance for OSM roads in decimal degrees (deprecated)
     osm_buffer_meters: float | dict[str, float] | None = (
         None  # Buffer in meters (float) or dict by road type
     )
@@ -159,10 +158,8 @@ class AnalysisConfig:
     # Legacy compatibility
     use_legacy_indices: bool = False  # If True, uses old band-first calculation
 
-    # OSM fractional road rasterization
-    osm_fractional: bool = False  # Use fractional road rasterization
+    # OSM road rasterization (fractional coverage)
     osm_sub_pixels: int = 5  # Sub-pixels per dimension (5x5 = 25 total)
-    osm_all_touched: bool = True  # For legacy binary rasterization
 
     # NTL enhancement uses multi-scale Gaussian field-based enhancement
 

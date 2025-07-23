@@ -899,11 +899,7 @@ async def black_marble_pipeline(
     if ntl_composite is not None:
         # NTL enhancement now always uses urban field approach
 
-        if (
-            config
-            and config.analysis.osm_fractional
-            and roads_fractional is not None
-        ):
+        if config and roads_fractional is not None:
             # URBAN FIELD ENHANCEMENT with fractional roads
             print("\n🌃 Enhancing NTL with urban fields (fractional roads)")
 

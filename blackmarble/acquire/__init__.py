@@ -7,13 +7,12 @@ This module handles fetching data from various sources:
 """
 
 from .async_orchestrator import AsyncDownloadOrchestrator, DownloadPlan
-from .osm import buffer_and_rasterize_roads, fetch_road_network
+from .osm import fetch_road_network
 from .osm_fractional import buffer_and_rasterize_roads_fractional
 
 __all__ = [
     "AsyncDownloadOrchestrator",
     "DownloadPlan",
     "fetch_road_network",
-    "buffer_and_rasterize_roads",
     "buffer_and_rasterize_roads_fractional",
 ]
