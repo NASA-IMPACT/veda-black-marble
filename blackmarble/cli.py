@@ -228,7 +228,6 @@ def run(
 
     try:
         typer.echo("\nRunning pipeline...")
-        typer.echo("🚀 Using async I/O for maximum performance")
 
         result = black_marble_pipeline_sync(
             bbox=bbox,

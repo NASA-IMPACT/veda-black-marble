@@ -213,12 +213,8 @@ async def download_viirs_tiles_async(
 
     try:
         for i, tile in enumerate(tiles):
-            if isinstance(tile, tuple) and len(tile) == 2:
-                v, h = tile
-                logger.debug(f"  Tile {i + 1}: h{h:02d}v{v:02d}")
-            else:
-                logger.error(f"  Invalid tile at index {i}: {tile} (type: {type(tile)})")
-                raise ValueError(f"Invalid tile format: expected (v, h) tuple, got {tile}")
+            v, h = tile
+            logger.debug(f"  Tile {i + 1}: h{h:02d}v{v:02d}")
     except ValueError as e:
         logger.error(f"Error unpacking tiles: {e}")
         logger.error(f"tiles content: {tiles}")

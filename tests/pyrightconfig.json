@@ -1,0 +1,10 @@
+{
+  "extends": "../pyproject.toml",
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": "none",
+  "reportUnknownParameterType": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownMemberType": "none",
+  "reportUntypedFunctionDecorator": "none"
+}

@@ -1,8 +1,4 @@
-"""Pipeline for Black Marble processing using async I/O.
-
-This pipeline uses async I/O for all data acquisition operations
-for maximum performance.
-"""
+"""Pipeline for Black Marble processing."""
 
 import logging
 import os
@@ -70,7 +66,7 @@ async def black_marble_pipeline(
         Dictionary with results and metadata
     """
 
-    print("🚀 Starting Black Marble pipeline with async downloads")
+    print("🚀 Starting Black Marble pipeline")
 
     if earthdata_token is None:
         earthdata_token = os.environ.get("EARTHDATA_TOKEN")

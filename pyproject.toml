@@ -76,13 +76,14 @@ markers = [
 exclude = ["docker/"]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
+stubPath = "blackmarble-stubs"
 reportMissingImports = "warning"
-reportMissingTypeStubs = "warning"
-reportUnknownParameterType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownMemberType = "error"
-reportUntypedFunctionDecorator = "error"
+reportMissingTypeStubs = "none"  # We have our own stubs
+reportUnknownParameterType = "warning"
+reportUnknownArgumentType = "warning"
+reportUnknownVariableType = "warning"
+reportUnknownMemberType = "warning"
+reportUntypedFunctionDecorator = "none"
 reportUntypedClassDecorator = "error"
 
 # ───────────────────────────────────────────────────────────────

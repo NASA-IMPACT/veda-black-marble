@@ -12,9 +12,8 @@ import osmnx as ox
 from rasterio.transform import from_origin
 from rasterio.crs import CRS
 
-from blackmarble.acquire.osm import buffer_and_rasterize_roads, download_osm_roads
+from blackmarble.acquire.osm import buffer_and_rasterize_roads
 from blackmarble.enhance.features import enhance_roads
-from blackmarble.config import PipelineConfig
 
 
 class TestBinaryRoadRasterization:

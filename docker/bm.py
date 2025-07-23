@@ -44,7 +44,6 @@ import boto3
 from datetime import datetime
 from datetime import date
 import utm
-from numpy import inf
 import matplotlib.pyplot as plt
 import rasterio
 import rasterio.features
@@ -54,7 +53,6 @@ import requests
 import osmnx as ox
 import os.path
 from pyproj import Proj
-import json
 from rasterio.io import MemoryFile
 from rio_cogeo.profiles import cog_profiles
 from rio_cogeo.cogeo import cog_translate
@@ -401,9 +399,9 @@ class OSMUtil:
         with rasterio.open(reference_raster) as f:
                     height = f.height
                     width = f.width
-                    crs = f.crs.to_string()
+                    f.crs.to_string()
                     transform = f.transform
-                    crs = f.crs.to_string()
+                    f.crs.to_string()
                     profile = f.profile
 
         G = ox.graph_from_bbox(max(lat1, lat2),
@@ -447,9 +445,9 @@ class OSMUtil:
         with rasterio.open(reference_raster) as f:
                     height = f.height
                     width = f.width
-                    crs = f.crs.to_string()
+                    f.crs.to_string()
                     transform = f.transform
-                    crs = f.crs.to_string()
+                    f.crs.to_string()
                     profile = f.profile
 
         base = np.zeros((height, width))
@@ -799,7 +797,7 @@ from geopy.distance import geodesic
 
 def calculate_bounding_box_area(min_lon, min_lat, max_lon, max_lat):
     sw_point = (min_lat, min_lon)
-    ne_point = (max_lat, max_lon)
+    (max_lat, max_lon)
 
     width = geodesic(sw_point, (max_lat, min_lon)).meters
     height = geodesic(sw_point, (min_lat, max_lon)).meters
@@ -866,7 +864,6 @@ def process_band_data(band, year, month, day, lat1, long1, lat2, long2, output_p
         g = gdal.Warp(output_prefix + str(i) + "A.TIFF",
                       aerosol_files, format="GTiff", options=["COMPRESS=LZW", "TILED=YES"],
                       resampleAlg='bilinear', srcNodata= 1, dstNodata = 0, multithread=True) # if you want
-        g = None
     return output_files, p_f, r_f, a_f
 
 

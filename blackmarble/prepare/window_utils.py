@@ -1,10 +1,11 @@
 """Window rounding utilities for correct pixel placement."""
 
 import math
+from typing import Any
 from rasterio.windows import Window
 
 
-def round_window_offsets_correctly(window, transform):
+def round_window_offsets_correctly(window: Window, transform: Any) -> Window:
     """Round window offsets correctly for north-up vs south-up rasters.
     
     For north-up rasters (negative pixel height):

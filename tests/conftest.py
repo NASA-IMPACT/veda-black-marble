@@ -1,48 +1,53 @@
 """Pytest configuration and shared fixtures for Black Marble tests."""
 
+from __future__ import annotations
+
+from typing import Any, Dict, Generator, Tuple
+
 import tempfile
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 import pytest
+from unittest.mock import Mock
 
 
 @pytest.fixture
-def test_shape():
+def test_shape() -> Tuple[int, int]:
     """Default shape for test arrays."""
     return (100, 100)
 
 
 @pytest.fixture
-def manhattan_bbox():
+def manhattan_bbox() -> Tuple[float, float, float, float]:
     """Small Manhattan area bounding box for testing."""
     return (-74.05, 40.69, -73.95, 40.79)
 
 
 @pytest.fixture
-def sf_bbox():
+def sf_bbox() -> Tuple[float, float, float, float]:
     """Small San Francisco area bounding box for testing."""
     return (-122.42, 37.77, -122.40, 37.79)
 
 
 @pytest.fixture
-def test_date():
+def test_date() -> datetime:
     """Default test date."""
     return datetime(2023, 9, 15)
 
 
 @pytest.fixture
-def temp_dir():
+def temp_dir() -> Generator[Path, None, None]:
     """Temporary directory for test outputs."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir)
 
 
 @pytest.fixture
-def mock_s3_adapter():
+def mock_s3_adapter() -> Mock:
     """Mock S3 adapter for testing."""
-    from unittest.mock import Mock
 
     adapter = Mock()
     adapter.anonymous = False
@@ -53,15 +58,14 @@ def mock_s3_adapter():
 
 
 @pytest.fixture
-def mock_raster_adapter():
+def mock_raster_adapter() -> Mock:
     """Mock raster adapter for testing."""
-    from unittest.mock import Mock
 
     adapter = Mock()
     adapter.use_rasterio = True
 
     # Mock read operation
-    def mock_read(filepath, band=None):
+    def mock_read(filepath: str, band: int | None = None) -> npt.NDArray[np.float32]:
         # Return random data of appropriate shape
         return np.random.rand(100, 100).astype(np.float32)
 
@@ -74,7 +78,11 @@ def mock_raster_adapter():
 
 
 @pytest.fixture
-def pipeline_config(manhattan_bbox, test_date, temp_dir):
+def pipeline_config(
+    manhattan_bbox: Tuple[float, float, float, float],
+    test_date: datetime,
+    temp_dir: Path,
+):
     """Default pipeline configuration for testing."""
     from blackmarble.config import PipelineConfig
 
@@ -83,18 +91,24 @@ def pipeline_config(manhattan_bbox, test_date, temp_dir):
 
 
 @pytest.fixture
-def enhanced_pipeline_config(manhattan_bbox, test_date, temp_dir):
+def enhanced_pipeline_config(
+    manhattan_bbox: Tuple[float, float, float, float],
+    test_date: datetime,
+    temp_dir: Path,
+):
     """Enhanced pipeline configuration for testing."""
     from blackmarble.config import PipelineConfig
 
     output_path = str(temp_dir / "test_enhanced.tif")
-    return PipelineConfig.for_enhanced_quality(manhattan_bbox, test_date, output_path)
+    return PipelineConfig.for_enhanced_quality(
+        manhattan_bbox, test_date, output_path
+    )
 
 
 @pytest.fixture
-def mock_cog_generator():
+def mock_cog_generator() -> Mock:
     """Mock COG generator for testing."""
-    from unittest.mock import MagicMock, Mock
+    from unittest.mock import MagicMock
 
     # Create a mock COGProfile
     COGProfile = Mock()
@@ -104,7 +118,9 @@ def mock_cog_generator():
     generator.profile = COGProfile
 
     # Mock process method
-    def mock_process(data, output_path, **kwargs):
+    def mock_process(
+        data: npt.NDArray[Any], output_path: str, **kwargs: Any
+    ) -> MagicMock:
         result = MagicMock()
         result.output_path = output_path
         result.success = True
@@ -121,7 +137,7 @@ def mock_cog_generator():
 
 
 @pytest.fixture(scope="session")
-def reference_data_paths():
+def reference_data_paths() -> Dict[str, Path]:
     """Verify and return paths to reference data files.
     
     This fixture runs once per test session and ensures all reference
@@ -129,35 +145,35 @@ def reference_data_paths():
     """
     import subprocess
     import sys
-    
+
     # Get reference data directory
     test_dir = Path(__file__).parent
     reference_dir = test_dir / "data" / "reference"
-    
+
     # Run verification
     result = subprocess.run(
         [sys.executable, str(test_dir.parent / "tools" / "fetch_reference_data.py")],
         capture_output=True,
-        text=True
+        text=True,
     )
-    
+
     if result.returncode != 0:
         pytest.fail(
-            f"Reference data verification failed!\n"
+            "Reference data verification failed!\n"
             f"stdout: {result.stdout}\n"
             f"stderr: {result.stderr}\n"
-            f"Run 'python tools/fetch_reference_data.py --force' to regenerate"
+            "Run 'python tools/fetch_reference_data.py --force' to regenerate"
         )
-    
+
     # Return paths
     return {
         "viirs": reference_dir / "viirs" / "VNP46A2_h08v05_20231015.tif",
-        "osm": reference_dir / "osm" / "test_roads.gpkg"
+        "osm": reference_dir / "osm" / "test_roads.gpkg",
     }
 
 
 # Pytest configuration
-def pytest_configure(config):
+def pytest_configure(config: Any) -> None:
     """Configure pytest with custom markers."""
     config.addinivalue_line("markers", "integration: mark test as integration test")
     config.addinivalue_line("markers", "slow: mark test as slow running")

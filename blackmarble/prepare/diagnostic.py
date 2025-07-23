@@ -1,8 +1,6 @@
 """Diagnostic output functions for debugging pipeline issues."""
 
-import json
 import os
-from datetime import datetime
 from typing import Any
 
 import numpy.typing as npt

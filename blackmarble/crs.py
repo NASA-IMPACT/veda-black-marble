@@ -5,7 +5,7 @@ that minimize distortion for each area of interest.
 """
 
 from functools import lru_cache
-from typing import Tuple
+from typing import Any, Tuple
 
 from pyproj import CRS
 
@@ -108,7 +108,7 @@ def get_crs_hash(crs: CRS) -> str:
 
 
 def create_processing_grid(bbox: Tuple[float, float, float, float], 
-                         resolution: float = 30.0) -> Tuple[CRS, 'rasterio.Affine', Tuple[int, int]]:
+                         resolution: float = 30.0) -> Tuple[CRS, Any, Tuple[int, int]]:
     """Create the standard processing grid for a bounding box.
     
     This creates:

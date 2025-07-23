@@ -7,15 +7,14 @@ of raster data to prepare it for analysis.
 from typing import Any, Literal
 
 import numpy as np
-import numpy.typing as npt
 from rasterio.transform import Affine
 from rasterio.warp import Resampling, calculate_default_transform, reproject
 
-# Type aliases
-ArrayLike = npt.NDArray[Any]
+from ..typing import ArrayLike, BBox
+
+# Local type aliases for rasterio types
 Transform = Any  # rasterio.transform.Affine
 CRS = Any  # rasterio.crs.CRS
-BBox = tuple[float, float, float, float]  # (minx, miny, maxx, maxy)
 
 
 def reproject_image(

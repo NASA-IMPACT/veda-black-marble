@@ -68,7 +68,7 @@ class TestVIIRSOrientation:
             # Calculate corners from geotransform
             ulx = geotransform[0]
             uly = geotransform[3]
-            lrx = ulx + geotransform[1] * cols
+            ulx + geotransform[1] * cols
             lry = uly + geotransform[5] * rows  # Note: geotransform[5] is negative
             
             # Upper should have higher Y than Lower
