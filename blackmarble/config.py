@@ -133,7 +133,7 @@ class AnalysisConfig:
 
     # NDUI parameters (matches existing config.py)
     ntl_floor: float = 0.1
-    ntl_ceiling: float = 100.0  # Raised from 10.0 to better capture urban gradients
+    ntl_ceiling: float = 10.0
     ndui_floor: float = 0.02
     ndui_epsilon: float = 1e-6
 
@@ -149,7 +149,7 @@ class AnalysisConfig:
     # Index composite methods
     # NDVI: Use 85th percentile to capture peak vegetation for better urban/vegetation separation
     ndvi_composite_method: Literal["median", "mean", "percentile"] = "percentile"
-    ndvi_composite_percentile: float = 85.0  # High percentile for vegetation peaks
+    ndvi_composite_percentile: float = 85.0
     
     # NDWI: Median is appropriate for water detection
     ndwi_composite_method: Literal["median", "mean", "percentile"] = "median"

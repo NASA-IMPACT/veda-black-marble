@@ -395,7 +395,9 @@ def parse_scene_metadata(scene_dict: dict[str, Any], mtl_data: dict[str, Any] | 
 
 class S3Client(Protocol):
     """Protocol for S3 client operations."""
-    async def get_object(self, Bucket: str, Key: str, **kwargs) -> dict[str, Any]: ...
+    async def get_object(self, *, Bucket: str, Key: str, **kwargs) -> dict[str, Any]:  # noqa: N803
+        """Get object from S3 bucket."""
+        ...
     @property
     def exceptions(self) -> Any: ...
 

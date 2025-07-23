@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import logging
 import os
 import traceback
 from datetime import datetime
@@ -73,6 +74,12 @@ def run(
         help="NTL enhancement method: 'hybrid' (urban field with dynamic scaling), "
         "'multiplicative' (urban field), or 'additive' (urban field).",
     ),
+    log_level: str = typer.Option(
+        "INFO",
+        "--log-level",
+        "-l",
+        help="Logging level: DEBUG, INFO, WARNING, ERROR",
+    ),
 ):
     """
     Runs the Black Marble processing pipeline for a given area and date.
@@ -84,6 +91,23 @@ def run(
     - Urban index calculation (NDUI)
     - Cloud-optimized GeoTIFF output
     """
+    
+    # Configure logging
+    numeric_level = getattr(logging, log_level.upper(), None)
+    if not isinstance(numeric_level, int):
+        typer.echo(f"Error: Invalid log level '{log_level}'", err=True)
+        raise typer.Exit(code=1)
+    
+    logging.basicConfig(
+        level=numeric_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Suppress noisy INFO messages from AWS libraries
+    logging.getLogger('aiobotocore').setLevel(logging.WARNING)
+    logging.getLogger('botocore').setLevel(logging.WARNING)
+    logging.getLogger('boto3').setLevel(logging.WARNING)
 
     # Handle Earthdata token
     if not earthdata_token:

@@ -13,6 +13,10 @@ import rasterio
 import rasterio.windows
 from pyproj import Transformer
 
+from ..logging_utils import get_logger
+
+logger = get_logger(__name__)
+
 from .landsat_qa import create_landsat_cloud_mask, print_qa_pixel_summary
 
 # Type aliases
@@ -46,7 +50,7 @@ def _read_windowed(file_path: str, bbox: BBox | None, transform_bbox: bool = Tru
                 maxx, maxy = transformer.transform(bbox[2], bbox[3])
                 bbox_in_src_crs = (minx, miny, maxx, maxy)
             except Exception as e:
-                print(f"  WARNING: Could not transform bbox: {e}")
+                logger.warning("Could not transform bbox: %s", e)
                 bbox_in_src_crs = bbox
         
         # Get the window for this bbox
@@ -57,8 +61,6 @@ def _read_windowed(file_path: str, bbox: BBox | None, transform_bbox: bool = Tru
         )
         
         # Log window details
-        import logging
-        logger = logging.getLogger(__name__)
         logger.debug(f"  Windowed read from {os.path.basename(file_path)}:")
         logger.debug(f"    File shape: {src.shape}")
         logger.debug(f"    File bounds: {src.bounds}")
@@ -150,8 +152,6 @@ def _calculate_optimal_dimensions(files: list[str], bbox: tuple[float, float, fl
                         file_res_y = abs(y3 - y1)
                         file_resolutions.append((file_res_x, file_res_y))
             except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.warning(f"Could not read resolution from {file}: {e}")
         
         # If we got file resolutions, use the finest (but not if suspiciously different)
@@ -170,8 +170,6 @@ def _calculate_optimal_dimensions(files: list[str], bbox: tuple[float, float, fl
     height = int(np.ceil((bbox[3] - bbox[1]) / res_deg_y))
     
     # Debug logging
-    import logging
-    logger = logging.getLogger(__name__)
     logger.info(f"Calculated optimal dimensions for mosaic:")
     logger.info(f"  BBox: {bbox}")
     logger.info(f"  Center: ({center_lon:.3f}°, {center_lat:.3f}°)")
@@ -245,7 +243,6 @@ def process_landsat_date(
     cloud_strategy: Literal["conservative", "moderate", "permissive"] = "moderate",
     save_diagnostics: bool = False,
     date_str: str | None = None,
-    output_shape: tuple[int, int] | None = None,
     processing_crs: Any = None,
     reference_transform: Any = None,
     reference_shape: tuple[int, int] | None = None,
@@ -265,7 +262,6 @@ def process_landsat_date(
         cloud_strategy: Cloud masking strategy ("conservative", "moderate", or "permissive")
         save_diagnostics: Whether to save diagnostic outputs
         date_str: Date string for diagnostic filenames
-        output_shape: Optional output shape (height, width) to use instead of auto-calculation
 
     Returns:
         Dictionary mapping band names to tuples of (masked_data, profile)
@@ -286,11 +282,11 @@ def process_landsat_date(
         qa_files, _, _, _ = bands_data["QA_PIXEL"]
 
         if qa_files:
-            print(f"Processing QA_PIXEL from {len(qa_files)} tiles")
+            logger.info("Processing QA_PIXEL from %d tiles", len(qa_files))
 
             # For multiple tiles, always use windowed mosaic approach
             if len(qa_files) > 1:
-                print(f"    Creating windowed mosaic from {len(qa_files)} QA tiles...")
+                logger.info("Creating windowed mosaic from %d QA tiles...", len(qa_files))
                 
                 # Use the standard processing grid
                 from ..crs import create_processing_grid
@@ -298,8 +294,8 @@ def process_landsat_date(
                 # Create the standard processing grid
                 output_crs, transform, (height, width) = create_processing_grid(bbox)
                 
-                print(f"    Using locally-optimized Albers Equal Area projection")
-                print(f"    Grid dimensions: {width} x {height} at 30m resolution")
+                logger.info("Using locally-optimized Albers Equal Area projection")
+                logger.info("Grid dimensions: %d x %d at 30m resolution", width, height)
                 
                 qa_data = np.zeros((height, width), dtype=np.uint16)
                 qa_profile = {
@@ -315,7 +311,7 @@ def process_landsat_date(
                 
                 # Process each file with windowed read and reproject
                 for i, qa_file in enumerate(qa_files):
-                    print(f"    Processing QA tile {i+1}/{len(qa_files)}: {os.path.basename(qa_file)}")
+                    logger.info("Processing QA tile %d/%d: %s", i+1, len(qa_files), os.path.basename(qa_file))
                     
                     # Read window from source file
                     with rasterio.open(qa_file) as src:
@@ -381,16 +377,16 @@ def process_landsat_date(
                         
                         # Calculate where to place this tile in the full mosaic
                         # DEBUG: Log exact offsets before rounding
-                        print(f"      DEBUG: Exact dst_window.row_off = {dst_window.row_off:.6f}")
-                        print(f"      DEBUG: Exact dst_window.col_off = {dst_window.col_off:.6f}")
-                        print(f"      DEBUG: Delta from rounding - row: {dst_window.row_off - dst_window_int.row_off:.6f}, col: {dst_window.col_off - dst_window_int.col_off:.6f}")
+                        logger.debug("Exact dst_window.row_off = %.6f", dst_window.row_off)
+                        logger.debug("Exact dst_window.col_off = %.6f", dst_window.col_off)
+                        logger.debug("Delta from rounding - row: %.6f, col: %.6f", dst_window.row_off - dst_window_int.row_off, dst_window.col_off - dst_window_int.col_off)
                         
                         # Use the already-rounded window offsets
                         dst_row_off = dst_window_int.row_off
                         dst_col_off = dst_window_int.col_off
                         
-                        print(f"      DEBUG: Final dst_row_off = {dst_row_off}")
-                        print(f"      DEBUG: Final dst_col_off = {dst_col_off}")
+                        logger.debug("Final dst_row_off = %d", dst_row_off)
+                        logger.debug("Final dst_col_off = %d", dst_col_off)
                         
                         # Extract the slice of the mosaic we'll update
                         # Handle negative offsets properly
@@ -435,12 +431,12 @@ def process_landsat_date(
                             
                             if fill_mask.any():
                                 mosaic_slice[fill_mask] = tile_data_cropped[fill_mask]
-                                print(f"      Filled {fill_mask.sum():,} pixels")
+                                logger.debug("Filled %d pixels", fill_mask.sum())
                         else:
-                            print(f"      WARNING: Shape mismatch after cropping - mosaic: {mosaic_slice.shape}, tile: {tile_data_cropped.shape}")
+                            logger.warning("Shape mismatch after cropping - mosaic: %s, tile: %s", mosaic_slice.shape, tile_data_cropped.shape)
             else:
                 # Single file case - still need to reproject to processing grid for consistency
-                print(f"    Processing single QA_PIXEL tile...")
+                logger.info("Processing single QA_PIXEL tile...")
                 
                 # Use the standard processing grid
                 from ..crs import create_processing_grid
@@ -479,11 +475,11 @@ def process_landsat_date(
                         resampling=Resampling.nearest
                     )
                     
-                    print(f"    Reprojected from {src.crs} to {qa_profile['crs']}")
+                    logger.info("Reprojected from %s to %s", src.crs, qa_profile['crs'])
 
             # Debug: check data shape
-            print(f"  QA data shape: {qa_data.shape}")
-            print(f"  QA data dtype: {qa_data.dtype}")
+            logger.debug("QA data shape: %s", qa_data.shape)
+            logger.debug("QA data dtype: %s", qa_data.dtype)
 
             # Data is already cropped by windowed read, no need for additional cropping
 
@@ -492,7 +488,7 @@ def process_landsat_date(
 
             # Check if QA data is empty
             if qa_data.size == 0:
-                print("  WARNING: QA_PIXEL data is empty after loading/cropping!")
+                logger.warning("QA_PIXEL data is empty after loading/cropping!")
                 cloud_mask = None
             else:
                 # Create cloud mask using bit-based approach
@@ -507,9 +503,9 @@ def process_landsat_date(
                 mask_total = cloud_mask.size
 
                 if mask_total > 0:
-                    print(f"  Cloud mask coverage: {mask_clear / mask_total * 100:.1f}% clear")
+                    logger.info("Cloud mask coverage: %.1f%% clear", mask_clear / mask_total * 100)
                 else:
-                    print("  WARNING: Cloud mask is empty!")
+                    logger.warning("Cloud mask is empty!")
                 
                 # Save cloud mask diagnostic if requested
                 if save_diagnostics and date_str:
@@ -520,18 +516,18 @@ def process_landsat_date(
                     mask_path = f"{diag_dir}/cloud_mask_{date_str}.tif"
                     with rasterio.open(mask_path, 'w', **qa_profile) as dst:
                         dst.write(cloud_mask.astype(np.uint8), 1)
-                    print(f"  Saved cloud mask to: {mask_path}")
+                    logger.info("Saved cloud mask to: %s", mask_path)
 
     # Process each spectral band
     for band_name, (band_files, _, _, _) in bands_data.items():
         if band_name == "QA_PIXEL" or not band_files:
             continue
 
-        print(f"Processing {band_name} from {len(band_files)} tiles")
+        logger.info("Processing %s from %d tiles", band_name, len(band_files))
 
         # For multiple tiles, always use windowed mosaic approach
         if len(band_files) > 1:
-            print(f"  Creating windowed mosaic from {len(band_files)} tiles...")
+            logger.info("Creating windowed mosaic from %d tiles...", len(band_files))
             
             # Use the same grid as QA_PIXEL if available
             if qa_profile is not None:
@@ -563,11 +559,11 @@ def process_landsat_date(
             
             # Process each file with windowed read and reproject
             for i, band_file in enumerate(band_files):
-                print(f"    Processing {band_name} tile {i+1}/{len(band_files)}: {os.path.basename(band_file)}")
+                logger.info("Processing %s tile %d/%d: %s", band_name, i+1, len(band_files), os.path.basename(band_file))
 
                 qa_file = qa_files[i] if i < len(qa_files) else None
                 if qa_file is None:
-                    print(f"      WARNING: No matching QA_PIXEL file for {band_file} – skipping tile")
+                    logger.warning("No matching QA_PIXEL file for %s - skipping tile", band_file)
                     continue
 
                 with rasterio.open(band_file) as src:
@@ -631,16 +627,16 @@ def process_landsat_date(
                 
                 # Calculate where to place this tile in the full mosaic
                 # DEBUG: Log exact offsets before rounding
-                print(f"      DEBUG: Exact dst_window.row_off = {dst_window.row_off:.6f}")
-                print(f"      DEBUG: Exact dst_window.col_off = {dst_window.col_off:.6f}")
-                print(f"      DEBUG: Delta from rounding - row: {dst_window.row_off - dst_window_int.row_off:.6f}, col: {dst_window.col_off - dst_window_int.col_off:.6f}")
+                logger.debug("Exact dst_window.row_off = %.6f", dst_window.row_off)
+                logger.debug("Exact dst_window.col_off = %.6f", dst_window.col_off)
+                logger.debug("Delta from rounding - row: %.6f, col: %.6f", dst_window.row_off - dst_window_int.row_off, dst_window.col_off - dst_window_int.col_off)
                 
                 # Use the already-rounded window offsets
                 dst_row_off = dst_window_int.row_off
                 dst_col_off = dst_window_int.col_off
                 
-                print(f"      DEBUG: Final dst_row_off = {dst_row_off}")
-                print(f"      DEBUG: Final dst_col_off = {dst_col_off}")
+                logger.debug("Final dst_row_off = %d", dst_row_off)
+                logger.debug("Final dst_col_off = %d", dst_col_off)
                 
                 # Extract the slice of the mosaic we'll update
                 # Handle negative offsets properly
@@ -685,17 +681,15 @@ def process_landsat_date(
                     
                     if fill_mask.any():
                         mosaic_slice[fill_mask] = tile_data_cropped[fill_mask]
-                        print(f"      Filled {fill_mask.sum():,} pixels")
+                        logger.debug("Filled %d pixels", fill_mask.sum())
                 else:
-                    print(f"      WARNING: Shape mismatch after cropping - mosaic: {mosaic_slice.shape}, tile: {tile_data_cropped.shape}")
+                    logger.warning("Shape mismatch after cropping - mosaic: %s, tile: %s", mosaic_slice.shape, tile_data_cropped.shape)
             
-            import logging
-            logger = logging.getLogger(__name__)
             logger.info(f"    Final mosaic has {(band_data > 0).sum()} valid pixels")
             logger.info(f"    Final mosaic shape: {band_data.shape}")
         else:
             # Single file case - still need to reproject to processing grid for consistency
-            print(f"  Processing single {band_name} tile...")
+            logger.info("Processing single %s tile...", band_name)
             
             # Use the same grid as QA_PIXEL if available
             if qa_profile is not None:
@@ -754,7 +748,7 @@ def process_landsat_date(
                     dst_nodata=0
                 )
                 
-                print(f"    Reprojected from {src_band.crs} to {band_profile['crs']}")
+                logger.info("Reprojected from %s to %s", src_band.crs, band_profile['crs'])
             else:
                 # No cloud masking - read directly
                 with rasterio.open(band_files[0]) as src:
@@ -778,13 +772,13 @@ def process_landsat_date(
                         dst_nodata=0
                     )
                     
-                    print(f"    Reprojected from {src.crs} to {band_profile['crs']}")
+                    logger.info("Reprojected from %s to %s", src.crs, band_profile['crs'])
 
         # Data is already cropped by windowed read, no need for additional cropping
 
         # Check if band data is empty
         if band_data.size == 0:
-            print(f"  WARNING: {band_name} data is empty after loading/cropping!")
+            logger.warning("%s data is empty after loading/cropping!", band_name)
             masked_data = band_data
         else:
             # Data were cloud-masked per tile before mosaicking
@@ -793,8 +787,6 @@ def process_landsat_date(
         result[band_name] = (masked_data, band_profile)
 
     # Log summary of processed data
-    import logging
-    logger = logging.getLogger(__name__)
     logger.info("Processing summary:")
     for band_name, (data, profile) in result.items():
         if data is not None:

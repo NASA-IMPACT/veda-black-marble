@@ -6,6 +6,10 @@ from typing import Any
 import numpy.typing as npt
 import rasterio
 
+from ..logging_utils import get_logger
+
+logger = get_logger(__name__)
+
 ArrayLike = npt.NDArray[Any]
 
 
@@ -90,12 +94,12 @@ def save_diagnostic(
             if description:
                 dst.set_band_description(1, description)
     except Exception as e:
-        print(f"Error saving diagnostic {output_path}: {e}")
-        print(f"Profile: {profile}")
+        logger.error("Error saving diagnostic %s: %s", output_path, e)
+        logger.error("Profile: %s", profile)
         raise
 
-    print(f"Saved diagnostic: {output_path}")
-    print(f"  Description: {description}")
-    print(f"  Shape: {data.shape}")
-    print(f"  Range: {data.min():.2f} to {data.max():.2f}")
-    print(f"  Non-zero pixels: {(data > 0).sum()}")
+    logger.info("Saved diagnostic: %s", output_path)
+    logger.info("  Description: %s", description)
+    logger.info("  Shape: %s", data.shape)
+    logger.info("  Range: %.2f to %.2f", data.min(), data.max())
+    logger.info("  Non-zero pixels: %d", (data > 0).sum())

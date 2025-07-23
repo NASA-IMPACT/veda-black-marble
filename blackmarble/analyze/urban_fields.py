@@ -10,6 +10,10 @@ import numpy as np
 import numpy.typing as npt
 from scipy.ndimage import gaussian_filter
 
+from ..logging_utils import get_logger
+
+logger = get_logger(__name__)
+
 # Type aliases
 ArrayLike = npt.NDArray[Any]
 
@@ -126,10 +130,10 @@ def enhance_ntl_with_urban_field(
         # Context-aware enhancement with proper dynamic range preservation
 
         # DEBUG: Print parameters being used
-        print("\n🔍 HYBRID ENHANCEMENT PARAMETERS:")
-        print(f"  - expected_scale: {hybrid_expected_scale}")
-        print(f"  - expected_sqrt_scale: {hybrid_expected_sqrt_scale}")
-        print(f"  - application_factor: {hybrid_application_factor}")
+        logger.debug("🔍 HYBRID ENHANCEMENT PARAMETERS:")
+        logger.debug("  - expected_scale: %s", hybrid_expected_scale)
+        logger.debug("  - expected_sqrt_scale: %s", hybrid_expected_sqrt_scale)
+        logger.debug("  - application_factor: %s", hybrid_application_factor)
 
         # Calculate enhancement factor based on urban density
         # This will be used to create a multiplicative enhancement similar to the old 1.3x approach
@@ -153,17 +157,19 @@ def enhance_ntl_with_urban_field(
         result = enhanced / max_enhancement_factor
 
         # DEBUG: Print enhancement statistics
-        print("\n📊 HYBRID ENHANCEMENT STATS:")
-        print(f"  - NTL range before: [{ntl.min():.1f}, {ntl.max():.1f}]")
-        print(f"  - NTL range after: [{result.min():.1f}, {result.max():.1f}]")
-        print(f"  - Max enhancement factor: {max_enhancement_factor:.3f}")
-        print(
-            f"  - Enhancement factors range: "
-            f"[{enhancement_factor.min():.3f}, {enhancement_factor.max():.3f}]"
+        logger.debug("📊 HYBRID ENHANCEMENT STATS:")
+        logger.debug("  - NTL range before: [%.1f, %.1f]", ntl.min(), ntl.max())
+        logger.debug("  - NTL range after: [%.1f, %.1f]", result.min(), result.max())
+        logger.debug("  - Max enhancement factor: %.3f", max_enhancement_factor)
+        logger.debug(
+            "  - Enhancement factors range: [%.3f, %.3f]",
+            enhancement_factor.min(),
+            enhancement_factor.max(),
         )
-        print(
-            f"  - Pixels enhanced: {np.sum(enhancement_factor > 1.001)} "
-            f"({np.sum(enhancement_factor > 1.001) / enhancement_factor.size * 100:.1f}%)"
+        logger.debug(
+            "  - Pixels enhanced: %d (%.1f%%)",
+            np.sum(enhancement_factor > 1.001),
+            np.sum(enhancement_factor > 1.001) / enhancement_factor.size * 100,
         )
 
         return result

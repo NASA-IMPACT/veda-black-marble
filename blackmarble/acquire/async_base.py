@@ -299,31 +299,25 @@ class AsyncDownloaderBase(ABC):
 
 
 class DownloadProgressTracker:
-    """Track progress across multiple downloads with tqdm progress bar"""
+    """Track progress across multiple downloads using logging"""
 
     def __init__(self, total_files: int, description: str = "Downloading", parent_task=None):
         """
         Args:
             total_files: Total number of files to download
-            description: Description for the progress bar
+            description: Description for the progress tracking
             parent_task: Optional parent task for nested progress (future use)
         """
-        from tqdm import tqdm
-
         self.total = total_files
         self.completed = 0
         self.failed = 0
         self.in_progress = 0
         self.description = description
         self.parent_task = parent_task
-
-        # Create tqdm progress bar
-        self.pbar = tqdm(
-            total=total_files,
-            desc=description,
-            unit="files",
-            leave=False
-        )
+        self.last_log_percent = -1
+        
+        # Log initial status
+        logging.info("Starting %s: %d files", self.description, self.total)
 
     def update(self, result: DownloadResult):
         """Update progress based on download result"""
@@ -332,24 +326,23 @@ class DownloadProgressTracker:
         elif result.status == DownloadStatus.COMPLETED:
             self.completed += 1
             self.in_progress = max(0, self.in_progress - 1)
-            self.pbar.update(1)
         elif result.status == DownloadStatus.FAILED:
             self.failed += 1
             self.in_progress = max(0, self.in_progress - 1)
-            self.pbar.update(1)  # Still advance progress even for failures
+            logging.warning("Download failed: %s", result.url)
 
-        # Update postfix with status
-        self.pbar.set_postfix({
-            "completed": self.completed,
-            "failed": self.failed,
-            "in_progress": self.in_progress
-        })
+        # Log progress at 10% intervals
+        if self.total > 0:
+            current_percent = int((self.completed + self.failed) * 100 / self.total)
+            if current_percent >= self.last_log_percent + 10:
+                self.last_log_percent = current_percent
+                logging.info("%s progress: %d%% (%d/%d completed, %d failed, %d in progress)",
+                             self.description, current_percent, self.completed, self.total, 
+                             self.failed, self.in_progress)
 
     def finish(self):
-        """Print final summary and close progress bar"""
-        self.pbar.close()
-
-        # Print summary
+        """Log final summary"""
+        # Log summary
         status = "✅" if self.failed == 0 else "⚠️"
-        print(f"{status} {self.description} complete: "
-              f"{self.completed} succeeded, {self.failed} failed")
+        logging.info("%s %s complete: %d succeeded, %d failed",
+                     status, self.description, self.completed, self.failed)

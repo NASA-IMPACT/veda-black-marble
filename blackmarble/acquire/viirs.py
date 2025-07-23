@@ -208,9 +208,6 @@ async def download_viirs_tiles_async(
     logger.info(f"  Date: {date.strftime('%Y-%m-%d')}")
     logger.info(f"  Number of tiles: {len(tiles)}")
 
-    # Add progress bar for tile discovery and checking
-    from tqdm.asyncio import tqdm
-
     try:
         for i, tile in enumerate(tiles):
             v, h = tile
@@ -238,13 +235,10 @@ async def download_viirs_tiles_async(
         # Create download tasks for each tile
         download_tasks = []
 
-        # Progress bar for tile discovery
-        discovery_bar = tqdm(
-            total=len(tiles),
-            desc=f"🛰️ Discovering VIIRS tiles ({date.strftime('%Y-%m-%d')})",
-            unit="tiles",
-            leave=False
-        )
+        # Log tile discovery start
+        logger.info(f"Discovering VIIRS tiles for {date.strftime('%Y-%m-%d')}: {len(tiles)} tiles")
+        tiles_cached = 0
+        tiles_queued = 0
 
         for tile in tiles:
             try:
@@ -267,8 +261,8 @@ async def download_viirs_tiles_async(
                     _add_layer_files_to_result(result, layer_files)
                 except Exception as e:
                     logger.error(f"Error processing cached tile h{h:02d}v{v:02d}: {e}")
-                discovery_bar.update(1)
-                discovery_bar.set_postfix({"tile": f"h{h:02d}v{v:02d}", "status": "cached"})
+                tiles_cached += 1
+                logger.debug(f"Using cached tile h{h:02d}v{v:02d}")
                 continue
 
             # Create download task
@@ -283,24 +277,19 @@ async def download_viirs_tiles_async(
                 output_path=hdf_path,
             )
             download_tasks.append((task, v, h, hdf_path))
-            discovery_bar.update(1)
-            discovery_bar.set_postfix({"tile": f"h{h:02d}v{v:02d}", "status": "queued"})
+            tiles_queued += 1
+            logger.debug(f"Queued download for tile h{h:02d}v{v:02d}")
 
-        # Close discovery bar
-        discovery_bar.close()
+        # Log discovery summary
+        logger.info(f"Tile discovery complete: {tiles_cached} cached, {tiles_queued} to download")
 
         # Download all tiles concurrently
         if download_tasks:
             logger.info(f"Downloading {len(download_tasks)} VIIRS tiles...")
             logger.debug(f"download_tasks length: {len(download_tasks)}")
-
-            # Create download progress bar
-            download_bar = tqdm(
-                total=len(download_tasks),
-                desc=f"📥 Downloading VIIRS data ({date.strftime('%Y-%m-%d')})",
-                unit="files",
-                leave=False
-            )
+            
+            download_completed = 0
+            download_failed = 0
 
             # Use gather with return_exceptions to handle individual failures
             try:
@@ -328,8 +317,7 @@ async def download_viirs_tiles_async(
 
                 if isinstance(result_or_error, Exception):
                     logger.error(f"Failed to download tile h{h:02d}v{v:02d}: {result_or_error}")
-                    download_bar.update(1)
-                    download_bar.set_postfix({"tile": f"h{h:02d}v{v:02d}", "status": "failed"})
+                    download_failed += 1
                     continue
 
                 # Extract layers from downloaded HDF5
@@ -338,15 +326,13 @@ async def download_viirs_tiles_async(
                     layer_files = extract_viirs_layers(hdf_path, effective_output_dir)
                     _add_layer_files_to_result(result, layer_files)
                     logger.debug(f"Successfully processed tile h{h:02d}v{v:02d}")
-                    download_bar.update(1)
-                    download_bar.set_postfix({"tile": f"h{h:02d}v{v:02d}", "status": "complete"})
+                    download_completed += 1
                 except Exception as e:
                     logger.error(f"Error extracting layers from tile h{h:02d}v{v:02d}: {e}")
-                    download_bar.update(1)
-                    download_bar.set_postfix({"tile": f"h{h:02d}v{v:02d}", "status": "error"})
+                    download_failed += 1
 
-            # Close download progress bar
-            download_bar.close()
+            # Log download summary
+            logger.info(f"Download complete: {download_completed} succeeded, {download_failed} failed")
         else:
             logger.info("No VIIRS tiles to download (all cached)")
 

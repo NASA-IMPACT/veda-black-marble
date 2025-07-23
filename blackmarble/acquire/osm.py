@@ -21,6 +21,10 @@ from rasterio.warp import transform_geom
 from shapely.geometry import mapping, shape
 from shapely.ops import transform
 
+from ..logging_utils import get_logger
+
+logger = get_logger(__name__)
+
 # Import default buffer sizes from fractional module
 
 # Type aliases
@@ -37,38 +41,31 @@ def download_osm_roads(
     road_filter: str | None = None,
 ) -> nx.MultiDiGraph:
     """Download OSM road network for a bounding box."""
-    from tqdm import tqdm
-
-    print(f"Downloading roads for bbox: N={north}, S={south}, E={east}, W={west}")
+    logger.info("Downloading roads for bbox: N=%s, S=%s, E=%s, W=%s", north, south, east, west)
     if road_filter:
-        print(f"Using filter: {road_filter}")
+        logger.info("Using filter: %s", road_filter)
 
-    # Create progress bar for OSM download
-    with tqdm(total=None, desc="🗺️ Fetching OSM road network", unit="nodes", leave=False) as pbar:
-        try:
-            # osmnx expects bbox as (west, south, east, north)
-            G = ox.graph_from_bbox(
-                bbox=(west, south, east, north),
-                retain_all=True,
-                truncate_by_edge=True,
-                simplify=True,
-                network_type="all",
-                custom_filter=road_filter if road_filter else None,
-            )
+    logger.info("Fetching OSM road network...")
+    try:
+        # osmnx expects bbox as (west, south, east, north)
+        G = ox.graph_from_bbox(
+            bbox=(west, south, east, north),
+            retain_all=True,
+            truncate_by_edge=True,
+            simplify=True,
+            network_type="all",
+            custom_filter=road_filter if road_filter else None,
+        )
 
-            # Update progress with node count
-            pbar.update(1)
-            pbar.set_postfix({"nodes": G.number_of_nodes(), "edges": G.number_of_edges()})
+        logger.info("Downloaded %d nodes, %d edges", G.number_of_nodes(), G.number_of_edges())
 
-            print(f"Downloaded {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+        # Add CRS attribute to graph to avoid warnings
+        G.graph["crs"] = "EPSG:4326"
 
-            # Add CRS attribute to graph to avoid warnings
-            G.graph["crs"] = "EPSG:4326"
-
-            return G
-        except Exception as e:
-            print(f"Error downloading roads: {type(e).__name__}: {e}")
-            raise
+        return G
+    except Exception as e:
+        logger.error("Error downloading roads: %s: %s", type(e).__name__, e)
+        raise
 
 
 def clear_osm_cache() -> None:
@@ -78,7 +75,7 @@ def clear_osm_cache() -> None:
         import shutil
 
         shutil.rmtree(cache_dir)
-        print(f"Cleared OSM cache directory: {cache_dir}")
+        logger.info("Cleared OSM cache directory: %s", cache_dir)
 
 
 def get_osm_cache_path(bbox: BBox, network_type: str, custom_filter: str | None) -> Path:
@@ -123,7 +120,7 @@ def fetch_road_network(
         cache_path = get_osm_cache_path(bbox, network_type, custom_filter)
 
         if cache_path.exists():
-            print(f"Loading OSM data from cache: {cache_path.name}")
+            logger.info("Loading OSM data from cache: %s", cache_path.name)
             try:
                 # Load from GeoPackage
                 edges_gdf = gpd.read_file(cache_path, layer="edges")
@@ -154,9 +151,10 @@ def fetch_road_network(
                         edge_attrs.pop("geometry", None)  # Remove geometry from attributes
                         graph.add_edge(u, v, **edge_attrs)
 
-                print(
-                    f"Loaded {graph.number_of_nodes()} nodes, "
-                    f"{graph.number_of_edges()} edges from cache"
+                logger.info(
+                    "Loaded %d nodes, %d edges from cache",
+                    graph.number_of_nodes(),
+                    graph.number_of_edges(),
                 )
 
                 # Add CRS attribute to graph to avoid warnings
@@ -164,10 +162,10 @@ def fetch_road_network(
 
                 return graph
             except Exception as e:
-                print(f"Failed to load cache: {e}. Downloading fresh data...")
+                logger.warning("Failed to load cache: %s. Downloading fresh data...", e)
 
     # Download fresh data
-    print("Downloading OSM data from server...")
+    logger.info("Downloading OSM data from server...")
     graph = download_osm_roads(max_lat, min_lat, max_lon, min_lon, custom_filter)
 
     # Save to cache
@@ -180,10 +178,10 @@ def fetch_road_network(
 
             # Save to GeoPackage - no size limitations!
             edges_gdf.to_file(cache_path, layer="edges", driver="GPKG")
-            print(f"Saved OSM data to cache: {cache_path.name}")
-            print(f"  Cached {len(edges_gdf):,} road segments")
+            logger.info("Saved OSM data to cache: %s", cache_path.name)
+            logger.info("  Cached %d road segments", len(edges_gdf))
         except Exception as e:
-            print(f"Failed to save cache: {e}")
+            logger.warning("Failed to save cache: %s", e)
             # Continue without caching - the download succeeded
 
     return graph

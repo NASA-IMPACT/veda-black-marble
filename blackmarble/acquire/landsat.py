@@ -219,7 +219,6 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
             List of scene metadata
         """
         from .wrs_utils import get_wrs_tiles_for_bbox_tuple
-        from tqdm.asyncio import tqdm
 
         # Get WRS tiles and organize by path for efficient processing
         tile_dicts = get_wrs_tiles_for_bbox_tuple(bbox)
@@ -244,20 +243,16 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
             'scenes_filtered_by_date': 0
         }
         stats_lock = asyncio.Lock()
+        last_log_scenes = 0
 
         sensor_prefix = f"{self.COLLECTION}/{self.LEVEL}/standard/oli-tirs/{year}/"
         
-        # Create progress bar with date range info
+        # Log date range info
         date_desc = f"{year}"
         if date_range:
             date_desc = f"{date_range[0].strftime('%Y-%m-%d')} to {date_range[1].strftime('%Y-%m-%d')}"
         
-        pbar = tqdm(
-            total=None,
-            desc=f"🔍 Discovering Landsat scenes ({date_desc})",
-            unit="scenes",
-            leave=False
-        )
+        logger.info(f"Discovering Landsat scenes for {date_desc}")
 
         async def process_path(path_num: int, path_tiles: list[str]):
             """Process a single path in parallel."""
@@ -343,15 +338,13 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
                 async with stats_lock:
                     stats['scenes_checked'] += 1
-                    pbar.update(1)
+                    # Log progress every 100 scenes
+                    if stats['scenes_checked'] % 100 == 0:
+                        logger.info(f"Checked {stats['scenes_checked']} scenes, found {len(scenes)} matching")
 
                 if cloud_cover <= cloud_cover_max:
                     scene_info['cloud_cover'] = cloud_cover
                     valid_scenes.append(scene_info)
-                    pbar.set_postfix({
-                        'found': len(scenes) + len(valid_scenes),
-                        'checked': stats['scenes_checked']
-                    })
                 else:
                     async with stats_lock:
                         stats['scenes_filtered_by_cloud'] += 1
@@ -397,9 +390,6 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         logger.info(f"Processing {len(path_tasks)} paths in parallel")
         await asyncio.gather(*path_tasks, return_exceptions=True)
 
-        # Close progress bar
-        pbar.close()
-
         # Check for missing tiles
         missing_tiles = set(tiles) - tiles_with_scenes
         if missing_tiles:
@@ -407,12 +397,12 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                 date_str = f"between {date_range[0].strftime('%Y-%m-%d')} and {date_range[1].strftime('%Y-%m-%d')}"
             else:
                 date_str = f"in {year}"
-            print(f"\n⚠️  WARNING: {len(missing_tiles)} tiles have NO scenes {date_str}!")
-            print(f"   Missing tiles: {sorted(missing_tiles)}")
+            logger.warning("⚠️  WARNING: %d tiles have NO scenes %s!", len(missing_tiles), date_str)
+            logger.warning("   Missing tiles: %s", sorted(missing_tiles))
             for tile in sorted(missing_tiles):
                 path = int(tile[:3])
                 row = int(tile[3:])
-                print(f"   - Path {path}, Row {row}")
+                logger.warning("   - Path %d, Row %d", path, row)
         
         # Log summary
         logger.info(
@@ -630,14 +620,9 @@ async def download_landsat(
         tiles_needed = set()  # Track all tiles we need
 
         # Find scenes for each year
-        from tqdm import tqdm
+        logger.info(f"Processing {len(dates_by_year)} years")
 
-        for year, year_dates in tqdm(
-            dates_by_year.items(),
-            desc="📅 Processing years",
-            unit="year",
-            leave=False
-        ):
+        for year, year_dates in dates_by_year.items():
             # Date range for the year
             date_range = (
                 min(year_dates) - timedelta(days=window_days),

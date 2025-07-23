@@ -318,12 +318,12 @@ class AsyncDownloadOrchestrator:
         try:
             tile_dicts = get_wrs_tiles_for_bbox_tuple(plan.bbox)
             tiles = [f"{t['path']:03d}{t['row']:03d}" for t in tile_dicts]
-            print(f"\n📍 WRS tiles that should cover bbox {plan.bbox}:")
-            print(f"   Total tiles: {len(tiles)}")
-            print(f"   Tiles: {sorted(tiles)}")
+            logger.debug("📍 WRS tiles that should cover bbox %s:", plan.bbox)
+            logger.debug("   Total tiles: %d", len(tiles))
+            logger.debug("   Tiles: %s", sorted(tiles))
             paths = sorted(set(t['path'] for t in tile_dicts))
-            print(f"   Paths: {paths}")
-            print()  # Empty line for readability
+            logger.debug("   Paths: %s", paths)
+            # Empty line removed - not needed for logging
         except Exception as e:
             logger.warning(f"Could not determine WRS tiles: {e}")
 
@@ -500,7 +500,7 @@ async def test_async_downloads():
     # Run downloads
     results = await orchestrator.download_all(plan)
 
-    print(results.summary())
+    logger.info(results.summary())
     return results
 
 

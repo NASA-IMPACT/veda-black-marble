@@ -15,8 +15,11 @@ from osgeo import gdal
 
 from . import acquire, analyze, enhance, export, prepare
 from .config import PipelineConfig
+from .logging_utils import get_logger
 
-# Create logger for spatial debugging
+# Create logger for this module
+logger = get_logger(__name__)
+# Keep spatial logger for specific spatial debugging
 log = logging.getLogger("bm.spatial")
 
 # Enable debug logging if environment variable is set
@@ -27,7 +30,8 @@ if os.environ.get("BM_SPATIAL_DEBUG", "").lower() in ("1", "true", "yes"):
 ArrayLike = npt.NDArray[Any]
 BBox = tuple[float, float, float, float]
 
-logger = logging.getLogger(__name__)
+# (Duplicate logger assignment removed; we already create `logger`
+#  via get_logger(__name__) above.)
 
 
 def quick_stats(data: ArrayLike, label: str) -> None:
@@ -66,7 +70,7 @@ async def black_marble_pipeline(
         Dictionary with results and metadata
     """
 
-    print("🚀 Starting Black Marble pipeline")
+    logger.info("🚀 Starting Black Marble pipeline")
 
     if earthdata_token is None:
         earthdata_token = os.environ.get("EARTHDATA_TOKEN")
@@ -79,9 +83,9 @@ async def black_marble_pipeline(
     composite_months = config.acquisition.composite_months if config else 12
     data_dir = "./data"
 
-    print(f"\n📥 Downloading all data for {composite_months} dates...")
-    print(f"   Target date: {date.strftime('%Y-%m-%d')}")
-    print(f"   Bounding box: {bbox}")
+    logger.info("📥 Downloading all data for %s dates...", composite_months)
+    logger.info("   Target date: %s", date.strftime("%Y-%m-%d"))
+    logger.info("   Bounding box: %s", bbox)
 
     from .acquire.async_orchestrator import AsyncDownloadOrchestrator, DownloadPlan
 
@@ -90,16 +94,18 @@ async def black_marble_pipeline(
 
     download_results = await orchestrator.download_all(plan)
 
-    print("\n✅ Downloads complete!")
-    print(download_results.summary())
+    logger.info("✅ Downloads complete!")
+    logger.info("%s", download_results.summary())
 
     if not download_results.viirs_data and earthdata_token:
         logger.error("VIIRS downloads failed - cannot continue without nighttime lights data")
-        print("❌ Pipeline failed: VIIRS data is required but download failed")
-        print("   Please check your EARTHDATA_TOKEN and network connection")
+        logger.error(
+            "❌ Pipeline failed: VIIRS data is required but download failed"
+        )
+        logger.error("   Please check your EARTHDATA_TOKEN and network connection")
         viirs_errors = [err for err in download_results.failed_downloads if "VIIRS" in err]
         if viirs_errors:
-            print(f"   Error details: {viirs_errors[0]}")
+            logger.error("   Error details: %s", viirs_errors[0])
         raise RuntimeError(
             "VIIRS download failed - pipeline cannot continue without nighttime lights data"
         )
@@ -108,9 +114,11 @@ async def black_marble_pipeline(
         logger.warning(
             "No Landsat data downloaded - pipeline will create a minimal output with OSM data only"
         )
-        print("⚠️  No Landsat data available - creating minimal output with available data")
+        logger.warning(
+            "⚠️  No Landsat data available - creating minimal output with available data"
+        )
 
-    print("\n🔧 Processing downloaded data...")
+    logger.info("🔧 Processing downloaded data...")
 
     os.makedirs(f"{data_dir}/temp", exist_ok=True)
 
@@ -145,19 +153,19 @@ async def black_marble_pipeline(
     viirs_transform = None
 
     if viirs_files:
-        print("\n📊 Processing VIIRS nighttime lights...")
-        print(f"VIIRS files keys: {list(viirs_files.keys())}")
+        logger.info("📊 Processing VIIRS nighttime lights...")
+        logger.debug("VIIRS files keys: %s", list(viirs_files.keys()))
         for key, files in viirs_files.items():
-            print(f"  {key}: {len(files)} files")
+            logger.debug("  %s: %d files", key, len(files))
 
         viirs_ntl_files = viirs_files.get("gap_filled_ntl", [])
         viirs_quality_files = viirs_files.get("quality", [])
 
         if not viirs_ntl_files:
-            print("⚠️  No VIIRS NTL files found - skipping VIIRS processing")
+            logger.warning("⚠️  No VIIRS NTL files found - skipping VIIRS processing")
         else:
             if len(viirs_ntl_files) > 1:
-                print(f"Creating VRT mosaic for {len(viirs_ntl_files)} VIIRS tiles")
+                logger.info("Creating VRT mosaic for %d VIIRS tiles", len(viirs_ntl_files))
                 viirs_ntl_vrt = f"{data_dir}/temp/viirs_gap_filled_ntl_mosaic.vrt"
                 os.makedirs(f"{data_dir}/temp", exist_ok=True)
                 # VIIRS uses fill_value of 65530 based on config
@@ -177,7 +185,9 @@ async def black_marble_pipeline(
                         viirs_ntl_vrt,
                         f"{data_dir}/diagnostics/vrts/viirs_gap_filled_ntl_mosaic.vrt",
                     )
-                    print(f"  Saved VRT to: data/diagnostics/vrts/viirs_gap_filled_ntl_mosaic.vrt")
+                    logger.debug(
+                        "Saved VRT to: data/diagnostics/vrts/viirs_gap_filled_ntl_mosaic.vrt"
+                    )
 
                 with rasterio.open(viirs_ntl_vrt) as src:
                     viirs_ntl = src.read(1)
@@ -231,34 +241,40 @@ async def black_marble_pipeline(
                 )
 
     if viirs_corrected is None:
-        print("⚠️  No VIIRS data - using Landsat as reference")
+        logger.warning("⚠️  No VIIRS data - using Landsat as reference")
 
     from .crs import get_processing_crs
     
     processing_crs = get_processing_crs(bbox)
     target_resolution_landsat = 30.0  # 30 meters for all projections
 
-    print(
-        f"Using locally-optimized Albers Equal Area projection "
-        f"with {target_resolution_landsat}m resolution"
+    logger.info(
+        "Using locally-optimized Albers Equal Area projection with %.0fm resolution",
+        target_resolution_landsat,
     )
 
     log.debug(f"Processing CRS determined from bbox:")
     log.debug(f"  - BBox: {bbox}")
     log.debug(f"  - CRS WKT: {processing_crs.to_wkt()}")
 
-    print("\n📐 Computing target grid for spatial alignment...")
+    logger.info("📐 Computing target grid for spatial alignment...")
     from .crs import create_processing_grid
     
     processing_crs, reference_transform, reference_shape = create_processing_grid(bbox, target_resolution_landsat)
     
     bounds = array_bounds(reference_shape[0], reference_shape[1], reference_transform)
     
-    print(f"  Target grid: {reference_shape} pixels")
-    print(f"  Bounds in processing CRS: ({bounds[0]:.1f}, {bounds[1]:.1f}, {bounds[2]:.1f}, {bounds[3]:.1f})")
-    print(f"  Pixel-aligned to {target_resolution_landsat}m grid")
+    logger.debug("  Target grid: %s pixels", reference_shape)
+    logger.debug(
+        "  Bounds in processing CRS: (%.1f, %.1f, %.1f, %.1f)",
+        bounds[0],
+        bounds[1],
+        bounds[2],
+        bounds[3],
+    )
+    logger.debug("  Pixel-aligned to %dm grid", target_resolution_landsat)
 
-    print("\n🛰️ Processing Landsat data...")
+    logger.info("🛰️ Processing Landsat data...")
 
     scale_factor = (
         config.preparation.landsat_scale_factor
@@ -289,23 +305,26 @@ async def black_marble_pipeline(
     process = psutil.Process()
     monitor_memory = True
 
-    print(f"\n💾 Processing {len(landsat_files_by_date)} Landsat dates")
+    logger.info("💾 Processing %d Landsat dates", len(landsat_files_by_date))
 
     # Debug configuration
     if config:
-        print(f"  Mask low denominator: {getattr(config.analysis, 'mask_low_denom', False)}")
+        logger.debug(
+            "  Mask low denominator: %s",
+            getattr(config.analysis, "mask_low_denom", False),
+        )
 
     # Debug: Print structure of landsat_files_by_date
     if not landsat_files_by_date:
-        print("WARNING: landsat_files_by_date is empty!")
+        logger.warning("landsat_files_by_date is empty!")
     else:
         sample_date = next(iter(landsat_files_by_date.keys()))
-        print(f"Sample Landsat data structure for {sample_date}:")
-        print(f"  Keys: {list(landsat_files_by_date[sample_date].keys())}")
+        logger.debug("Sample Landsat data structure for %s:", sample_date)
+        logger.debug("  Keys: %s", list(landsat_files_by_date[sample_date].keys()))
         for band, paths in landsat_files_by_date[sample_date].items():
-            print(f"  {band}: {len(paths)} files")
+            logger.debug("  %s: %d files", band, len(paths))
 
-    print("\n📊 Analyzing tile coverage across dates:")
+    logger.debug("📊 Analyzing tile coverage across dates:")
     all_tiles_by_date = {}
     for date, date_files in landsat_files_by_date.items():
         date_tiles = set()
@@ -322,22 +341,26 @@ async def black_marble_pipeline(
     for tiles in all_tiles_by_date.values():
         all_possible_tiles.update(tiles)
 
-    print(f"  Total unique tiles across all dates: {sorted(all_possible_tiles)}")
+    logger.debug("  Total unique tiles across all dates: %s", sorted(all_possible_tiles))
     for date, tiles in sorted(all_tiles_by_date.items()):
         missing = all_possible_tiles - tiles
         if missing:
-            print(f"  {date.strftime('%Y-%m-%d')}: Missing tiles {sorted(missing)}")
+            logger.debug(
+                "  %s: Missing tiles %s", date.strftime("%Y-%m-%d"), sorted(missing)
+            )
 
     # Process each date's Landsat data
     for idx, target_date in enumerate(sorted(landsat_files_by_date.keys())):
         # Log memory usage
-        print(
-            f"\nProcessing Landsat for {target_date.strftime('%Y-%m-%d')} "
-            f"(date {idx + 1}/{len(landsat_files_by_date)})"
+        logger.info(
+            "Processing Landsat for %s (date %d/%d)",
+            target_date.strftime("%Y-%m-%d"),
+            idx + 1,
+            len(landsat_files_by_date),
         )
         if monitor_memory and process is not None:
             memory_gb = process.memory_info().rss / 1024 / 1024 / 1024
-            print(f"  Current memory usage: {memory_gb:.1f} GB")
+            logger.debug("  Current memory usage: %.1f GB", memory_gb)
 
         date_files = landsat_files_by_date[target_date]
 
@@ -345,9 +368,10 @@ async def black_marble_pipeline(
         REQUIRED_BANDS = ["B3", "B4", "B5", "QA_PIXEL"]
         missing_bands = [b for b in REQUIRED_BANDS if b not in date_files or not date_files.get(b)]
         if missing_bands:
-            print(f"  Skipping - missing bands: {missing_bands}")
-            print(
-                f"  Available: {[b for b in REQUIRED_BANDS if b in date_files and date_files.get(b)]}"
+            logger.warning("  Skipping - missing bands: %s", missing_bands)
+            logger.warning(
+                "  Available: %s",
+                [b for b in REQUIRED_BANDS if b in date_files and date_files.get(b)],
             )
             continue
 
@@ -365,7 +389,7 @@ async def black_marble_pipeline(
                         tiles_with_data.add(pathrow)
 
         if date_tiles:
-            print(f"  Tiles for this date: {sorted(date_tiles)}")
+            logger.info("  Tiles for this date: %s", sorted(date_tiles))
 
         logger.info(
             f"Processing {target_date.strftime('%Y-%m-%d')} with tiles: {sorted(date_tiles)}"
@@ -415,17 +439,23 @@ async def black_marble_pipeline(
         # DEBUG: Log the transform from processed data
         if processed_data and "B5" in processed_data:
             _, profile = processed_data["B5"]
-            print(f"  📍 Date {target_date.strftime('%Y-%m-%d')} transform:")
-            print(f"     CRS: {profile['crs']}")
-            print(f"     Transform.c (x-origin): {profile['transform'].c}")
-            print(f"     Transform.f (y-origin): {profile['transform'].f}")
-            print(f"     Reference transform.c: {reference_transform.c}")
-            print(f"     Reference transform.f: {reference_transform.f}")
+            logger.debug(
+                "📍 Date %s transform: CRS=%s, x0=%.3f, y0=%.3f (ref x0=%.3f, y0=%.3f)",
+                target_date.strftime("%Y-%m-%d"),
+                profile["crs"],
+                profile["transform"].c,
+                profile["transform"].f,
+                reference_transform.c,
+                reference_transform.f,
+            )
             if abs(profile['transform'].c - reference_transform.c) > 0.1:
-                print(f"     ⚠️  X-origin differs by {profile['transform'].c - reference_transform.c:.1f}m")
+                logger.warning(
+                    "     ⚠️  X-origin differs by %.1fm",
+                    profile['transform'].c - reference_transform.c,
+                )
 
         # Calculate indices for this date BEFORE temporal compositing
-        print(f"  Calculating indices for {target_date.strftime('%Y-%m-%d')}")
+        logger.info("  Calculating indices for %s", target_date.strftime("%Y-%m-%d"))
         if "B5" in processed_data and "B4" in processed_data and "B3" in processed_data:
                 # Get the masked data
                 b3_data, _ = processed_data["B3"]
@@ -433,8 +463,13 @@ async def black_marble_pipeline(
                 b5_data, profile = processed_data["B5"]
                 
                 # DEBUG: Log shapes
-                print(f"  📐 Band shapes - B3: {b3_data.shape}, B4: {b4_data.shape}, B5: {b5_data.shape}")
-                print(f"  📐 Expected reference shape: {reference_shape}")
+                logger.debug(
+                    "  📐 Band shapes - B3: %s, B4: %s, B5: %s (expected %s)",
+                    b3_data.shape,
+                    b4_data.shape,
+                    b5_data.shape,
+                    reference_shape,
+                )
 
                 if reference_profile is None:
                     reference_profile = profile
@@ -442,10 +477,13 @@ async def black_marble_pipeline(
                         f"Set reference profile from B5: shape={profile['height']}x{profile['width']}, crs={profile['crs']}"
                     )
                     # DEBUG: Check if reference CRS matches processing CRS
-                    print(f"  ⚠️  Reference profile CRS: {profile['crs']}")
-                    print(f"  ⚠️  Processing CRS: {processing_crs}")
+                    logger.warning(
+                        "  Reference profile CRS: %s (processing CRS %s)",
+                        profile["crs"],
+                        processing_crs,
+                    )
                     if str(profile['crs']) != str(processing_crs):
-                        print(f"  🚨 WARNING: Reference CRS does not match processing CRS!")
+                        logger.warning("🚨 Reference CRS does not match processing CRS!")
                 elif (
                     profile["width"] * profile["height"]
                     > reference_profile["width"] * reference_profile["height"]
@@ -487,14 +525,16 @@ async def black_marble_pipeline(
                         band_files, _, _, _ = bands_data[band_name]
                         all_landsat_files[band_name].extend(band_files)
         else:
-            print(f"  Skipping index calculation - missing required bands")
+            logger.warning("  Skipping index calculation - missing required bands")
 
         # Log memory after processing date
         if monitor_memory and process is not None:
             memory_gb = process.memory_info().rss / 1024 / 1024 / 1024
             total_arrays = sum(len(stack) for stack in index_stacks.values())
-            print(
-                f"  Memory after date: {memory_gb:.1f} GB (index arrays in memory: {total_arrays})"
+            logger.debug(
+                "  Memory after date: %.1f GB (index arrays in memory: %d)",
+                memory_gb,
+                total_arrays,
             )
 
     # Check which tiles we got vs expected
@@ -504,63 +544,72 @@ async def black_marble_pipeline(
         expected_tiles = get_wrs_tiles_for_bbox_tuple(bbox)
         expected_pathrows = {f"{t['path']:03d}{t['row']:03d}" for t in expected_tiles}
 
-        print(f"\n📊 Tile coverage summary:")
-        print(f"  Expected tiles for bbox: {sorted(expected_pathrows)}")
-        print(f"  Tiles with data: {sorted(tiles_with_data)}")
+        logger.debug("📊 Tile coverage summary:")
+        logger.debug("  Expected tiles for bbox: %s", sorted(expected_pathrows))
+        logger.debug("  Tiles with data: %s", sorted(tiles_with_data))
 
         missing_tiles = expected_pathrows - tiles_with_data
         if missing_tiles:
-            print(f"  ⚠️  MISSING TILES: {sorted(missing_tiles)}")
+            logger.warning("  ⚠️  MISSING TILES: %s", sorted(missing_tiles))
             for pr in sorted(missing_tiles):
                 path = int(pr[:3])
                 row = int(pr[3:])
-                print(f"     - Path {path}, Row {row}")
+                logger.debug("     - Path %d, Row %d", path, row)
         else:
-            print(f"  ✅ All expected tiles have data!")
+            logger.info("  ✅ All expected tiles have data!")
 
     # Create temporal composites
-    print("\n⏳ Creating Landsat temporal composites...")
+    logger.info("⏳ Creating Landsat temporal composites...")
 
     # Debug what we have
-    print(f"  Index stacks: NDVI={len(index_stacks['ndvi'])}, NDWI={len(index_stacks['ndwi'])}")
-    print(
-        f"  Band stacks: B3={len(band_stacks['B3'])}, B4={len(band_stacks['B4'])}, B5={len(band_stacks['B5'])}"
+    logger.debug("  Index stacks: NDVI=%d, NDWI=%d", len(index_stacks['ndvi']), len(index_stacks['ndwi']))
+    logger.debug(
+        "  Band stacks: B3=%d, B4=%d, B5=%d",
+        len(band_stacks['B3']),
+        len(band_stacks['B4']),
+        len(band_stacks['B5']),
     )
 
     if any(index_stacks.values()):
         # Create index composites (indices already calculated per-date)
-        print("  Creating index composites from per-date indices")
+        logger.info("  Creating index composites from per-date indices")
 
         if index_stacks["ndvi"]:
-            print(f"  Creating NDVI composite from {len(index_stacks['ndvi'])} dates")
+            logger.info("  Creating NDVI composite from %d dates", len(index_stacks['ndvi']))
             ndvi_composite = analyze.create_index_temporal_composite(
                 index_stacks["ndvi"],
                 method=config.analysis.ndvi_composite_method,
                 percentile=config.analysis.ndvi_composite_percentile,
                 min_valid_observations=config.analysis.min_valid_observations,
             )
-            print(
-                f"    NDVI composite range: [{np.nanmin(ndvi_composite):.3f}, {np.nanmax(ndvi_composite):.3f}]"
+            logger.info(
+                "    NDVI composite range: [%.3f, %.3f]",
+                np.nanmin(ndvi_composite),
+                np.nanmax(ndvi_composite),
             )
-            print(
-                f"    Valid pixels: {(~np.isnan(ndvi_composite)).sum() / ndvi_composite.size * 100:.1f}%"
+            logger.info(
+                "    Valid pixels: %.1f%%",
+                (~np.isnan(ndvi_composite)).sum() / ndvi_composite.size * 100,
             )
         else:
             ndvi_composite = None
 
         if index_stacks["ndwi"]:
-            print(f"  Creating NDWI composite from {len(index_stacks['ndwi'])} dates")
+            logger.info("  Creating NDWI composite from %d dates", len(index_stacks['ndwi']))
             ndwi_composite = analyze.create_index_temporal_composite(
                 index_stacks["ndwi"],
                 method=config.analysis.ndwi_composite_method,
                 percentile=config.analysis.ndwi_composite_percentile,
                 min_valid_observations=config.analysis.min_valid_observations,
             )
-            print(
-                f"    NDWI composite range (clamped to [0,1]): [{np.nanmin(ndwi_composite):.3f}, {np.nanmax(ndwi_composite):.3f}]"
+            logger.info(
+                "    NDWI composite range (clamped to [0,1]): [%.3f, %.3f]",
+                np.nanmin(ndwi_composite),
+                np.nanmax(ndwi_composite),
             )
-            print(
-                f"    Valid pixels: {(~np.isnan(ndwi_composite)).sum() / ndwi_composite.size * 100:.1f}%"
+            logger.info(
+                "    Valid pixels: %.1f%%",
+                (~np.isnan(ndwi_composite)).sum() / ndwi_composite.size * 100,
             )
         else:
             ndwi_composite = None
@@ -570,19 +619,19 @@ async def black_marble_pipeline(
 
         # Validate that we have a reference profile for reprojection
         if reference_profile is None and (ndvi_composite is not None or ndwi_composite is not None):
-            print("⚠️  WARNING: No reference profile available for index reprojection")
-            print("    This can happen if all Landsat scenes were filtered out")
+            logger.warning("⚠️  WARNING: No reference profile available for index reprojection")
+            logger.warning("    This can happen if all Landsat scenes were filtered out")
             # Try to get profile from the first index array
             if index_stacks["ndvi"] and hasattr(index_stacks["ndvi"][0], "shape"):
                 # We need to construct a minimal profile for reprojection
                 # This is a fallback - ideally we should have saved profiles with indices
-                print("    Creating fallback reference profile from index shape")
+                logger.info("    Creating fallback reference profile from index shape")
 
         landsat_reprojected = {}
 
 
     else:
-        print("⚠️  No valid Landsat data found - skipping index calculations")
+        logger.warning("⚠️  No valid Landsat data found - skipping index calculations")
         landsat_reprojected = {}
 
     # Reproject Landsat bands to target CRS - common for both VRT and in-memory
@@ -591,7 +640,7 @@ async def black_marble_pipeline(
 
     landsat_bands = locals().get("landsat_bands", {})
     if landsat_bands:
-        print("\n🗺️  Reprojecting Landsat to target CRS...")
+        logger.info("🗺️  Reprojecting Landsat to target CRS...")
         landsat_reprojected = {}
 
         for band_name, (data, profile) in landsat_bands.items():
@@ -650,8 +699,8 @@ async def black_marble_pipeline(
         # Align VIIRS to Landsat grid for consistent processing
         if reference_transform is not None and reference_shape is not None and landsat_reprojected:
             # We have Landsat data to align to
-            print(f"VIIRS shape before alignment: {viirs_reprojected.shape}")
-            print(f"Reference Landsat shape: {reference_shape}")
+            logger.debug("VIIRS shape before alignment: %s", viirs_reprojected.shape)
+            logger.debug("Reference Landsat shape: %s", reference_shape)
 
             # Debug stats before alignment
             quick_stats(viirs_reprojected, "VIIRS before alignment")
@@ -708,10 +757,10 @@ async def black_marble_pipeline(
             # Debug stats after alignment
             quick_stats(viirs_reprojected, "VIIRS after alignment")
 
-            print(f"Aligned VIIRS shape: {viirs_reprojected.shape}")
+            logger.debug("Aligned VIIRS shape: %s", viirs_reprojected.shape)
             nonzero_count = (viirs_reprojected > 0).sum()
             nonzero_pct = nonzero_count / viirs_reprojected.size * 100
-            print(f"Aligned VIIRS non-zero pixels: {nonzero_count} " f"({nonzero_pct:.1f}%)")
+            logger.info("Aligned VIIRS non-zero pixels: %d (%.1f%%)", nonzero_count, nonzero_pct)
 
             # Critical assertion - stop if alignment produced all zeros
             if nonzero_pct < 10.0:  # Less than 10% non-zero is suspicious
@@ -742,18 +791,20 @@ async def black_marble_pipeline(
             buffer_meters = DEFAULT_BUFFER_BY_TYPE  # Variable buffer by road type
 
         if isinstance(buffer_meters, dict):
-            print(
-                f"Road buffering: Variable by type (motorway: {buffer_meters.get('motorway', 'N/A')}m, residential: {buffer_meters.get('residential', 'N/A')}m)"
+            logger.info(
+                "Road buffering: Variable by type (motorway: %sm, residential: %sm)",
+                buffer_meters.get('motorway', 'N/A'),
+                buffer_meters.get('residential', 'N/A'),
             )
         else:
-            print(f"Road buffering: Uniform {buffer_meters}m")
-        print(f"Rasterizing to: {processing_crs}")
-        print(f"Road network has {len(road_network.nodes)} nodes, {len(road_network.edges)} edges")
-        print(f"Reference transform: {reference_transform}")
-        print(f"Reference shape: {reference_shape}")
+            logger.info("Road buffering: Uniform %sm", buffer_meters)
+        logger.debug("Rasterizing to: %s", processing_crs)
+        logger.debug("Road network has %d nodes, %d edges", len(road_network.nodes), len(road_network.edges))
+        logger.debug("Reference transform: %s", reference_transform)
+        logger.debug("Reference shape: %s", reference_shape)
 
         # Use fractional road rasterization
-        print("  Using fractional road rasterization (5x5 sub-pixels)")
+        logger.info("  Using fractional road rasterization (5x5 sub-pixels)")
         roads_fractional = acquire.buffer_and_rasterize_roads_fractional(
             graph=road_network,
             bbox=bbox,
@@ -767,21 +818,23 @@ async def black_marble_pipeline(
 
         # Print statistics
         road_pixels = np.sum(roads_fractional > 0)
-        print(
-            f"Rasterized {road_pixels} pixels with roads "
-            f"({road_pixels / roads_fractional.size * 100:.2f}%)"
+        logger.info(
+            "Rasterized %d pixels with roads (%.2f%%)",
+            road_pixels,
+            road_pixels / roads_fractional.size * 100,
         )
         if road_pixels > 0:
-            print(
-                f"Fractional coverage range: "
-                f"{roads_fractional[roads_fractional > 0].min():.3f} to "
-                f"{roads_fractional.max():.3f}"
+            logger.info(
+                "Fractional coverage range: %.3f to %.3f",
+                roads_fractional[roads_fractional > 0].min(),
+                roads_fractional.max(),
             )
-            print(
-                f"Mean fractional coverage: {roads_fractional[roads_fractional > 0].mean():.3f}"
+            logger.info(
+                "Mean fractional coverage: %.3f",
+                roads_fractional[roads_fractional > 0].mean(),
             )
         else:
-            print("⚠️  WARNING: No roads were rasterized! Check buffer size and CRS.")
+            logger.warning("⚠️  No roads were rasterized! Check buffer size and CRS.")
 
         # Save diagnostic
         if config and getattr(config, "save_diagnostics", False):
@@ -794,7 +847,7 @@ async def black_marble_pipeline(
             )
     else:
         # No road network data
-        print("  No road network data available")
+        logger.warning("  No road network data available")
         if reference_shape is not None:
             roads_fractional = np.zeros(reference_shape, dtype="float32")
         else:
@@ -807,7 +860,7 @@ async def black_marble_pipeline(
     # Save diagnostic composite bands if requested
     if config and getattr(config, "save_diagnostics", False) and landsat_reprojected:
         diagnostic_bands = getattr(config, "diagnostic_bands", ["B3", "B4", "B5"])
-        print(f"\n💾 Saving diagnostic composite bands: {diagnostic_bands}")
+        logger.info("💾 Saving diagnostic composite bands: %s", diagnostic_bands)
 
         for band_name in diagnostic_bands:
             if band_name in landsat_reprojected:
@@ -825,21 +878,24 @@ async def black_marble_pipeline(
                 # Log statistics
                 valid_pixels = ~np.isnan(band_data)
                 if valid_pixels.any():
-                    print(
-                        f"  {band_name}: min={np.nanmin(band_data):.3f}, max={np.nanmax(band_data):.3f}, "
-                        f"coverage={valid_pixels.sum() / band_data.size * 100:.1f}%"
+                    logger.debug(
+                        "  %s: min=%.3f, max=%.3f, coverage=%.1f%%",
+                        band_name,
+                        np.nanmin(band_data),
+                        np.nanmax(band_data),
+                        valid_pixels.sum() / band_data.size * 100,
                     )
                 else:
-                    print(f"  {band_name}: No valid pixels")
+                    logger.warning("  %s: No valid pixels", band_name)
 
-    print("\n📈 Calculating indices...")
+    logger.info("📈 Calculating indices...")
 
     ndvi = None
     ndwi = None
 
     if ndvi_composite is not None and reference_profile is not None:
-        print("  Reprojecting pre-calculated NDVI composite...")
-        print(f"    Using reference grid: {reference_shape}")
+        logger.info("  Reprojecting pre-calculated NDVI composite...")
+        logger.debug("    Using reference grid: %s", reference_shape)
         ndvi, ndvi_transform, _ = prepare.reproject_image(
             data=ndvi_composite,
             src_transform=reference_profile["transform"],
@@ -849,7 +905,7 @@ async def black_marble_pipeline(
             dst_shape=reference_shape,
             resampling="bilinear",
         )
-        print(f"    Reprojected NDVI shape: {ndvi.shape}")
+        logger.debug("    Reprojected NDVI shape: %s", ndvi.shape)
         
         # Save NDVI diagnostic
         if config and getattr(config, "save_diagnostics", False) and ndvi is not None:
@@ -862,8 +918,8 @@ async def black_marble_pipeline(
             )
 
     if ndwi_composite is not None and reference_profile is not None:
-        print("  Reprojecting pre-calculated NDWI composite...")
-        print(f"    Using reference grid: {reference_shape}")
+        logger.info("  Reprojecting pre-calculated NDWI composite...")
+        logger.debug("    Using reference grid: %s", reference_shape)
         ndwi, ndwi_transform, _ = prepare.reproject_image(
             data=ndwi_composite,
             src_transform=reference_profile["transform"],
@@ -873,7 +929,7 @@ async def black_marble_pipeline(
             dst_shape=reference_shape,
             resampling="bilinear",
         )
-        print(f"    Reprojected NDWI shape: {ndwi.shape}")
+        logger.debug("    Reprojected NDWI shape: %s", ndwi.shape)
 
         # Save diagnostic output if requested
         if config and getattr(config, "save_diagnostics", False) and ndwi is not None:
@@ -901,7 +957,7 @@ async def black_marble_pipeline(
 
         if config and roads_fractional is not None:
             # URBAN FIELD ENHANCEMENT with fractional roads
-            print("\n🌃 Enhancing NTL with urban fields (fractional roads)")
+            logger.info("🌃 Enhancing NTL with urban fields (fractional roads)")
 
             # Compute multi-scale urban fields
             urban_field = analyze.compute_urban_fields(
@@ -910,12 +966,13 @@ async def black_marble_pipeline(
                 weights=config.analysis.urban_field_weights,
             )
 
-            print("\n🏙️ URBAN FIELD STATS:")
-            print(f"  - Max urban field: {urban_field.max():.3f}")
-            print(f"  - Mean urban field (where > 0): {urban_field[urban_field > 0].mean():.3f}")
-            print(
-                f"  - Urban pixels: {np.sum(urban_field > 0)} "
-                f"({np.sum(urban_field > 0) / urban_field.size * 100:.1f}%)"
+            logger.info("🏙️ URBAN FIELD STATS:")
+            logger.info("  - Max urban field: %.3f", urban_field.max())
+            logger.info("  - Mean urban field (where > 0): %.3f", urban_field[urban_field > 0].mean())
+            logger.info(
+                "  - Urban pixels: %d (%.1f%%)",
+                np.sum(urban_field > 0),
+                np.sum(urban_field > 0) / urban_field.size * 100,
             )
 
             # Save urban field diagnostic
@@ -956,15 +1013,15 @@ async def black_marble_pipeline(
             ntl_composite = ntl_enhanced
             enhanced_pixels = np.sum(enhancement > 0)
             if enhanced_pixels > 0:
-                print(f"  Enhanced {enhanced_pixels} pixels")
-                print(f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}")
+                logger.info("  Enhanced %d pixels", enhanced_pixels)
+                logger.info("  Mean enhancement: %.3f", np.mean(enhancement[enhancement > 0]))
             else:
-                print("  No pixels enhanced (no roads with sufficient density)")
+                logger.warning("  No pixels enhanced (no roads with sufficient density)")
 
 
 
     if reference_transform is not None and reference_shape is not None:
-        print(f"\\n✅ Verifying spatial alignment to reference grid {reference_shape}:")
+        logger.info("✅ Verifying spatial alignment to reference grid %s:", reference_shape)
 
         if ndvi is not None and ndvi.shape != reference_shape:
             raise ValueError(
@@ -979,38 +1036,46 @@ async def black_marble_pipeline(
             )
 
 
-        print("  All arrays properly aligned!")
+        logger.info("  All arrays properly aligned!")
 
     ndui = None
     if ntl_composite is not None and ndvi is not None:
         # Verify shapes match before calculating NDUI
         if ntl_composite.shape != ndvi.shape:
-            print("WARNING: Shape mismatch after alignment!")
-            print(f"  NTL shape: {ntl_composite.shape}")
-            print(f"  NDVI shape: {ndvi.shape}")
+            logger.warning("WARNING: Shape mismatch after alignment!")
+            logger.warning("  NTL shape: %s", ntl_composite.shape)
+            logger.warning("  NDVI shape: %s", ndvi.shape)
             raise ValueError(
                 f"NTL and NDVI shapes still don't match after alignment: "
                 f"{ntl_composite.shape} vs {ndvi.shape}. This indicates a problem "
                 f"with the spatial alignment step."
             )
 
-        print("\nBefore NDUI Calculation:")
-        print(f"  NTL composite shape: {ntl_composite.shape}")
-        print(
-            f"  NTL non-zero pixels: {(ntl_composite > 0).sum()} "
-            f"({(ntl_composite > 0).sum() / ntl_composite.size * 100:.1f}%)"
+        logger.debug("Before NDUI Calculation:")
+        logger.debug("  NTL composite shape: %s", ntl_composite.shape)
+        logger.debug(
+            "  NTL non-zero pixels: %d (%.1f%%)",
+            (ntl_composite > 0).sum(),
+            (ntl_composite > 0).sum() / ntl_composite.size * 100,
         )
-        print(f"  NTL range: [{np.nanmin(ntl_composite):.3f}, {np.nanmax(ntl_composite):.3f}]")
-        print(
-            f"  NDVI non-NaN pixels: {(~np.isnan(ndvi)).sum()} "
-            f"({(~np.isnan(ndvi)).sum() / ndvi.size * 100:.1f}%)"
+        logger.debug(
+            "  NTL range: [%.3f, %.3f]",
+            np.nanmin(ntl_composite),
+            np.nanmax(ntl_composite),
         )
-        print(
-            f"  NDVI range (clamped to [0,1]): [{np.nanmin(ndvi):.3f}, {np.nanmax(ndvi):.3f}]"
+        logger.debug(
+            "  NDVI non-NaN pixels: %d (%.1f%%)",
+            (~np.isnan(ndvi)).sum(),
+            (~np.isnan(ndvi)).sum() / ndvi.size * 100,
+        )
+        logger.debug(
+            "  NDVI range (clamped to [0,1]): [%.3f, %.3f]",
+            np.nanmin(ndvi),
+            np.nanmax(ndvi),
         )
 
         ceiling_value = config.analysis.ntl_ceiling if config and hasattr(config, "analysis") else 10.0
-        print(f"\n🔍 DEBUG: Using ntl_ceiling = {ceiling_value}")
+        logger.debug("🔍 Using ntl_ceiling = %s", ceiling_value)
         
         ndui = analyze.calculate_ndui(
             ntl=ntl_composite,
@@ -1024,12 +1089,13 @@ async def black_marble_pipeline(
             epsilon=1e-6,
         )
 
-        print("\nAfter NDUI Calculation:")
-        print(
-            f"  NDUI non-zero pixels: {(ndui > 0).sum()} "
-            f"({(ndui > 0).sum() / ndui.size * 100:.1f}%)"
+        logger.debug("After NDUI Calculation:")
+        logger.debug(
+            "  NDUI non-zero pixels: %d (%.1f%%)",
+            (ndui > 0).sum(),
+            (ndui > 0).sum() / ndui.size * 100,
         )
-        print(f"  NDUI range: [{np.nanmin(ndui):.3f}, {np.nanmax(ndui):.3f}]")
+        logger.debug("  NDUI range: [%.3f, %.3f]", np.nanmin(ndui), np.nanmax(ndui))
 
         # Save diagnostic output if requested
         if config and getattr(config, "save_diagnostics", False) and ndui is not None:
@@ -1045,7 +1111,7 @@ async def black_marble_pipeline(
     if ndui is not None:
         urban_mask = ndui > 0.3
 
-    print("\n✨ Enhancing results...")
+    logger.info("✨ Enhancing results...")
 
     ntl_enhanced = None
     if ntl_composite is not None:
@@ -1079,11 +1145,15 @@ async def black_marble_pipeline(
 
     ntl_colored = None
     if ndui is not None:
-        print("\nBefore Colormap Application (USING NDUI):")
-        print(f"  Data shape: {ndui.shape}")
-        print(f"  Non-zero pixels: {(ndui > 0).sum()} ({(ndui > 0).sum() / ndui.size * 100:.1f}%)")
-        print(f"  Data range: [{np.nanmin(ndui):.3f}, {np.nanmax(ndui):.3f}]")
-        print(f"  Data type: {ndui.dtype}")
+        logger.debug("Before Colormap Application (USING NDUI):")
+        logger.debug("  Data shape: %s", ndui.shape)
+        logger.debug(
+            "  Non-zero pixels: %d (%.1f%%)",
+            (ndui > 0).sum(),
+            (ndui > 0).sum() / ndui.size * 100,
+        )
+        logger.debug("  Data range: [%.3f, %.3f]", np.nanmin(ndui), np.nanmax(ndui))
+        logger.debug("  Data type: %s", ndui.dtype)
 
         # Apply inferno colormap to NDUI with appropriate scale range
         ntl_colored = enhance.apply_inferno_colormap(
@@ -1091,11 +1161,18 @@ async def black_marble_pipeline(
             scale_range=(0.3, 1.0),
         )
 
-        print("\nAfter Colormap Application:")
-        print(f"  Output shape: {ntl_colored.shape}")
-        print(f"  Output channels: {ntl_colored.shape[0] if len(ntl_colored.shape) == 3 else 1}")
-        print(f"  Output range: [{np.nanmin(ntl_colored):.3f}, {np.nanmax(ntl_colored):.3f}]")
-        print(f"  Output type: {ntl_colored.dtype}")
+        logger.debug("After Colormap Application:")
+        logger.debug("  Output shape: %s", ntl_colored.shape)
+        logger.debug(
+            "  Output channels: %d",
+            ntl_colored.shape[0] if len(ntl_colored.shape) == 3 else 1,
+        )
+        logger.debug(
+            "  Output range: [%.3f, %.3f]",
+            np.nanmin(ntl_colored),
+            np.nanmax(ntl_colored),
+        )
+        logger.debug("  Output type: %s", ntl_colored.dtype)
 
         # Save diagnostic output if requested
         if config and getattr(config, "save_diagnostics", False):
@@ -1118,7 +1195,7 @@ async def black_marble_pipeline(
             gamma=None,  # Use default gamma
         )
 
-    print("\n💾 Exporting results...")
+    logger.info("💾 Exporting results...")
 
     validation_results = {"valid": True, "errors": []}
     if ntl_colored is not None and reference_transform is not None:
@@ -1132,7 +1209,7 @@ async def black_marble_pipeline(
         )
 
         if not validation_results["valid"]:
-            print(f"Warning: Output validation failed: {validation_results['errors']}")
+            logger.warning("Output validation failed: %s", validation_results['errors'])
 
     road_types = ["motorway", "trunk", "primary", "secondary"]
     metadata = export.create_metadata(
