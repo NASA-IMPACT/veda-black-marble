@@ -131,17 +131,11 @@ class AnalysisConfig:
     urban_field_weights: list[float] = field(
         default_factory=lambda: [0.2, 0.3, 0.3, 0.2]
     )  # Direct, local, block, district
-    ntl_enhancement_mode: Literal["multiplicative", "additive", "hybrid"] = "hybrid"
+    ntl_enhancement_mode: Literal["multiplicative", "additive", "hybrid"] = "multiplicative"
 
-    # Enhancement strength parameters (conservative defaults)
+    # Enhancement strength parameters
     enhancement_multiplicative_factor: float = (
         0.3  # Multiplicative mode: max enhancement factor - 1 (e.g., 0.3 = up to 1.3x)
-    )
-    enhancement_additive_factor: float = 0.02  # Additive mode: NTL + (factor * urban_field)
-    enhancement_hybrid_expected_scale: float = 0.2  # Hybrid mode: linear term coefficient
-    enhancement_hybrid_expected_sqrt_scale: float = 0.1  # Hybrid mode: sqrt term coefficient
-    enhancement_hybrid_application_factor: float = (
-        1.0  # Hybrid mode: apply full calculated enhancement
     )
 
 

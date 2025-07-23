@@ -53,17 +53,6 @@ def run(
         "--composite-method",
         help="Method for creating Landsat composites: 'mean' (smooth, no edges) or 'median' (robust but hard edges)",
     ),
-    permissive_compositing: bool = typer.Option(
-        False,
-        "--permissive-compositing",
-        help="Use less aggressive cloud masking for temporal compositing (reduces NaN regions).",
-    ),
-    ntl_enhancement: str = typer.Option(
-        "hybrid",
-        "--ntl-enhancement",
-        help="NTL enhancement method: 'hybrid' (urban field with dynamic scaling), "
-        "'multiplicative' (urban field), or 'additive' (urban field).",
-    ),
     log_level: str = typer.Option(
         "INFO",
         "--log-level",
@@ -165,32 +154,13 @@ def run(
 
 
 
-    # Configure NTL enhancement
-    valid_enhancements = ["hybrid", "additive", "multiplicative"]
-    if ntl_enhancement not in valid_enhancements:
-        typer.echo(
-            f"Error: Invalid NTL enhancement '{ntl_enhancement}'. "
-            f"Must be one of: {', '.join(valid_enhancements)}",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    # Type narrow the enhancement mode
-    from typing import Literal, cast
-
-    config.analysis.ntl_enhancement_mode = cast(
-        Literal["multiplicative", "additive", "hybrid"], ntl_enhancement
-    )
-    typer.echo(f"🌃 NTL enhancement: Urban field ({ntl_enhancement} mode)")
+    # Configure NTL enhancement - always use multiplicative mode
+    config.analysis.ntl_enhancement_mode = "multiplicative"
+    typer.echo("🌃 NTL enhancement: Urban field (multiplicative mode)")
     typer.echo(f"   Urban field scales: {config.analysis.urban_field_sigmas} pixels")
 
     # Set compositing method
     config.landsat_composite_method = landsat_composite_method
-    
-    # Enable permissive compositing if requested
-    if permissive_compositing:
-        typer.echo("⚠️  Warning: --permissive-compositing option is deprecated and has no effect")
-        typer.echo("   Cloud masking strategy is now fixed in the pipeline")
 
     # Display processing info
     typer.echo("\nStarting Black Marble pipeline:")
@@ -198,7 +168,7 @@ def run(
     typer.echo(f"  Date: {date.strftime('%Y-%m-%d')}")
     typer.echo(f"  Config Preset: {config_preset}")
     typer.echo(f"  Road Rasterization: Fractional (5x5)")
-    typer.echo(f"  NTL Enhancement: {ntl_enhancement}")
+    typer.echo(f"  NTL Enhancement: multiplicative")
     typer.echo(f"  Output Path: {output_path_obj}")
 
     try:

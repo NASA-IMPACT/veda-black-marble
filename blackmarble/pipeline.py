@@ -159,7 +159,7 @@ async def black_marble_pipeline(
             logger.debug("  %s: %d files", key, len(files))
 
         viirs_ntl_files = viirs_files.get("gap_filled_ntl", [])
-        viirs_quality_files = viirs_files.get("quality", [])
+        # viirs_quality_files = viirs_files.get("quality", [])  # Not currently used
 
         if not viirs_ntl_files:
             logger.warning("⚠️  No VIIRS NTL files found - skipping VIIRS processing")
@@ -173,8 +173,7 @@ async def black_marble_pipeline(
                     separate=False,  # Mosaic tiles together
                     resolution='highest'  # Use highest resolution from input files
                 )
-                vrt_ds = gdal.BuildVRT(viirs_ntl_vrt, [str(f) for f in viirs_ntl_files], options=vrt_options)
-                vrt_ds = None  # Close to write to disk
+                gdal.BuildVRT(viirs_ntl_vrt, [str(f) for f in viirs_ntl_files], options=vrt_options)
 
                 # Save VRT to diagnostics if requested
                 if config and getattr(config, "save_diagnostics", False):
@@ -276,20 +275,20 @@ async def black_marble_pipeline(
 
     logger.info("🛰️ Processing Landsat data...")
 
-    scale_factor = (
-        config.preparation.landsat_scale_factor
-        if config and hasattr(config, "preparation")
-        else 0.0000275
-    )
-    add_offset = (
-        config.preparation.landsat_add_offset if config and hasattr(config, "preparation") else -0.2
-    )
+    # scale_factor = (
+    #     config.preparation.landsat_scale_factor
+    #     if config and hasattr(config, "preparation")
+    #     else 0.0000275
+    # )
+    # add_offset = (
+    #     config.preparation.landsat_add_offset if config and hasattr(config, "preparation") else -0.2
+    # )
     dilate_pixels = (
         config.preparation.qa_dilation_radius if config and hasattr(config, "preparation") else 3
     )
 
     band_stacks = {"B3": [], "B4": [], "B5": []}
-    band_dates = {"B3": [], "B4": [], "B5": []}
+    # band_dates = {"B3": [], "B4": [], "B5": []}  # Not currently used
 
     index_stacks = {"ndvi": [], "ndwi": []}
     index_dates = []
@@ -626,18 +625,57 @@ async def black_marble_pipeline(
                 # This is a fallback - ideally we should have saved profiles with indices
                 logger.info("    Creating fallback reference profile from index shape")
 
+        # Create band composites from the stacks
+        logger.info("  Creating band composites...")
+        landsat_bands = {}
+        
+        composite_method = config.landsat_composite_method if config else "mean"
+        logger.info(f"  Using {composite_method} method for band compositing")
+        
+        for band_name in ["B3", "B4", "B5"]:
+            if band_stacks[band_name]:
+                logger.debug(f"  Creating {band_name} composite from {len(band_stacks[band_name])} dates")
+                
+                # Stack arrays and compute composite
+                stacked = np.stack(band_stacks[band_name], axis=0)
+                
+                if composite_method == "mean":
+                    # Use nanmean to handle masked/invalid pixels
+                    composite = np.nanmean(stacked, axis=0)
+                elif composite_method == "median":
+                    # Use nanmedian for more robust compositing
+                    composite = np.nanmedian(stacked, axis=0)
+                else:
+                    raise ValueError(f"Unknown composite method: {composite_method}")
+                
+                # Use the reference profile we saved earlier
+                if reference_profile is not None:
+                    landsat_bands[band_name] = (composite, reference_profile)
+                else:
+                    logger.warning(f"  No reference profile for {band_name} composite")
+                
+                # Log statistics
+                valid_pixels = ~np.isnan(composite)
+                if valid_pixels.any():
+                    logger.debug(
+                        f"  {band_name}: min={np.nanmin(composite):.3f}, max={np.nanmax(composite):.3f}, "
+                        f"coverage={valid_pixels.sum() / composite.size * 100:.1f}%"
+                    )
+
         landsat_reprojected = {}
 
 
     else:
         logger.warning("⚠️  No valid Landsat data found - skipping index calculations")
         landsat_reprojected = {}
+        landsat_bands = {}
 
     # Reproject Landsat bands to target CRS - common for both VRT and in-memory
     # Note: reference_transform and reference_shape are already set from create_processing_grid()
     reference_bbox = None
 
-    landsat_bands = locals().get("landsat_bands", {})
+    # Remove the locals().get() hack since we now properly create landsat_bands
+    # landsat_bands = locals().get("landsat_bands", {})
     if landsat_bands:
         logger.info("🗺️  Reprojecting Landsat to target CRS...")
         landsat_reprojected = {}
@@ -984,16 +1022,12 @@ async def black_marble_pipeline(
                     crs=processing_crs,
                 )
 
-            # Enhance NTL
+            # Enhance NTL using multiplicative mode
             ntl_enhanced = analyze.enhance_ntl_with_urban_field(
                 ntl=ntl_composite,
                 urban_field=urban_field,
-                enhancement_mode=config.analysis.ntl_enhancement_mode,
+                enhancement_mode="multiplicative",
                 multiplicative_factor=config.analysis.enhancement_multiplicative_factor,
-                additive_factor=config.analysis.enhancement_additive_factor,
-                hybrid_expected_scale=config.analysis.enhancement_hybrid_expected_scale,
-                hybrid_expected_sqrt_scale=config.analysis.enhancement_hybrid_expected_sqrt_scale,
-                hybrid_application_factor=config.analysis.enhancement_hybrid_application_factor,
             )
 
             # Calculate enhancement
