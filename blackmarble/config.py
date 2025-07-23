@@ -24,12 +24,6 @@ class LandsatAcquisitionConfig:
         7  # Search ±7 days from each target date (balanced approach)
     )
 
-    # Minimum quality thresholds
-    min_coverage_threshold: float = 0.7  # Minimum acceptable coverage (trade-off between data vs no data)
-
-    # Scene selection preferences
-    prefer_newer_sensors: bool = True  # Prefer L8/L9 over L7
-
     # Date-grouped selection settings
     # Design: With 12 dates × ±7 day windows throughout the year, we ensure catching
     # opportunities to find good coverage. Therefore we prioritize:
@@ -46,17 +40,11 @@ class AcquisitionConfig:
     """Configuration for data acquisition phase."""
 
     # Landsat settings
-    landsat_collection: int = 2
-    landsat_level: str = "L2SP"
     cloud_cover_max: float = 50.0  # More permissive to accept T2 scenes
     composite_months: int = 12  # Total number of months for temporal composite (including target date)
 
     # Landsat time-window acquisition configuration
     landsat_acquisition: LandsatAcquisitionConfig = field(default_factory=LandsatAcquisitionConfig)
-
-    # VIIRS settings
-    viirs_product: str = "VNP46A2"
-    viirs_band: str = "DNB_At_Sensor_Radiance"
 
     # OSM settings
     road_types: list[str] = field(
@@ -65,9 +53,6 @@ class AcquisitionConfig:
     osm_buffer_meters: float | dict[str, float] | None = (
         None  # Buffer in meters (float) or dict by road type
     )
-
-    # Processing settings
-    ignore_missing_tiles: bool = False
 
 
 @dataclass
@@ -88,14 +73,6 @@ class PreparationConfig:
     qa_dilation_radius: int = 3
     qa_cloud_strategy: Literal["conservative", "moderate", "permissive"] = "moderate"
 
-    # VIIRS corrections
-    quality_valid_flags: list[int] = field(default_factory=lambda: [0, 2])
-
-    # Spatial processing
-    target_crs: str = "EPSG:3857"  # Web Mercator
-    target_resolution: float = 30.0  # meters
-    resampling_method: str = "bilinear"
-
 
 @dataclass
 class AnalysisConfig:
@@ -112,12 +89,7 @@ class AnalysisConfig:
     ndui_epsilon: float = 1e-6
 
     # Temporal compositing
-    composite_method: Literal["median", "mean", "max", "percentile"] = "median"
-    composite_percentile: int | None = None
     min_valid_observations: int = 1
-
-    # Index calculation settings (for mathematical correctness)
-    calculate_indices_first: bool = True  # Calculate indices per-date before compositing
 
     # OSM road rasterization (fractional coverage)
     osm_sub_pixels: int = 5  # Sub-pixels per dimension (5x5 = 25 total)
@@ -143,9 +115,6 @@ class AnalysisConfig:
 class EnhancementConfig:
     """Configuration for enhancement phase."""
 
-    # Enhancement mode
-    quality_mode: Literal["basic", "enhanced"] = "basic"
-
     # Contrast enhancement
     contrast_method: Literal["linear", "percentile"] = "linear"
     contrast_percentiles: tuple[float, float] = (2.0, 98.0)
@@ -155,10 +124,6 @@ class EnhancementConfig:
     colormap: Literal["inferno", "viridis", "plasma", "grayscale"] = "inferno"
     colormap_range: tuple[float, float] = (0.3, 0.8)
     zero_as_black: bool = True
-
-    # Visualization
-    add_hillshade: bool = False
-    add_cartographic_elements: bool = False
 
 
 @dataclass
@@ -187,12 +152,6 @@ class MemoryConfig:
 
     # Memory optimization settings
     delete_bands_after_indices: bool = True  # Delete band arrays after calculating indices
-    memory_warning_gb: float = 8.0  # Warn if memory usage exceeds this
-    memory_limit_gb: float | None = None  # Hard limit - abort if exceeded
-
-    # Streaming options
-    use_streaming: bool = True  # Process dates incrementally vs all at once
-    batch_size: int | None = None  # Process dates in batches if set
 
 
 @dataclass
@@ -213,15 +172,11 @@ class PipelineConfig:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
 
     # Global settings
-    verbose: bool = False
-    debug: bool = False
     max_workers: int = 4
     min_valid_pixel_percentage: float = 10.0
-    use_parallel: bool = True
 
     # Diagnostics
     save_diagnostics: bool = False
-    save_temporal_stack: bool = True  # Persist per-date Landsat arrays before compositing
 
     @classmethod
     def for_bm_parity(cls, bbox: BBox, date: datetime, output_path: str) -> "PipelineConfig":
@@ -242,7 +197,6 @@ class PipelineConfig:
             date=date,
             output_path=output_path,
             enhancement=EnhancementConfig(
-                quality_mode="basic",
                 contrast_method="linear",
                 colormap="inferno",
             ),
@@ -269,13 +223,8 @@ class PipelineConfig:
             bbox=bbox,
             date=date,
             output_path=output_path,
-            analysis=AnalysisConfig(
-                composite_method="median",
-            ),
             enhancement=EnhancementConfig(
-                quality_mode="enhanced",
                 contrast_method="percentile",
-                add_cartographic_elements=True,
             ),
             export=ExportConfig(
                 generate_urban_mask=True,
