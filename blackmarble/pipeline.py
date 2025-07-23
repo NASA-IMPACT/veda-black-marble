@@ -317,8 +317,6 @@ async def black_marble_pipeline(
     # Initialize composite variables (for index-first calculation)
     ndvi_composite = None
     ndwi_composite = None
-    ndvi_for_ndui = None  # High-percentile NDVI for NDUI
-    ndvi_for_ndui_reprojected = None  # Reprojected version
     reference_profile = None
 
     # Track all landsat files for metadata
@@ -675,19 +673,6 @@ async def black_marble_pipeline(
         else:
             ndwi_composite = None
 
-        # For NDUI, we always want a high-percentile NDVI (regardless of main composite method)
-        if index_stacks["ndvi"]:
-            print(
-                f"  Creating {config.analysis.ndvi_percentile_for_ndui}th percentile NDVI for NDUI vegetation correction"
-            )
-            ndvi_for_ndui = analyze.create_index_temporal_composite(
-                index_stacks["ndvi"],
-                method="percentile",
-                percentile=config.analysis.ndvi_percentile_for_ndui,
-                min_valid_observations=config.analysis.min_valid_observations,
-            )
-        else:
-            ndvi_for_ndui = ndvi_composite  # Fallback to regular composite if no stack
 
         # Skip saving original CRS versions - we'll save the reprojected versions later
 
@@ -986,33 +971,9 @@ async def black_marble_pipeline(
                 ndvi,
                 reference_transform,
                 "data/diagnostics/ndvi.tif",
-                f"NDVI temporal composite ({config.analysis.ndvi_composite_method})",
+                f"NDVI {config.analysis.ndvi_composite_percentile}th percentile composite",
                 crs=processing_crs,
             )
-
-        # Also reproject the high-percentile NDVI for NDUI if different
-        if ndvi_for_ndui is not None and ndvi_for_ndui is not ndvi_composite:
-            ndvi_for_ndui_reprojected, _, _ = prepare.reproject_image(
-                data=ndvi_for_ndui,
-                src_transform=reference_profile["transform"],
-                src_crs=reference_profile["crs"],
-                dst_crs=processing_crs,
-                dst_transform=reference_transform,
-                dst_shape=reference_shape,
-                resampling="bilinear",
-            )
-            
-            # Save high-percentile NDVI if diagnostics enabled
-            if config and getattr(config, "save_diagnostics", False):
-                prepare.save_diagnostic(
-                    ndvi_for_ndui_reprojected,
-                    reference_transform,
-                    "data/diagnostics/ndvi_for_ndui.tif",
-                    f"NDVI {config.analysis.ndvi_percentile_for_ndui}th percentile (for NDUI calculation)",
-                    crs=processing_crs,
-                )
-        else:
-            ndvi_for_ndui_reprojected = ndvi
 
     if ndwi_composite is not None and reference_profile is not None:
         print("  Reprojecting pre-calculated NDWI composite...")
@@ -1133,38 +1094,20 @@ async def black_marble_pipeline(
                 "This indicates a reprojection error."
             )
 
-        if (
-            ndvi_for_ndui_reprojected is not None
-            and ndvi_for_ndui_reprojected.shape != reference_shape
-        ):
-            raise ValueError(
-                f"High-percentile NDVI shape {ndvi_for_ndui_reprojected.shape} does not match "
-                f"reference {reference_shape}. This indicates a reprojection error."
-            )
 
         print("  All arrays properly aligned!")
 
     # Calculate urban index combining NTL and vegetation
     ndui = None
     if ntl_composite is not None and ndvi is not None:
-        # Use the appropriate NDVI for NDUI calculation
-        ndvi_for_ndui_final = ndvi  # Default to regular NDVI
-
-        # Check if we have a special high-percentile NDVI for NDUI
-        if ndvi_for_ndui_reprojected is not None:
-            ndvi_for_ndui_final = ndvi_for_ndui_reprojected
-            print(
-                f"  Using {config.analysis.ndvi_percentile_for_ndui}th percentile NDVI for NDUI vegetation correction"
-            )
-
         # Verify shapes match before calculating NDUI
-        if ntl_composite.shape != ndvi_for_ndui_final.shape:
+        if ntl_composite.shape != ndvi.shape:
             print("WARNING: Shape mismatch after alignment!")
             print(f"  NTL shape: {ntl_composite.shape}")
-            print(f"  NDVI shape: {ndvi_for_ndui_final.shape}")
+            print(f"  NDVI shape: {ndvi.shape}")
             raise ValueError(
                 f"NTL and NDVI shapes still don't match after alignment: "
-                f"{ntl_composite.shape} vs {ndvi_for_ndui_final.shape}. This indicates a problem "
+                f"{ntl_composite.shape} vs {ndvi.shape}. This indicates a problem "
                 f"with the spatial alignment step."
             )
 
@@ -1177,16 +1120,16 @@ async def black_marble_pipeline(
         )
         print(f"  NTL range: [{np.nanmin(ntl_composite):.3f}, {np.nanmax(ntl_composite):.3f}]")
         print(
-            f"  NDVI non-NaN pixels: {(~np.isnan(ndvi_for_ndui_final)).sum()} "
-            f"({(~np.isnan(ndvi_for_ndui_final)).sum() / ndvi_for_ndui_final.size * 100:.1f}%)"
+            f"  NDVI non-NaN pixels: {(~np.isnan(ndvi)).sum()} "
+            f"({(~np.isnan(ndvi)).sum() / ndvi.size * 100:.1f}%)"
         )
         print(
-            f"  NDVI range (clamped to [0,1]): [{np.nanmin(ndvi_for_ndui_final):.3f}, {np.nanmax(ndvi_for_ndui_final):.3f}]"
+            f"  NDVI range (clamped to [0,1]): [{np.nanmin(ndvi):.3f}, {np.nanmax(ndvi):.3f}]"
         )
 
         ndui = analyze.calculate_ndui(
             ntl=ntl_composite,
-            ndvi=ndvi_for_ndui_final,
+            ndvi=ndvi,
             ndwi=ndwi,  # Optional, can be None
             ntl_floor=config.analysis.ntl_floor if config and hasattr(config, "analysis") else 0.1,
             ntl_ceiling=config.analysis.ntl_ceiling
