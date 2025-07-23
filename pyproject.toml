@@ -14,7 +14,7 @@ dependencies = [
     "aioboto3>=14.3.0",
     "boto3<1.38",
     "fiona>=1.10.1,<2.0",
-    "gdal>=3.10.1,<4.0",
+    "gdal==3.10.1",
     "geopy>=2.4.1,<3.0",
     "h5py>=3.14.0",
     "mypy-boto3-s3>=1.38.0,<2.0",
@@ -30,15 +30,17 @@ dependencies = [
     "utm>=0.8.1,<1.0",
     "matplotlib>=3.10.3",
     "tqdm>=4.67.1",
-    "pandas>=2.0,<2.2",
+    "pandas==2.1.1",
     "nest-asyncio>=1.6.0",
+    "psutil>=7.0.0",
 ]
 
 [project.scripts]
 blackmarble = "blackmarble.cli:app"
 
 [tool.setuptools]
-packages = ["blackmarble"]
+# Use automatic package discovery to find all subpackages
+packages.find = {}
 
 [tool.setuptools.package-data]
 blackmarble = ["data/*.npy", "data/WRS2_descending_0/*"]
@@ -52,7 +54,6 @@ dev = [
   "pre-commit>=4.2.0",
   "pytest>=8.3.5",
   "pyright>=1.1.402",
-  "psutil>=7.0.0",
   "black==23.12.1",
   "isort==5.13.2",
   "ruff==0.3.5",

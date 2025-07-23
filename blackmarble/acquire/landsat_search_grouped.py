@@ -14,7 +14,7 @@ from .landsat_search import (
     with_s3_client,
     S3Client,
 )
-from blackmarble.config import LandsatAcquisitionConfig
+from ..config import LandsatAcquisitionConfig
 
 logger = logging.getLogger(__name__)
 

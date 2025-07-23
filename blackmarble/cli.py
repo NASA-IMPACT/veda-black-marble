@@ -7,8 +7,8 @@ from pathlib import Path
 
 import typer
 
-from blackmarble.config import PipelineConfig
-from blackmarble.pipeline import black_marble_pipeline_sync
+from .config import PipelineConfig
+from .pipeline import black_marble_pipeline_sync
 
 app = typer.Typer(help="Command-line interface for the VEDA Black Marble processing pipeline.")
 

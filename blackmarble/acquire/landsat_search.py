@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Protocol
 
-from blackmarble.config import LandsatAcquisitionConfig
+from ..config import LandsatAcquisitionConfig
 
 logger = logging.getLogger(__name__)
 

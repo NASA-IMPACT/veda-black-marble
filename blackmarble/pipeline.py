@@ -13,7 +13,7 @@ import rasterio
 from rasterio.transform import array_bounds
 from osgeo import gdal
 
-from . import acquire, analyze, enhance, export, prepare
+from . import acquire, analyze, enhance, export, prepare  # type: ignore[attr-defined]
 from .config import PipelineConfig
 from .logging_utils import get_logger
 
@@ -169,7 +169,7 @@ async def black_marble_pipeline(
                 viirs_ntl_vrt = f"{data_dir}/temp/viirs_gap_filled_ntl_mosaic.vrt"
                 os.makedirs(f"{data_dir}/temp", exist_ok=True)
                 # VIIRS uses fill_value of 65530 based on config
-                vrt_options = gdal.BuildVRTOptions(
+                vrt_options = gdal.BuildVRTOptions(  # type: ignore[attr-defined]
                     separate=False,  # Mosaic tiles together
                     resolution='highest'  # Use highest resolution from input files
                 )
@@ -813,7 +813,7 @@ async def black_marble_pipeline(
     if road_network is not None and reference_shape is not None and reference_transform is not None:
         # Use the new CRS-aware road rasterization (like sync pipeline)
         # Use buffer sizes from config or default variable sizes
-        from blackmarble.acquire.osm_fractional import DEFAULT_BUFFER_BY_TYPE
+        from .acquire.osm_fractional import DEFAULT_BUFFER_BY_TYPE
 
         if config and config.acquisition.osm_buffer_meters is not None:
             buffer_meters = config.acquisition.osm_buffer_meters
