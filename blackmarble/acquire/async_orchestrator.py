@@ -295,7 +295,7 @@ class AsyncDownloadOrchestrator:
         Download Landsat data using the new time-window search strategy.
 
         Steps
-        1. For each target date in the download plan, call `search_best_scenes`
+        1. For each target date in the download plan, call `search_best_scenes_grouped`
            to obtain the optimal scene per WRS tile inside the configured time
            window (the window and quality weights are defined in
            landsat_search.LandsatAcquisitionConfig, imported internally by the

@@ -10,7 +10,7 @@ from typing import Any
 from .landsat_search import (
     SceneMeta, 
     SearchParams,
-    search_best_scenes_functional,
+    get_all_scenes_in_window,
     with_s3_client,
     S3Client,
 )
@@ -61,7 +61,7 @@ async def search_best_scenes(
         scenes_func = find_scenes_func
         
         # Get ALL scenes in time window
-        all_scenes = await search_best_scenes_functional(
+        all_scenes = await get_all_scenes_in_window(
             params=params,
             find_scenes_func=scenes_func,
             s3_client=s3_client,

@@ -7,8 +7,7 @@ All I/O and stateful operations are explicitly passed as dependencies.
 import asyncio
 import json
 import logging
-import math
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Protocol
 
@@ -60,41 +59,6 @@ class SearchParams:
 
 # Pure Functions (No Side Effects)
 
-def calculate_quality_score(scene: SceneMeta, weights: dict[str, float]) -> float:
-    """Calculate quality score for a scene (pure function).
-    
-    Returns:
-        Quality score between 0 and 1
-    """
-    # Validate weights
-    required_keys = {"spatial_coverage", "cloud_free", "snow_free", "off_nadir"}
-    missing_keys = required_keys - set(weights.keys())
-    if missing_keys:
-        raise ValueError(f"Missing required weight keys: {missing_keys}")
-        
-    weight_sum = sum(weights.values())
-    if not math.isclose(weight_sum, 1.0, abs_tol=0.001):
-        raise ValueError(f"Weights must sum to 1.0 (±0.001), got {weight_sum}")
-    
-    score = 0.0
-    
-    # Spatial coverage component
-    score += weights["spatial_coverage"] * scene.spatial_coverage
-    
-    # Cloud-free component
-    cloud_free = 1.0 - (scene.cloud_cover / 100.0)
-    score += weights["cloud_free"] * cloud_free
-    
-    # Snow-free component
-    snow_free = 1.0 - scene.snow_cover
-    score += weights["snow_free"] * snow_free
-    
-    # Off-nadir penalty
-    if not scene.off_nadir:
-        score += weights["off_nadir"]
-        
-    # Clamp to [0, 1]
-    return max(0.0, min(1.0, score))
 
 
 def group_by_pathrow(scenes: list[SceneMeta]) -> dict[tuple[int, int], list[SceneMeta]]:
@@ -108,39 +72,6 @@ def group_by_pathrow(scenes: list[SceneMeta]) -> dict[tuple[int, int], list[Scen
     return grouped
 
 
-def select_best_scene(
-    candidates: list[SceneMeta],
-    target_date: datetime,
-    weights: dict[str, float]
-) -> SceneMeta:
-    """Select best scene from candidates (pure function)."""
-    # Calculate scores
-    scored_candidates = [
-        replace(scene, quality_score=calculate_quality_score(scene, weights))
-        for scene in candidates
-    ]
-    
-    # Define sensor ranking (lower is better)
-    sensor_rank = {
-        "OLI_TIRS": 0,  # L8/L9
-        "ETM": 1,       # L7
-        "TM": 2,        # L5/L4
-        "UNKNOWN": 3,
-    }
-    
-    # Sort by multiple criteria
-    def sort_key(scene: SceneMeta) -> tuple[float, int, float]:
-        rank = sensor_rank.get(scene.sensor, 3)
-        temporal_distance = abs((scene.date - target_date).days)
-        
-        return (
-            -scene.quality_score,  # Negative for descending
-            rank,
-            temporal_distance,
-        )
-    
-    sorted_candidates = sorted(scored_candidates, key=sort_key)
-    return sorted_candidates[0]
 
 
 def normalize_target_date(target_date: datetime) -> datetime:
@@ -508,17 +439,19 @@ async def with_s3_client(
 
 # Main Pipeline (Composition of Pure Functions)
 
-async def search_best_scenes_functional(
+
+
+async def get_all_scenes_in_window(
     params: SearchParams,
-    find_scenes_func: Callable,  # Injected dependency
-    s3_client: S3Client,  # Injected dependency
+    find_scenes_func: Any,
+    s3_client: S3Client,
     bucket: str = "usgs-landsat",
-    max_concurrent_mtl: int = 32,
+    max_concurrent_mtl: int = 20,
 ) -> list[SceneMeta]:
-    """Search for best Landsat scenes within time window (functional pipeline).
+    """Get ALL scenes in time window without any selection.
     
-    This is a pure pipeline that composes all the functions above.
-    All I/O operations are passed as dependencies.
+    This is used by the grouped search to get all scenes before
+    it does its own date-based grouping and selection.
     """
     # Normalize timezone
     target_date_utc = normalize_target_date(params.target_date)
@@ -528,7 +461,7 @@ async def search_best_scenes_functional(
     window_end = target_date_utc + timedelta(days=params.config.window_days)
     
     logger.info(
-        f"Searching for Landsat scenes between {window_start.date()} "
+        f"Getting all Landsat scenes between {window_start.date()} "
         f"and {window_end.date()} UTC (±{params.config.window_days} days)"
     )
     
@@ -560,73 +493,7 @@ async def search_best_scenes_functional(
     # Filter out failed fetches (pure)
     valid_scenes = [s for s in scene_metas if s is not None]
     
-    # Group by path/row (pure)
-    scenes_by_tile = group_by_pathrow(valid_scenes)
-    
-    # Select best scene for each tile (pure)
-    selected_scenes = []
-    for candidates in scenes_by_tile.values():
-        if candidates:
-            # Hardcoded quality weights (previously in config)
-            quality_weights = {
-                "spatial_coverage": 0.5,  # Weight for spatial coverage
-                "cloud_free": 0.3,       # Weight for cloud-free percentage
-                "snow_free": 0.15,       # Weight for snow-free percentage
-                "off_nadir": 0.05,       # Weight for nadir viewing
-            }
-            best = select_best_scene(
-                candidates,
-                target_date_utc,
-                quality_weights
-            )
-            selected_scenes.append(best)
-    
-    # Sort by path/row (pure)
-    selected_scenes.sort(key=lambda s: (s.path, s.row))
-    
-    # Check coverage completeness
-    if not params.allow_incomplete and len(selected_scenes) < len(scenes_by_tile):
-        raise ValueError("Incomplete tile coverage")
-    
-    return selected_scenes
+    return valid_scenes
 
 
-# Public API (Convenience wrapper)
-
-async def search_best_scenes(
-    bbox: tuple[float, float, float, float],
-    target_date: datetime,
-    config: LandsatAcquisitionConfig | None = None,
-    allow_incomplete: bool = False,
-    find_scenes_func: Callable | None = None,
-) -> list[SceneMeta]:
-    """Search for best Landsat scenes within time window.
-    
-    This is the main entry point that sets up dependencies and calls
-    the functional pipeline.
-    """
-    if config is None:
-        config = LandsatAcquisitionConfig()
-    
-    if find_scenes_func is None:
-        # Import here to avoid circular dependency
-        from .landsat import AsyncLandsatDownloader
-        downloader = AsyncLandsatDownloader(aws_unsigned=False)  # Use signed requests
-        find_scenes_func = downloader.find_landsat_scenes
-    
-    params = SearchParams(
-        bbox=bbox,
-        target_date=target_date,
-        config=config,
-        allow_incomplete=allow_incomplete,
-    )
-    
-    # Run pipeline with managed S3 client
-    async def pipeline(s3_client: S3Client) -> list[SceneMeta]:
-        return await search_best_scenes_functional(
-            params=params,
-            find_scenes_func=find_scenes_func,
-            s3_client=s3_client,
-        )
-    
-    return await with_s3_client(pipeline)
+# Public API
