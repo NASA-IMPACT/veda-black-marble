@@ -181,14 +181,23 @@ async def black_marble_pipeline(
                 print(f"Creating VRT mosaic for {len(viirs_ntl_files)} VIIRS tiles")
                 viirs_ntl_vrt = f"{data_dir}/temp/viirs_gap_filled_ntl_mosaic.vrt"
                 os.makedirs(f"{data_dir}/temp", exist_ok=True)
-                vrt_ds = gdal.BuildVRT(viirs_ntl_vrt, [str(f) for f in viirs_ntl_files])
+                # VIIRS uses fill_value of 65530 based on config
+                vrt_options = gdal.BuildVRTOptions(
+                    separate=False,  # Mosaic tiles together
+                    resolution='highest'  # Use highest resolution from input files
+                )
+                vrt_ds = gdal.BuildVRT(viirs_ntl_vrt, [str(f) for f in viirs_ntl_files], options=vrt_options)
                 vrt_ds = None  # Close to write to disk
-                
+
                 # Save VRT to diagnostics if requested
                 if config and getattr(config, "save_diagnostics", False):
                     os.makedirs(f"{data_dir}/diagnostics/vrts", exist_ok=True)
                     import shutil
-                    shutil.copy(viirs_ntl_vrt, f"{data_dir}/diagnostics/vrts/viirs_gap_filled_ntl_mosaic.vrt")
+
+                    shutil.copy(
+                        viirs_ntl_vrt,
+                        f"{data_dir}/diagnostics/vrts/viirs_gap_filled_ntl_mosaic.vrt",
+                    )
                     print(f"  Saved VRT to: data/diagnostics/vrts/viirs_gap_filled_ntl_mosaic.vrt")
 
                 with rasterio.open(viirs_ntl_vrt) as src:
@@ -217,7 +226,6 @@ async def black_marble_pipeline(
             logger.debug(
                 f"Non-zero pixels after crop: {(viirs_ntl > 0).sum()} ({(viirs_ntl > 0).sum() / viirs_ntl.size * 100:.1f}%)"
             )
-
 
             # Update profile
             viirs_profile["transform"] = viirs_transform
@@ -250,30 +258,37 @@ async def black_marble_pipeline(
     if viirs_corrected is None:
         print("⚠️  No VIIRS data - using Landsat as reference")
 
-    # Determine appropriate UTM zone for the area (like sync pipeline)
-    center_lon = (bbox[0] + bbox[2]) / 2
-    center_lat = (bbox[1] + bbox[3]) / 2
-
-    # Calculate UTM zone
-    utm_zone = int((center_lon + 180) / 6) + 1
-    hemisphere = "north" if center_lat >= 0 else "south"
-    epsg_code = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
-
-    # Use configured CRS or default to UTM for accurate local analysis
-    target_crs = f"EPSG:{epsg_code}"  # Use calculated UTM zone
-    target_resolution_landsat = 30.0  # 30 meters for Landsat
+    # Get locally-optimized Albers Equal Area projection
+    from .crs import get_processing_crs
+    
+    processing_crs = get_processing_crs(bbox)
+    target_resolution_landsat = 30.0  # 30 meters for all projections
 
     print(
-        f"Using projection: {target_crs} "
-        f"(UTM Zone {utm_zone}{'N' if hemisphere == 'north' else 'S'}) "
+        f"Using locally-optimized Albers Equal Area projection "
         f"with {target_resolution_landsat}m resolution"
     )
 
-    log.debug(f"Target CRS determined from bbox center:")
+    log.debug(f"Processing CRS determined from bbox:")
     log.debug(f"  - BBox: {bbox}")
-    log.debug(f"  - Center: ({center_lon:.6f}, {center_lat:.6f})")
-    log.debug(f"  - UTM Zone: {utm_zone}{'N' if hemisphere == 'north' else 'S'}")
-    log.debug(f"  - Target CRS: {target_crs}")
+    log.debug(f"  - CRS WKT: {processing_crs.to_wkt()}")
+
+    # Pre-compute target grid for deterministic alignment
+    # This ensures all reprojections use the exact same grid
+    print("\n📐 Computing target grid for spatial alignment...")
+    from .crs import create_processing_grid
+    
+    # Create the standard processing grid
+    # This will be used for EVERYTHING: Landsat, VIIRS, roads, indices, etc.
+    processing_crs, reference_transform, reference_shape = create_processing_grid(bbox, target_resolution_landsat)
+    
+    # Get bounds for display
+    from rasterio.transform import array_bounds
+    bounds = array_bounds(reference_shape[0], reference_shape[1], reference_transform)
+    
+    print(f"  Target grid: {reference_shape} pixels")
+    print(f"  Bounds in processing CRS: ({bounds[0]:.1f}, {bounds[1]:.1f}, {bounds[2]:.1f}, {bounds[3]:.1f})")
+    print(f"  Pixel-aligned to {target_resolution_landsat}m grid")
 
     # Process Landsat data
     print("\n🛰️ Processing Landsat data...")
@@ -294,11 +309,11 @@ async def black_marble_pipeline(
     # Initialize band stacks and index stacks
     band_stacks = {"B3": [], "B4": [], "B5": []}
     band_dates = {"B3": [], "B4": [], "B5": []}  # Track dates for diagnostics
-    
+
     # Initialize index stacks for index-first calculation
     index_stacks = {"ndvi": [], "ndwi": []}
     index_dates = []  # Dates for index composites
-    
+
     # Initialize composite variables (for index-first calculation)
     ndvi_composite = None
     ndwi_composite = None
@@ -308,7 +323,7 @@ async def black_marble_pipeline(
 
     # Track all landsat files for metadata
     all_landsat_files = {"B3": [], "B4": [], "B5": []}
-    
+
     # Track which tiles we actually have data for
     tiles_with_data = set()
 
@@ -326,11 +341,9 @@ async def black_marble_pipeline(
 
     # Original in-memory processing
     print(f"\n💾 Processing {len(landsat_files_by_date)} Landsat dates")
-    
+
     # Debug configuration
     if config:
-        print(f"  Index-first calculation: {getattr(config.analysis, 'calculate_indices_first', False)}")
-        print(f"  Use legacy indices: {getattr(config.analysis, 'use_legacy_indices', False)}")
         print(f"  Mask low denominator: {getattr(config.analysis, 'mask_low_denom', False)}")
 
     # Debug: Print structure of landsat_files_by_date
@@ -342,7 +355,7 @@ async def black_marble_pipeline(
         print(f"  Keys: {list(landsat_files_by_date[sample_date].keys())}")
         for band, paths in landsat_files_by_date[sample_date].items():
             print(f"  {band}: {len(paths)} files")
-    
+
     print("\n📊 Analyzing tile coverage across dates:")
     all_tiles_by_date = {}
     for date, date_files in landsat_files_by_date.items():
@@ -350,7 +363,7 @@ async def black_marble_pipeline(
         for band, paths in date_files.items():
             for path in paths:
                 filename = Path(path).stem
-                parts = filename.split('_')
+                parts = filename.split("_")
                 if len(parts) >= 3:
                     pathrow = parts[2]
                     if len(pathrow) == 6 and pathrow.isdigit():
@@ -359,7 +372,7 @@ async def black_marble_pipeline(
     all_possible_tiles = set()
     for tiles in all_tiles_by_date.values():
         all_possible_tiles.update(tiles)
-    
+
     print(f"  Total unique tiles across all dates: {sorted(all_possible_tiles)}")
     for date, tiles in sorted(all_tiles_by_date.items()):
         missing = all_possible_tiles - tiles
@@ -388,24 +401,26 @@ async def black_marble_pipeline(
                 f"  Available: {[b for b in REQUIRED_BANDS if b in date_files and date_files.get(b)]}"
             )
             continue
-            
+
         # Track which tiles this date has
         date_tiles = set()
         for band, paths in date_files.items():
             for path in paths:
                 # Extract path/row from filename
                 filename = Path(path).stem
-                parts = filename.split('_')
+                parts = filename.split("_")
                 if len(parts) >= 3:
                     pathrow = parts[2]
                     if len(pathrow) == 6 and pathrow.isdigit():
                         date_tiles.add(pathrow)
                         tiles_with_data.add(pathrow)
-        
+
         if date_tiles:
             print(f"  Tiles for this date: {sorted(date_tiles)}")
-            
-        logger.info(f"Processing {target_date.strftime('%Y-%m-%d')} with tiles: {sorted(date_tiles)}")
+
+        logger.info(
+            f"Processing {target_date.strftime('%Y-%m-%d')} with tiles: {sorted(date_tiles)}"
+        )
         for band, paths in date_files.items():
             if paths:
                 logger.info(f"  {band}: {len(paths)} files")
@@ -424,161 +439,164 @@ async def black_marble_pipeline(
 
         # Process this date's data
         # Use less aggressive masking for compositing if configured
-        composite_strategy = getattr(config.preparation, "qa_composite_strategy", None) if config else None
-        composite_dilation = getattr(config.preparation, "qa_composite_dilation", None) if config else None
-        
-        actual_strategy = composite_strategy or getattr(config.preparation, "qa_cloud_strategy", "moderate") if config else "moderate"
+        composite_strategy = (
+            getattr(config.preparation, "qa_composite_strategy", None) if config else None
+        )
+        composite_dilation = (
+            getattr(config.preparation, "qa_composite_dilation", None) if config else None
+        )
+
+        actual_strategy = (
+            composite_strategy or getattr(config.preparation, "qa_cloud_strategy", "moderate")
+            if config
+            else "moderate"
+        )
         actual_dilation = composite_dilation if composite_dilation is not None else dilate_pixels
-        
+
         processed_data = prepare.process_landsat_date(
             bands_data=bands_data,
             bbox=bbox,
             apply_qa_mask=True,
             dilate_pixels=actual_dilation,
             cloud_strategy=actual_strategy,
+            save_diagnostics=config and getattr(config, "save_diagnostics", False),
+            date_str=target_date.strftime('%Y-%m-%d'),
         )
+        
+        # DEBUG: Log the transform from processed data
+        if processed_data and "B5" in processed_data:
+            _, profile = processed_data["B5"]
+            print(f"  📍 Date {target_date.strftime('%Y-%m-%d')} transform:")
+            print(f"     CRS: {profile['crs']}")
+            print(f"     Transform.c (x-origin): {profile['transform'].c}")
+            print(f"     Transform.f (y-origin): {profile['transform'].f}")
+            print(f"     Reference transform.c: {reference_transform.c}")
+            print(f"     Reference transform.f: {reference_transform.f}")
+            if abs(profile['transform'].c - reference_transform.c) > 0.1:
+                print(f"     ⚠️  X-origin differs by {profile['transform'].c - reference_transform.c:.1f}m")
 
-        # Check if we should calculate indices first (new approach)
-        if config and config.analysis.calculate_indices_first and not config.analysis.use_legacy_indices:
-            # Calculate indices for this date BEFORE temporal compositing
-            print(f"  Using index-first calculation for {target_date.strftime('%Y-%m-%d')}")
-            if "B5" in processed_data and "B4" in processed_data and "B3" in processed_data:
+        # Calculate indices for this date BEFORE temporal compositing
+        print(f"  Calculating indices for {target_date.strftime('%Y-%m-%d')}")
+        if "B5" in processed_data and "B4" in processed_data and "B3" in processed_data:
                 # Get the masked data
-                b3_data, _ = processed_data["B3"]
-                b4_data, _ = processed_data["B4"]
+                b3_data, b3_profile = processed_data["B3"]
+                b4_data, b4_profile = processed_data["B4"]
                 b5_data, profile = processed_data["B5"]
                 
+                # DEBUG: Log shapes
+                print(f"  📐 Band shapes - B3: {b3_data.shape}, B4: {b4_data.shape}, B5: {b5_data.shape}")
+                print(f"  📐 Expected reference shape: {reference_shape}")
+
                 if reference_profile is None:
                     reference_profile = profile
-                    logger.info(f"Set reference profile from B5: shape={profile['height']}x{profile['width']}, crs={profile['crs']}")
-                elif profile['width'] * profile['height'] > reference_profile['width'] * reference_profile['height']:
-                    logger.info(f"Updating reference profile to larger area: {reference_profile['height']}x{reference_profile['width']} -> {profile['height']}x{profile['width']}")
+                    logger.info(
+                        f"Set reference profile from B5: shape={profile['height']}x{profile['width']}, crs={profile['crs']}"
+                    )
+                    # DEBUG: Check if reference CRS matches processing CRS
+                    print(f"  ⚠️  Reference profile CRS: {profile['crs']}")
+                    print(f"  ⚠️  Processing CRS: {processing_crs}")
+                    if str(profile['crs']) != str(processing_crs):
+                        print(f"  🚨 WARNING: Reference CRS does not match processing CRS!")
+                elif (
+                    profile["width"] * profile["height"]
+                    > reference_profile["width"] * reference_profile["height"]
+                ):
+                    logger.info(
+                        f"Updating reference profile to larger area: {reference_profile['height']}x{reference_profile['width']} -> {profile['height']}x{profile['width']}"
+                    )
                     reference_profile = profile
-                
+
                 # Calculate NDVI for this date
                 ndvi_date = analyze.calculate_ndvi(
-                    nir=b5_data,
-                    red=b4_data,
-                    mask_low_denom=config.analysis.mask_low_denom
+                    nir=b5_data, red=b4_data, mask_low_denom=config.analysis.mask_low_denom
                 ).astype(np.float32)  # Control memory
                 
+                # Clamp negative NDVI values to 0 for NDUI calculation
+                # Negative NDVI indicates water/bare soil/artificial surfaces
+                ndvi_date = np.maximum(ndvi_date, 0.0)
+
                 # Calculate NDWI for this date
                 ndwi_date = analyze.calculate_ndwi(
-                    green=b3_data,
-                    nir=b5_data,
-                    mask_low_denom=config.analysis.mask_low_denom
+                    green=b3_data, nir=b5_data, mask_low_denom=config.analysis.mask_low_denom
                 ).astype(np.float32)  # Control memory
                 
+                # Clamp negative NDWI values to 0
+                # Negative NDWI indicates dry soil/built-up areas
+                ndwi_date = np.maximum(ndwi_date, 0.0)
+
                 # Add to index stacks
                 index_stacks["ndvi"].append(ndvi_date)
                 index_stacks["ndwi"].append(ndwi_date)
                 index_dates.append(target_date)
-                
+
                 if config and getattr(config, "save_diagnostics", False):
-                    date_str = target_date.strftime('%Y%m%d')
+                    date_str = target_date.strftime("%Y%m%d")
                     os.makedirs("data/diagnostics/per_date", exist_ok=True)
-                    
+
                     prepare.save_diagnostic(
                         ndvi_date,
                         profile,
                         f"data/diagnostics/per_date/ndvi_{date_str}.tif",
-                        f"NDVI for {date_str}"
+                        f"NDVI for {date_str}",
                     )
-                    
+
                     prepare.save_diagnostic(
                         ndwi_date,
                         profile,
                         f"data/diagnostics/per_date/ndwi_{date_str}.tif",
-                        f"NDWI for {date_str}"
+                        f"NDWI for {date_str}",
                     )
-                    
+
                     prepare.save_diagnostic(
                         b3_data,
                         profile,
                         f"data/diagnostics/per_date/B3_{date_str}.tif",
-                        f"Band 3 (Green) for {date_str}"
+                        f"Band 3 (Green) for {date_str}",
                     )
                     prepare.save_diagnostic(
                         b4_data,
                         profile,
                         f"data/diagnostics/per_date/B4_{date_str}.tif",
-                        f"Band 4 (Red) for {date_str}"
+                        f"Band 4 (Red) for {date_str}",
                     )
                     prepare.save_diagnostic(
                         b5_data,
                         profile,
                         f"data/diagnostics/per_date/B5_{date_str}.tif",
-                        f"Band 5 (NIR) for {date_str}"
+                        f"Band 5 (NIR) for {date_str}",
                     )
-                    
+
                     valid_ndvi = ndvi_date[~np.isnan(ndvi_date)]
                     if valid_ndvi.size > 0:
-                        print(f"    NDVI stats: min={np.min(valid_ndvi):.3f}, max={np.max(valid_ndvi):.3f}, "
-                              f"mean={np.mean(valid_ndvi):.3f}, coverage={valid_ndvi.size/ndvi_date.size*100:.1f}%")
+                        print(
+                            f"    NDVI stats: min={np.min(valid_ndvi):.3f}, max={np.max(valid_ndvi):.3f}, "
+                            f"mean={np.mean(valid_ndvi):.3f}, coverage={valid_ndvi.size/ndvi_date.size*100:.1f}%"
+                        )
                     else:
                         print(f"    NDVI: No valid pixels!")
-                
+
                 # Optional: Delete bands to save memory
                 if config.memory.delete_bands_after_indices:
                     del b3_data, b4_data, b5_data
                     import gc
+
                     gc.collect()
-                    
+
                 # Track files for metadata
                 for band_name in ["B3", "B4", "B5"]:
                     if band_name in bands_data:
                         band_files, _, _, _ = bands_data[band_name]
                         all_landsat_files[band_name].extend(band_files)
-            else:
-                print(f"  Skipping index calculation - missing required bands")
         else:
-            # Legacy approach: Store bands for later
-            for band_name in ["B3", "B4", "B5"]:
-                if band_name in processed_data:
-                    masked_data, profile = processed_data[band_name]
-                    band_stacks[band_name].append(masked_data)
-
-                    if reference_profile is None:
-                        reference_profile = profile
-
-                    # Track downloaded files for metadata
-                    if band_name in bands_data:
-                        band_files, _, _, _ = bands_data[band_name]
-                        all_landsat_files[band_name].extend(band_files)
-
-                    band_dates[band_name].append(target_date)  # NEW: track date
-                    
-                    if config and getattr(config, "save_diagnostics", False):
-                        date_str = target_date.strftime('%Y%m%d')
-                        os.makedirs("data/diagnostics/per_date", exist_ok=True)
-                        
-                        prepare.save_diagnostic(
-                            masked_data,
-                            profile,
-                            f"data/diagnostics/per_date/{band_name}_{date_str}.tif",
-                            f"Band {band_name} for {date_str}"
-                        )
-                        
-                        valid_data = masked_data[~np.isnan(masked_data)]
-                        if valid_data.size > 0:
-                            print(f"    {band_name} stats: min={np.min(valid_data):.3f}, max={np.max(valid_data):.3f}, "
-                                  f"mean={np.mean(valid_data):.3f}, coverage={valid_data.size/masked_data.size*100:.1f}%")
-                        else:
-                            print(f"    {band_name}: No valid pixels!")
+            print(f"  Skipping index calculation - missing required bands")
 
         # Log memory after processing date
         if monitor_memory and process is not None:
             memory_gb = process.memory_info().rss / 1024 / 1024 / 1024
-            if config and config.analysis.calculate_indices_first and not config.analysis.use_legacy_indices:
-                total_arrays = sum(len(stack) for stack in index_stacks.values())
-                print(
-                    f"  Memory after date: {memory_gb:.1f} GB (index arrays in memory: {total_arrays})"
-                )
-            else:
-                total_arrays = sum(len(stack) for stack in band_stacks.values())
-                print(
-                    f"  Memory after date: {memory_gb:.1f} GB (band arrays in memory: {total_arrays})"
-                )
+            total_arrays = sum(len(stack) for stack in index_stacks.values())
+            print(
+                f"  Memory after date: {memory_gb:.1f} GB (index arrays in memory: {total_arrays})"
+            )
 
     # Persist per-date arrays for diagnostics
     if config and getattr(config, "save_temporal_stack", False) and reference_profile is not None:
@@ -594,13 +612,14 @@ async def black_marble_pipeline(
     # Check which tiles we got vs expected
     if tiles_with_data:
         from .acquire.wrs_utils import get_wrs_tiles_for_bbox_tuple
+
         expected_tiles = get_wrs_tiles_for_bbox_tuple(bbox)
         expected_pathrows = {f"{t['path']:03d}{t['row']:03d}" for t in expected_tiles}
-        
+
         print(f"\n📊 Tile coverage summary:")
         print(f"  Expected tiles for bbox: {sorted(expected_pathrows)}")
         print(f"  Tiles with data: {sorted(tiles_with_data)}")
-        
+
         missing_tiles = expected_pathrows - tiles_with_data
         if missing_tiles:
             print(f"  ⚠️  MISSING TILES: {sorted(missing_tiles)}")
@@ -613,15 +632,17 @@ async def black_marble_pipeline(
 
     # Create temporal composites
     print("\n⏳ Creating Landsat temporal composites...")
-    
+
     # Debug what we have
     print(f"  Index stacks: NDVI={len(index_stacks['ndvi'])}, NDWI={len(index_stacks['ndwi'])}")
-    print(f"  Band stacks: B3={len(band_stacks['B3'])}, B4={len(band_stacks['B4'])}, B5={len(band_stacks['B5'])}")
+    print(
+        f"  Band stacks: B3={len(band_stacks['B3'])}, B4={len(band_stacks['B4'])}, B5={len(band_stacks['B5'])}"
+    )
 
-    if config and config.analysis.calculate_indices_first and not config.analysis.use_legacy_indices and any(index_stacks.values()):
-        # NEW APPROACH: Create index composites (indices already calculated per-date)
-        print("  Using index-first calculation (mathematically correct)")
-        
+    if any(index_stacks.values()):
+        # Create index composites (indices already calculated per-date)
+        print("  Creating index composites from per-date indices")
+
         # Create NDVI composite
         if index_stacks["ndvi"]:
             print(f"  Creating NDVI composite from {len(index_stacks['ndvi'])} dates")
@@ -629,39 +650,49 @@ async def black_marble_pipeline(
                 index_stacks["ndvi"],
                 method=config.analysis.ndvi_composite_method,
                 percentile=config.analysis.ndvi_composite_percentile,
-                min_valid_observations=config.analysis.min_valid_observations
+                min_valid_observations=config.analysis.min_valid_observations,
             )
-            print(f"    NDVI composite range: [{np.nanmin(ndvi_composite):.3f}, {np.nanmax(ndvi_composite):.3f}]")
-            print(f"    Valid pixels: {(~np.isnan(ndvi_composite)).sum() / ndvi_composite.size * 100:.1f}%")
+            print(
+                f"    NDVI composite range: [{np.nanmin(ndvi_composite):.3f}, {np.nanmax(ndvi_composite):.3f}]"
+            )
+            print(
+                f"    Valid pixels: {(~np.isnan(ndvi_composite)).sum() / ndvi_composite.size * 100:.1f}%"
+            )
         else:
             ndvi_composite = None
-            
-        # Create NDWI composite  
+
+        # Create NDWI composite
         if index_stacks["ndwi"]:
             print(f"  Creating NDWI composite from {len(index_stacks['ndwi'])} dates")
             ndwi_composite = analyze.create_index_temporal_composite(
                 index_stacks["ndwi"],
                 method=config.analysis.ndwi_composite_method,
                 percentile=config.analysis.ndwi_composite_percentile,
-                min_valid_observations=config.analysis.min_valid_observations
+                min_valid_observations=config.analysis.min_valid_observations,
             )
-            print(f"    NDWI composite range: [{np.nanmin(ndwi_composite):.3f}, {np.nanmax(ndwi_composite):.3f}]")
-            print(f"    Valid pixels: {(~np.isnan(ndwi_composite)).sum() / ndwi_composite.size * 100:.1f}%")
+            print(
+                f"    NDWI composite range (clamped to [0,1]): [{np.nanmin(ndwi_composite):.3f}, {np.nanmax(ndwi_composite):.3f}]"
+            )
+            print(
+                f"    Valid pixels: {(~np.isnan(ndwi_composite)).sum() / ndwi_composite.size * 100:.1f}%"
+            )
         else:
             ndwi_composite = None
-            
+
         # For NDUI, we always want a high-percentile NDVI (regardless of main composite method)
         if index_stacks["ndvi"]:
-            print(f"  Creating {config.analysis.ndvi_percentile_for_ndui}th percentile NDVI for NDUI vegetation correction")
+            print(
+                f"  Creating {config.analysis.ndvi_percentile_for_ndui}th percentile NDVI for NDUI vegetation correction"
+            )
             ndvi_for_ndui = analyze.create_index_temporal_composite(
                 index_stacks["ndvi"],
                 method="percentile",
                 percentile=config.analysis.ndvi_percentile_for_ndui,
-                min_valid_observations=config.analysis.min_valid_observations
+                min_valid_observations=config.analysis.min_valid_observations,
             )
         else:
             ndvi_for_ndui = ndvi_composite  # Fallback to regular composite if no stack
-            
+
         if config and getattr(config, "save_diagnostics", False) and reference_profile is not None:
             if ndvi_composite is not None:
                 prepare.save_diagnostic(
@@ -671,7 +702,7 @@ async def black_marble_pipeline(
                     f"NDVI {config.analysis.ndvi_composite_method} composite (original CRS)",
                     crs=reference_profile["crs"],
                 )
-            
+
             if ndvi_for_ndui is not None and ndvi_for_ndui is not ndvi_composite:
                 prepare.save_diagnostic(
                     ndvi_for_ndui,
@@ -680,7 +711,7 @@ async def black_marble_pipeline(
                     f"NDVI {config.analysis.ndvi_percentile_for_ndui}th percentile for NDUI (original CRS)",
                     crs=reference_profile["crs"],
                 )
-            
+
             if ndwi_composite is not None:
                 prepare.save_diagnostic(
                     ndwi_composite,
@@ -689,78 +720,29 @@ async def black_marble_pipeline(
                     f"NDWI {config.analysis.ndwi_composite_method} composite (original CRS)",
                     crs=reference_profile["crs"],
                 )
-            
+
         # Validate that we have a reference profile for reprojection
         if reference_profile is None and (ndvi_composite is not None or ndwi_composite is not None):
             print("⚠️  WARNING: No reference profile available for index reprojection")
             print("    This can happen if all Landsat scenes were filtered out")
             # Try to get profile from the first index array
-            if index_stacks["ndvi"] and hasattr(index_stacks["ndvi"][0], 'shape'):
+            if index_stacks["ndvi"] and hasattr(index_stacks["ndvi"][0], "shape"):
                 # We need to construct a minimal profile for reprojection
                 # This is a fallback - ideally we should have saved profiles with indices
                 print("    Creating fallback reference profile from index shape")
-        
+
         # We still need to reproject indices to target CRS
         # Create a dummy "landsat_reprojected" dict for compatibility
         landsat_reprojected = {}
-        
+
         # Skip band compositing entirely
-        
-    elif not any(band_stacks.values()):
+
+    else:
         print("⚠️  No valid Landsat data found - skipping index calculations")
         landsat_reprojected = {}
-    else:
-        # Create median composites from the masked stacks
-        landsat_bands = {}
-        landsat_profiles = {}
 
-        for band_name, stack in band_stacks.items():
-            if stack:
-                print(f"  Creating temporal composite for {band_name} from {len(stack)} dates")
-
-                # Create composite from pre-masked data with scaling
-                # Use mean instead of median to avoid hard edges at scene boundaries
-                composite_method = getattr(config, "landsat_composite_method", "mean")
-                logger.debug(
-                    f"Creating composite with scale_factor={scale_factor}, add_offset={add_offset}, method={composite_method}"
-                )
-                # Check if we should log coverage
-                log_coverage = getattr(config, "log_composite_coverage", False) if config else False
-                
-                composite = analyze.create_landsat_median_composite(
-                    stack, 
-                    scale_factor=scale_factor, 
-                    add_offset=add_offset, 
-                    method=composite_method,
-                    log_coverage=log_coverage
-                )
-
-                logger.debug(f"Composite stats for {band_name}:")
-                logger.debug(f"  Min: {np.nanmin(composite):.3f}, Max: {np.nanmax(composite):.3f}")
-                logger.debug(
-                    f"  NaN pixels: {np.isnan(composite).sum()} ({np.isnan(composite).sum() / composite.size * 100:.1f}%)"
-                )
-                logger.debug(
-                    f"  Non-zero pixels: {(composite != 0).sum()} ({(composite != 0).sum() / composite.size * 100:.1f}%)"
-                )
-
-                landsat_bands[band_name] = (composite, reference_profile)
-                landsat_profiles[band_name] = reference_profile
-
-                print(
-                    f"  Created composite for {band_name}: shape={composite.shape}, "
-                    f"coverage={(composite > 0).sum() / composite.size * 100:.1f}%"
-                )
-                # DEBUG: Check if composite is scaled properly
-                print(
-                    f"    Composite range: [{np.nanmin(composite):.3f}, {np.nanmax(composite):.3f}]"
-                )
-            else:
-                print(f"  Warning: No data found for {band_name}")
-
-    # Reproject Landsat bands to target CRS (UTM) - common for both VRT and in-memory
-    reference_transform = None
-    reference_shape = None
+    # Reproject Landsat bands to target CRS - common for both VRT and in-memory
+    # Note: reference_transform and reference_shape are already set from create_processing_grid()
     reference_bbox = None
 
     landsat_bands = locals().get("landsat_bands", {})
@@ -773,25 +755,20 @@ async def black_marble_pipeline(
                 data=data,
                 src_transform=profile["transform"],
                 src_crs=profile["crs"],
-                dst_crs=target_crs,
+                dst_crs=processing_crs,
+                dst_transform=reference_transform,
+                dst_shape=reference_shape,
                 resampling="bilinear",  # Use bilinear for smoother results
-                resolution=target_resolution_landsat,
             )
             landsat_reprojected[band_name] = reprojected
 
-            # Store reference transform and shape from first band
-            if reference_transform is None:
-                reference_transform = new_transform
-                reference_shape = reprojected.shape
+            # Store reference bbox from first band (but keep using pre-ordained transform/shape)
+            if reference_bbox is None:
                 reference_bbox = new_bbox
     else:
         # No Landsat data available
         landsat_reprojected = {}
-        if config and config.analysis.calculate_indices_first and not config.analysis.use_legacy_indices:
-            # This is expected in index-first mode
-            pass
-        else:
-            print("⚠️  No Landsat bands available after temporal compositing")
+        # This is expected in index-first mode
 
     # Reproject VIIRS to target CRS first (like sync pipeline)
     viirs_reprojected = None
@@ -803,28 +780,28 @@ async def black_marble_pipeline(
         logger.debug(
             f"  Original VIIRS bounds: {rasterio.transform.array_bounds(viirs_corrected.shape[0], viirs_corrected.shape[1], viirs_profile['transform'])}"
         )
-        logger.debug(f"  Target CRS: {target_crs}")
+        logger.debug(f"  Target CRS: {processing_crs}")
 
         viirs_reprojected, viirs_transform, viirs_bounds = prepare.reproject_image(
             data=viirs_corrected,
             src_transform=viirs_profile["transform"],
             src_crs=viirs_profile["crs"],
-            dst_crs=target_crs,
+            dst_crs=processing_crs,
+            dst_transform=reference_transform,
+            dst_shape=reference_shape,
             resampling="bilinear",  # Use bilinear like sync pipeline
-            resolution=target_resolution_landsat,
         )
 
         logger.debug(f"  Reprojected VIIRS shape: {viirs_reprojected.shape}")
         logger.debug(f"  Reprojected VIIRS bounds: {viirs_bounds}")
 
-        # If no reference from Landsat, use VIIRS as reference
-        if reference_transform is None and viirs_transform is not None:
-            reference_transform = viirs_transform
-            reference_shape = viirs_reprojected.shape
-            # Keep the target_crs as UTM - VIIRS has already been reprojected to it
-            print(f"📍 Using VIIRS as reference grid (no Landsat reference available)")
-            print(f"   Reference CRS: {target_crs} (UTM)")
-            print(f"   Reference shape: {reference_shape}")
+        # We should NEVER use VIIRS as reference - we have a pre-ordained grid
+        # from create_processing_grid()
+        if reference_transform is None:
+            raise RuntimeError(
+                "Reference transform is None! This should never happen as we create "
+                "the processing grid at the start of the pipeline."
+            )
 
         # Align VIIRS to Landsat grid for consistent processing
         if reference_transform is not None and reference_shape is not None and landsat_reprojected:
@@ -903,110 +880,84 @@ async def black_marble_pipeline(
                     "Check tile selection and spatial footprints."
                 )
         else:
-            # No Landsat data to align to
-            if not landsat_reprojected and not (config and config.analysis.calculate_indices_first):
-                print("⚠️  WARNING: No Landsat data available for NDVI calculation!")
-                print("    Pipeline will continue but NDUI calculation will be limited")
+            # No reprojected Landsat bands to align to
+            # This is expected in indices-first mode where we calculate NDVI/NDWI before reprojection
+            if not landsat_reprojected:
+                logger.debug("No reprojected Landsat bands for VIIRS alignment (expected in indices-first mode)")
 
-    # Rasterize roads to match grid
-    roads_rasterized = None
+    # Rasterize roads to match grid (fractional only)
+    roads_fractional = None
     if road_network is not None and reference_shape is not None and reference_transform is not None:
         # Use the new CRS-aware road rasterization (like sync pipeline)
-        # Use 30m buffer to match default in osm.py - 5.5m was too small
-        buffer_meters = 30.0  # Buffer roads by 30 meters
+        # Use buffer sizes from config or default variable sizes
+        from blackmarble.acquire.osm_fractional import DEFAULT_BUFFER_BY_TYPE
 
-        print(f"Road buffering: {buffer_meters:.1f} meters (applied in UTM)")
-        print(f"Rasterizing to: {target_crs}")
+        if config and config.acquisition.osm_buffer_meters is not None:
+            buffer_meters = config.acquisition.osm_buffer_meters
+        else:
+            buffer_meters = DEFAULT_BUFFER_BY_TYPE  # Variable buffer by road type
+
+        if isinstance(buffer_meters, dict):
+            print(
+                f"Road buffering: Variable by type (motorway: {buffer_meters.get('motorway', 'N/A')}m, residential: {buffer_meters.get('residential', 'N/A')}m)"
+            )
+        else:
+            print(f"Road buffering: Uniform {buffer_meters}m")
+        print(f"Rasterizing to: {processing_crs}")
         print(f"Road network has {len(road_network.nodes)} nodes, {len(road_network.edges)} edges")
         print(f"Reference transform: {reference_transform}")
         print(f"Reference shape: {reference_shape}")
 
-        # Use fractional or binary road rasterization based on config
-        if config and config.analysis.osm_fractional:
-            # NEW: Fractional rasterization
-            print("  Using fractional road rasterization (5x5 sub-pixels)")
-            roads_fractional = acquire.buffer_and_rasterize_roads_fractional(
-                graph=road_network,
-                bbox=bbox,
-                transform=reference_transform,
-                crs=target_crs,
-                shape=(reference_shape[0], reference_shape[1]),
-                buffer_meters=buffer_meters,
-                sub_pixels=config.analysis.osm_sub_pixels,
-                hierarchical=False,  # Not supported for fractional
-            )
+        # Use fractional road rasterization
+        print("  Using fractional road rasterization (5x5 sub-pixels)")
+        roads_fractional = acquire.buffer_and_rasterize_roads_fractional(
+            graph=road_network,
+            bbox=bbox,
+            transform=reference_transform,
+            crs=processing_crs,
+            shape=(reference_shape[0], reference_shape[1]),
+            buffer_meters=buffer_meters,
+            sub_pixels=config.analysis.osm_sub_pixels if config else 5,
+            hierarchical=False,  # Not supported for fractional
+        )
 
-            # Print statistics
-            road_pixels = np.sum(roads_fractional > 0)
+        # Print statistics
+        road_pixels = np.sum(roads_fractional > 0)
+        print(
+            f"Rasterized {road_pixels} pixels with roads "
+            f"({road_pixels / roads_fractional.size * 100:.2f}%)"
+        )
+        if road_pixels > 0:
             print(
-                f"Rasterized {road_pixels} pixels with roads "
-                f"({road_pixels / roads_fractional.size * 100:.2f}%)"
+                f"Fractional coverage range: "
+                f"{roads_fractional[roads_fractional > 0].min():.3f} to "
+                f"{roads_fractional.max():.3f}"
             )
-            if road_pixels > 0:
-                print(
-                    f"Fractional coverage range: "
-                    f"{roads_fractional[roads_fractional > 0].min():.3f} to "
-                    f"{roads_fractional.max():.3f}"
-                )
-                print(
-                    f"Mean fractional coverage: {roads_fractional[roads_fractional > 0].mean():.3f}"
-                )
-            else:
-                print("⚠️  WARNING: No roads were rasterized! Check buffer size and CRS.")
-
-            # Save diagnostic
-            if getattr(config, "save_diagnostics", False):
-                prepare.save_diagnostic(
-                    roads_fractional,
-                    reference_transform,
-                    "data/diagnostics/roads_fractional.tif",
-                    "Fractional road coverage (0.0-1.0)",
-                    crs=target_crs,
-                )
-
-            roads_rasterized = None
+            print(
+                f"Mean fractional coverage: {roads_fractional[roads_fractional > 0].mean():.3f}"
+            )
         else:
-            # LEGACY: Binary hierarchical rasterization
-            roads_rasterized = acquire.buffer_and_rasterize_roads(
-                graph=road_network,
-                bbox=bbox,
-                transform=reference_transform,
-                crs=target_crs,
-                shape=(reference_shape[0], reference_shape[1]),
-                buffer_meters=buffer_meters,
-                hierarchical=True,  # Use hierarchical road classification
+            print("⚠️  WARNING: No roads were rasterized! Check buffer size and CRS.")
+
+        # Save diagnostic
+        if config and getattr(config, "save_diagnostics", False):
+            prepare.save_diagnostic(
+                roads_fractional,
+                reference_transform,
+                "data/diagnostics/roads_fractional.tif",
+                "Fractional road coverage (0.0-1.0)",
+                crs=processing_crs,
             )
-
-            # Print statistics
-            road_pixels = np.sum(roads_rasterized > 0)
-            print(
-                f"Rasterized {road_pixels} pixels "
-                f"({road_pixels / roads_rasterized.size * 100:.2f}%)"
-            )
-
-            # Save diagnostic output if requested
-            if config and getattr(config, "save_diagnostics", False):
-                road_diagnostic = roads_rasterized.astype(np.float32)
-                prepare.save_diagnostic(
-                    road_diagnostic,
-                    reference_transform,
-                    "data/diagnostics/roads_rasterized.tif",
-                    "Rasterized road network",
-                    crs=target_crs,
-                )
-
-            roads_fractional = None
     else:
         # No road network data
         print("  No road network data available")
         if reference_shape is not None:
-            roads_rasterized = np.zeros(reference_shape, dtype="uint8")
             roads_fractional = np.zeros(reference_shape, dtype="float32")
         else:
-            # This should never happen if we have any data
+            # This should never happen since we create the processing grid at the start
             raise RuntimeError(
                 "No reference shape available for road rasterization. "
-                "This indicates no Landsat or VIIRS data was successfully processed."
+                "This should never happen as we create the processing grid at the start of the pipeline."
             )
 
     # Save diagnostic composite bands if requested
@@ -1024,7 +975,7 @@ async def black_marble_pipeline(
                     reference_transform,
                     output_path,
                     f"Landsat {band_name} Temporal Composite",
-                    crs=target_crs,
+                    crs=processing_crs,
                 )
 
                 # Log statistics
@@ -1043,94 +994,49 @@ async def black_marble_pipeline(
     # Calculate spectral indices
     ndvi = None
     ndwi = None
-    
-    # Check if we already have indices from index-first calculation
-    if config and config.analysis.calculate_indices_first and not config.analysis.use_legacy_indices:
-        # We already have composited indices - just need to reproject them
-        if ndvi_composite is not None and reference_profile is not None:
-            print("  Reprojecting pre-calculated NDVI composite...")
-            print(f"    Using reference grid: {reference_shape}")
-            ndvi, ndvi_transform, _ = prepare.reproject_image(
-                data=ndvi_composite,
+
+    # We already have composited indices - just need to reproject them
+    if ndvi_composite is not None and reference_profile is not None:
+        print("  Reprojecting pre-calculated NDVI composite...")
+        print(f"    Using reference grid: {reference_shape}")
+        ndvi, ndvi_transform, _ = prepare.reproject_image(
+            data=ndvi_composite,
+            src_transform=reference_profile["transform"],
+            src_crs=reference_profile["crs"],
+            dst_crs=processing_crs,
+            dst_transform=reference_transform,
+            dst_shape=reference_shape,
+            resampling="bilinear",
+        )
+        print(f"    Reprojected NDVI shape: {ndvi.shape}")
+
+        # Also reproject the high-percentile NDVI for NDUI if different
+        if ndvi_for_ndui is not None and ndvi_for_ndui is not ndvi_composite:
+            ndvi_for_ndui_reprojected, _, _ = prepare.reproject_image(
+                data=ndvi_for_ndui,
                 src_transform=reference_profile["transform"],
                 src_crs=reference_profile["crs"],
-                dst_crs=target_crs,
+                dst_crs=processing_crs,
                 dst_transform=reference_transform,
                 dst_shape=reference_shape,
                 resampling="bilinear",
             )
-            print(f"    Reprojected NDVI shape: {ndvi.shape}")
-            
-            # Also reproject the high-percentile NDVI for NDUI if different
-            if ndvi_for_ndui is not None and ndvi_for_ndui is not ndvi_composite:
-                ndvi_for_ndui_reprojected, _, _ = prepare.reproject_image(
-                    data=ndvi_for_ndui,
-                    src_transform=reference_profile["transform"],
-                    src_crs=reference_profile["crs"],
-                    dst_crs=target_crs,
-                    dst_transform=reference_transform,
-                    dst_shape=reference_shape,
-                    resampling="bilinear",
-                )
-            else:
-                ndvi_for_ndui_reprojected = ndvi
-                
-        if ndwi_composite is not None and reference_profile is not None:
-            print("  Reprojecting pre-calculated NDWI composite...")
-            print(f"    Using reference grid: {reference_shape}")
-            ndwi, ndwi_transform, _ = prepare.reproject_image(
-                data=ndwi_composite,
-                src_transform=reference_profile["transform"],
-                src_crs=reference_profile["crs"],
-                dst_crs=target_crs,
-                dst_transform=reference_transform,
-                dst_shape=reference_shape,
-                resampling="bilinear",
-            )
-            print(f"    Reprojected NDWI shape: {ndwi.shape}")
-            
-        # Update reference transform if we have it from NDVI
-        if ndvi is not None and reference_transform is None:
-            # Get the transform from the reprojected NDVI
-            # Since we used prepare.reproject_image, the transform was returned
-            if 'ndvi_transform' in locals():
-                reference_transform = ndvi_transform
-                reference_shape = ndvi.shape
-            
-    # Legacy approach: calculate from band composites
-    elif "B5" in landsat_reprojected and "B4" in landsat_reprojected:
-        # DEBUG: Check Landsat values before NDVI
-        logger.debug("Landsat Values Before NDVI:")
-        logger.debug(
-            f"  B4 (red): min={np.nanmin(landsat_reprojected['B4']):.3f}, max={np.nanmax(landsat_reprojected['B4']):.3f}"
-        )
-        logger.debug(
-            f"  B4 negative pixels: {(landsat_reprojected['B4'] < 0).sum()} ({(landsat_reprojected['B4'] < 0).sum() / landsat_reprojected['B4'].size * 100:.1f}%)"
-        )
-        logger.debug(
-            f"  B5 (NIR): min={np.nanmin(landsat_reprojected['B5']):.3f}, max={np.nanmax(landsat_reprojected['B5']):.3f}"
-        )
-        logger.debug(
-            f"  B5 negative pixels: {(landsat_reprojected['B5'] < 0).sum()} ({(landsat_reprojected['B5'] < 0).sum() / landsat_reprojected['B5'].size * 100:.1f}%)"
-        )
+        else:
+            ndvi_for_ndui_reprojected = ndvi
 
-        ndvi = analyze.calculate_ndvi(nir=landsat_reprojected["B5"], red=landsat_reprojected["B4"])
-
-        # Save diagnostic output if requested
-        if config and getattr(config, "save_diagnostics", False) and ndvi is not None:
-            prepare.save_diagnostic(
-                ndvi,
-                reference_transform,
-                "data/diagnostics/ndvi.tif",
-                "NDVI (reprojected to target CRS)",
-                crs=target_crs,
-            )
-
-    # Legacy NDWI calculation
-    if ndwi is None and "B3" in landsat_reprojected and "B5" in landsat_reprojected:
-        ndwi = analyze.calculate_ndwi(
-            green=landsat_reprojected["B3"], nir=landsat_reprojected["B5"]
+    if ndwi_composite is not None and reference_profile is not None:
+        print("  Reprojecting pre-calculated NDWI composite...")
+        print(f"    Using reference grid: {reference_shape}")
+        ndwi, ndwi_transform, _ = prepare.reproject_image(
+            data=ndwi_composite,
+            src_transform=reference_profile["transform"],
+            src_crs=reference_profile["crs"],
+            dst_crs=processing_crs,
+            dst_transform=reference_transform,
+            dst_shape=reference_shape,
+            resampling="bilinear",
         )
+        print(f"    Reprojected NDWI shape: {ndwi.shape}")
 
         # Save diagnostic output if requested
         if config and getattr(config, "save_diagnostics", False) and ndwi is not None:
@@ -1139,7 +1045,7 @@ async def black_marble_pipeline(
                 reference_transform,
                 "data/diagnostics/ndwi.tif",
                 "NDWI (reprojected to target CRS)",
-                crs=target_crs,
+                crs=processing_crs,
             )
 
     # For now, we only have single date VIIRS, so no temporal compositing
@@ -1183,7 +1089,7 @@ async def black_marble_pipeline(
                     reference_transform,
                     "data/diagnostics/urban_field.tif",
                     "Multi-scale urban density field",
-                    crs=target_crs,
+                    crs=processing_crs,
                 )
 
             # Enhance NTL
@@ -1208,7 +1114,7 @@ async def black_marble_pipeline(
                     reference_transform,
                     "data/diagnostics/ntl_enhancement.tif",
                     "NTL enhancement from urban fields",
-                    crs=target_crs,
+                    crs=processing_crs,
                 )
 
             ntl_composite = ntl_enhanced
@@ -1219,173 +1125,33 @@ async def black_marble_pipeline(
             else:
                 print("  No pixels enhanced (no roads with sufficient density)")
 
-        elif (
-            enhancement_approach == "urban_field"
-            and roads_rasterized is not None
-            and not (config and config.analysis.osm_fractional)
-        ):
-            # Urban field approach but only binary roads available - convert to pseudo-fractional
-            print("\n🌃 Enhancing NTL with urban fields (binary roads converted to fractional)")
 
-            # Convert binary road mask to fractional (0 or 1)
-            roads_fractional_pseudo = roads_rasterized.astype(np.float32)
-            roads_fractional_pseudo[roads_fractional_pseudo > 0] = 1.0
-
-            # Compute urban fields from pseudo-fractional roads
-            urban_field = analyze.compute_urban_fields(
-                road_fraction=roads_fractional_pseudo,
-                sigmas=config.analysis.urban_field_sigmas if config else [2.0, 5.0, 10.0],
-                weights=config.analysis.urban_field_weights if config else [0.5, 0.3, 0.2],
-            )
-
-            # Enhance NTL
-            ntl_enhanced = analyze.enhance_ntl_with_urban_field(
-                ntl=ntl_composite,
-                urban_field=urban_field,
-                enhancement_mode=config.analysis.ntl_enhancement_mode if config else "hybrid",
-                multiplicative_factor=config.analysis.enhancement_multiplicative_factor
-                if config
-                else 0.3,
-                additive_factor=config.analysis.enhancement_additive_factor if config else 0.02,
-                hybrid_expected_scale=config.analysis.enhancement_hybrid_expected_scale
-                if config
-                else 0.2,
-                hybrid_expected_sqrt_scale=config.analysis.enhancement_hybrid_expected_sqrt_scale
-                if config
-                else 0.1,
-                hybrid_application_factor=config.analysis.enhancement_hybrid_application_factor
-                if config
-                else 1.0,
-            )
-
-            enhancement = ntl_enhanced - ntl_composite
-            ntl_composite = ntl_enhanced
-            enhanced_pixels = np.sum(enhancement > 0)
-            if enhanced_pixels > 0:
-                print(f"  Enhanced {enhanced_pixels} pixels")
-                print(f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}")
-
-        elif enhancement_approach == "legacy_burn" and (
-            roads_rasterized is not None or roads_fractional is not None
-        ):
-            # LEGACY BURN-IN ENHANCEMENT
-            print("\n🛣️  Enhancing NTL with road data (legacy burn-in)")
-
-            major_factor = config.analysis.legacy_major_road_factor if config else 1.3
-            minor_factor = config.analysis.legacy_minor_road_factor if config else 1.1
-
-            if roads_fractional is not None and config and config.analysis.osm_fractional:
-                # Use fractional roads for burn-in
-                print("  Using fractional road coverage for burn-in")
-                ntl_enhanced = ntl_composite.copy()
-
-                # The fractional value represents the percentage of pixel covered by roads
-                # Apply enhancement proportionally
-                # For pixels with roads, enhance by: 1 + (factor - 1) * coverage
-                # This gives smooth transitions: 0% coverage = 1x, 100% coverage = factor
-                # roads_fractional is always a numpy array with float values
-                # Simple fractional coverage (0-1), use average of factors
-                avg_factor = (major_factor + minor_factor) / 2
-                enhancement_factor = 1 + (avg_factor - 1) * roads_fractional
-                ntl_enhanced = ntl_composite * enhancement_factor
-
-            else:
-                # Use binary roads
-                print("  Using binary road mask for burn-in")
-                ntl_enhanced = ntl_composite.copy()
-
-                # Apply enhancement based on road type
-                major_roads_mask = (roads_rasterized == 1) | (roads_rasterized == 4)
-                minor_roads_mask = (
-                    (roads_rasterized == 2)
-                    | (roads_rasterized == 3)
-                    | (roads_rasterized == 5)
-                    | (roads_rasterized == 6)
-                )
-
-                ntl_enhanced = np.where(
-                    major_roads_mask, ntl_composite * major_factor, ntl_enhanced
-                )
-                ntl_enhanced = np.where(
-                    minor_roads_mask, ntl_composite * minor_factor, ntl_enhanced
-                )
-
-            # Log statistics
-            enhancement = ntl_enhanced - ntl_composite
-            enhanced_pixels = np.sum(enhancement > 0)
-            if enhanced_pixels > 0:
-                print(
-                    f"  Enhanced {enhanced_pixels} pixels "
-                    f"({enhanced_pixels / ntl_composite.size * 100:.1f}%)"
-                )
-                # Show appropriate statistics based on road type
-                if roads_rasterized is not None and not (
-                    roads_fractional is not None and config and config.analysis.osm_fractional
-                ):
-                    # Binary roads - show road type breakdown
-                    # Calculate masks for statistics
-                    major_roads_mask_stats = (roads_rasterized == 1) | (roads_rasterized == 4)
-                    minor_roads_mask_stats = (
-                        (roads_rasterized == 2)
-                        | (roads_rasterized == 3)
-                        | (roads_rasterized == 5)
-                        | (roads_rasterized == 6)
-                    )
-                    print(
-                        f"  Major roads ({major_factor}x): {np.sum(major_roads_mask_stats)} pixels"
-                    )
-                    print(
-                        f"  Minor roads ({minor_factor}x): {np.sum(minor_roads_mask_stats)} pixels"
-                    )
-                else:
-                    # Fractional roads - show coverage statistics
-                    if roads_fractional is not None:
-                        coverage_pixels = np.sum(roads_fractional > 0)
-                        avg_coverage = (
-                            np.mean(roads_fractional[roads_fractional > 0])
-                            if coverage_pixels > 0
-                            else 0
-                        )
-                        print(
-                            f"  Road coverage: {coverage_pixels} pixels "
-                            f"with avg {avg_coverage:.1%} coverage"
-                        )
-                print(f"  Mean enhancement: {np.mean(enhancement[enhancement > 0]):.3f}")
-
-            # Save enhancement diagnostic
-            if config and getattr(config, "save_diagnostics", False):
-                prepare.save_diagnostic(
-                    enhancement,
-                    reference_transform,
-                    "data/diagnostics/ntl_road_enhancement.tif",
-                    "NTL enhancement from roads (binary)",
-                    crs=target_crs,
-                )
-
-            ntl_composite = ntl_enhanced
 
     # Verify all arrays are aligned to the reference grid
     if reference_transform is not None and reference_shape is not None:
         print(f"\\n✅ Verifying spatial alignment to reference grid {reference_shape}:")
-        
+
         if ndvi is not None and ndvi.shape != reference_shape:
             raise ValueError(
                 f"NDVI shape {ndvi.shape} does not match reference {reference_shape}. "
                 "This indicates a reprojection error."
             )
-        
+
         if ndwi is not None and ndwi.shape != reference_shape:
             raise ValueError(
                 f"NDWI shape {ndwi.shape} does not match reference {reference_shape}. "
                 "This indicates a reprojection error."
             )
-            
-        if ndvi_for_ndui_reprojected is not None and ndvi_for_ndui_reprojected.shape != reference_shape:
+
+        if (
+            ndvi_for_ndui_reprojected is not None
+            and ndvi_for_ndui_reprojected.shape != reference_shape
+        ):
             raise ValueError(
                 f"High-percentile NDVI shape {ndvi_for_ndui_reprojected.shape} does not match "
                 f"reference {reference_shape}. This indicates a reprojection error."
             )
-        
+
         print("  All arrays properly aligned!")
 
     # Calculate urban index combining NTL and vegetation
@@ -1393,12 +1159,14 @@ async def black_marble_pipeline(
     if ntl_composite is not None and ndvi is not None:
         # Use the appropriate NDVI for NDUI calculation
         ndvi_for_ndui_final = ndvi  # Default to regular NDVI
-        
+
         # Check if we have a special high-percentile NDVI for NDUI
         if ndvi_for_ndui_reprojected is not None:
             ndvi_for_ndui_final = ndvi_for_ndui_reprojected
-            print(f"  Using {config.analysis.ndvi_percentile_for_ndui}th percentile NDVI for NDUI vegetation correction")
-        
+            print(
+                f"  Using {config.analysis.ndvi_percentile_for_ndui}th percentile NDVI for NDUI vegetation correction"
+            )
+
         # Verify shapes match before calculating NDUI
         if ntl_composite.shape != ndvi_for_ndui_final.shape:
             print("WARNING: Shape mismatch after alignment!")
@@ -1422,7 +1190,9 @@ async def black_marble_pipeline(
             f"  NDVI non-NaN pixels: {(~np.isnan(ndvi_for_ndui_final)).sum()} "
             f"({(~np.isnan(ndvi_for_ndui_final)).sum() / ndvi_for_ndui_final.size * 100:.1f}%)"
         )
-        print(f"  NDVI range: [{np.nanmin(ndvi_for_ndui_final):.3f}, {np.nanmax(ndvi_for_ndui_final):.3f}]")
+        print(
+            f"  NDVI range (clamped to [0,1]): [{np.nanmin(ndvi_for_ndui_final):.3f}, {np.nanmax(ndvi_for_ndui_final):.3f}]"
+        )
 
         ndui = analyze.calculate_ndui(
             ntl=ntl_composite,
@@ -1453,7 +1223,7 @@ async def black_marble_pipeline(
                 reference_transform,
                 "data/diagnostics/ndui_raw.tif",
                 "NDUI (calculated with enhanced NTL)",
-                crs=target_crs,
+                crs=processing_crs,
             )
 
     # Create urban mask
@@ -1491,34 +1261,9 @@ async def black_marble_pipeline(
                 reference_transform,
                 "data/diagnostics/ntl_contrast_enhanced.tif",
                 "NTL after contrast enhancement",
-                crs=target_crs,
+                crs=processing_crs,
             )
 
-    # Enhance road networks in the NTL data
-    ntl_roads_enhanced = None
-    if ntl_enhanced is not None and roads_rasterized is not None:
-        ntl_roads_enhanced = enhance.enhance_roads(
-            data=ntl_enhanced,
-            road_mask=roads_rasterized,
-            major_factor=config.enhancement.road_major_factor if config else 1.3,
-            minor_factor=config.enhancement.road_minor_factor if config else 1.1,
-            custom_factors=config.enhancement.custom_road_factors if config else None,
-        )
-    else:
-        ntl_roads_enhanced = ntl_enhanced
-
-    # Enhance urban features
-    ntl_urban_enhanced = None
-    if ntl_roads_enhanced is not None and urban_mask is not None:
-        ntl_urban_enhanced = enhance.enhance_urban_features(
-            ntl_data=ntl_roads_enhanced,
-            urban_mask=urban_mask,
-            road_mask=roads_rasterized,
-            enhancement_factor=1.2,
-            road_factor=1.1,
-        )
-    else:
-        ntl_urban_enhanced = ntl_roads_enhanced
 
     # Apply color mapping for visualization
     # CRITICAL FIX: Use NDUI for colormap like sync pipeline, not NTL
@@ -1553,7 +1298,7 @@ async def black_marble_pipeline(
                 reference_transform,
                 "data/diagnostics/ndui_final_before_colormap.tif",
                 "Final NDUI before colormap",
-                crs=target_crs,
+                crs=processing_crs,
             )
 
     # Create false color composite for context (optional)
@@ -1576,7 +1321,7 @@ async def black_marble_pipeline(
         validation_results = export.validate_for_cog(
             data=ntl_colored,
             transform=reference_transform,
-            crs=target_crs,
+            crs=processing_crs,
             check_tiling=True,
             check_compression=True,
             check_overviews=True,
@@ -1620,7 +1365,7 @@ async def black_marble_pipeline(
         indices_calculated=["ndvi", "ndwi", "ndui"] if ndui is not None else [],
         date_processed=datetime.now(),
         bbox=bbox,
-        crs=target_crs,
+        crs=processing_crs,
         resolution=target_resolution_landsat,
     )
 
@@ -1639,7 +1384,7 @@ async def black_marble_pipeline(
             data=ntl_colored,
             output_path=output_path,
             transform=reference_transform,
-            crs=target_crs,
+            crs=processing_crs,
             metadata=metadata,
             compress=compress_setting,  # type: ignore[arg-type]
             tiled=config.export.tiled if config else True,
@@ -1664,7 +1409,7 @@ async def black_marble_pipeline(
             data=urban_mask.astype(np.uint8),
             output_path=output_path.replace(".tif", "_urban_mask.tif"),
             transform=reference_transform,
-            crs=target_crs,
+            crs=processing_crs,
             metadata={"band_name": "urban_mask"},
             compress=compress_setting,  # type: ignore[arg-type]
         )
@@ -1698,7 +1443,7 @@ async def black_marble_pipeline(
                 data=data,
                 output_path=output_path.replace(".tif", "_indices.tif"),
                 transform=reference_transform,
-                crs=target_crs,
+                crs=processing_crs,
                 metadata=metadata,
                 compress=compress_setting,  # type: ignore[arg-type]
                 nodata=np.nan,  # Properly handle NaN values from masking

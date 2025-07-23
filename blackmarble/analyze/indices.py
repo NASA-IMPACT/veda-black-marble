@@ -64,6 +64,10 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSI
         This function preserves NaN values in the input arrays, making it
         suitable for masked data. Output is NOT clamped to [-1, 1] to
         preserve extreme values that may indicate processing issues.
+        
+        For NDUI calculations in the Black Marble pipeline, negative NDVI 
+        values (water/bare soil/artificial surfaces) should be clamped to 0
+        as they should not contribute to the vegetation signal.
     """
 
     # Input validation
@@ -167,6 +171,10 @@ def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = LANDSAT_EP
     Note:
         NDWI is used extensively in the prepare.quality module for
         water masking operations. Positive values indicate water presence.
+        
+        For the Black Marble pipeline, negative NDWI values (dry soil,
+        built-up areas) should be clamped to 0 to focus on water features
+        and prevent negative values from affecting subsequent analysis.
     """
 
     # Input validation

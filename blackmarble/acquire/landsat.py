@@ -231,11 +231,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                 tiles_by_path[path] = []
             tiles_by_path[path].append(f"{path:03d}{t['row']:03d}")
 
-        logger.info(f"Searching {len(tiles)} tiles across {len(tiles_by_path)} paths")
-        print(f"📍 WRS tiles that should cover bbox {bbox}:")
-        print(f"   Total tiles: {len(tiles)}")
-        print(f"   Tiles: {sorted(tiles)}")
-        print(f"   Paths: {sorted(tiles_by_path.keys())}")
+        logger.info(f"Searching {len(tiles)} tiles across {len(tiles_by_path)} paths for year {year}")
 
         # Prepare for parallel operations
         scenes: list[dict[str, Any]] = []
@@ -251,10 +247,14 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
         sensor_prefix = f"{self.COLLECTION}/{self.LEVEL}/standard/oli-tirs/{year}/"
         
-        # Create progress bar
+        # Create progress bar with date range info
+        date_desc = f"{year}"
+        if date_range:
+            date_desc = f"{date_range[0].strftime('%Y-%m-%d')} to {date_range[1].strftime('%Y-%m-%d')}"
+        
         pbar = tqdm(
             total=None,
-            desc=f"🔍 Discovering Landsat scenes ({year})",
+            desc=f"🔍 Discovering Landsat scenes ({date_desc})",
             unit="scenes",
             leave=False
         )
@@ -299,13 +299,13 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                 scene_prefix = scene_info["Prefix"]
                 scene_id = scene_prefix.split("/")[-2]
 
-                # Parse scene date
+                # Parse scene date (acquisition date only)
                 try:
                     scene_date = datetime.strptime(scene_id.split("_")[3], "%Y%m%d")
                 except (ValueError, IndexError):
                     continue
 
-                # Apply date filter BEFORE downloading MTL
+                # Apply date filter based on acquisition date
                 if date_range:
                     if scene_date < date_range[0] or scene_date > date_range[1]:
                         async with stats_lock:
@@ -373,18 +373,12 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                         async with tiles_lock:
                             tiles_with_scenes.add(tile_id)
 
-        # No longer need semaphore since we're not downloading MTL files
-
         async def check_scene_cloud_cover(scene_info: dict[str, Any]) -> float:
-            """Check cloud cover based on tier (no MTL download needed)."""
-            scene_id = scene_info['scene_id']
-            # Simply use tier as quality indicator
-            if '_T1' in scene_id:
-                return 10.0  # Tier 1 scenes are high quality, assume low cloud cover
-            elif '_T2' in scene_id:
-                return 50.0  # Tier 2 scenes, assume high cloud cover to filter out
-            else:
-                return 100.0  # Unknown tier, filter out
+            """Get cloud cover from MTL metadata file."""
+            return await self.get_scene_cloud_cover(
+                scene_info['scene_prefix'], 
+                scene_info['scene_id']
+            )
 
         # First, list all paths in parallel to check which exist
         response = await self.list_s3_objects(sensor_prefix)
@@ -409,7 +403,11 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         # Check for missing tiles
         missing_tiles = set(tiles) - tiles_with_scenes
         if missing_tiles:
-            print(f"\n⚠️  WARNING: {len(missing_tiles)} tiles have NO scenes in {year}!")
+            if date_range:
+                date_str = f"between {date_range[0].strftime('%Y-%m-%d')} and {date_range[1].strftime('%Y-%m-%d')}"
+            else:
+                date_str = f"in {year}"
+            print(f"\n⚠️  WARNING: {len(missing_tiles)} tiles have NO scenes {date_str}!")
             print(f"   Missing tiles: {sorted(missing_tiles)}")
             for tile in sorted(missing_tiles):
                 path = int(tile[:3])
@@ -662,28 +660,26 @@ async def download_landsat(
             # Match scenes to requested dates
             for target_date in year_dates:
                 # Group scenes by tile for this date
-                scenes_by_tile: dict[str, dict[str, Any]] = {}
+                scenes_by_tile: dict[str, list[dict[str, Any]]] = {}
                 for scene in scenes:
                     tile_id = f"{scene['path']:03d}{scene['row']:03d}"
                     tiles_needed.add(tile_id)
 
                     diff = abs(scene["date"] - target_date)
                     if diff <= timedelta(days=window_days):
-                        if tile_id not in scenes_by_tile or diff < abs(
-                            scenes_by_tile[tile_id]["date"] - target_date
-                        ):
-                            scenes_by_tile[tile_id] = scene
+                        scenes_by_tile.setdefault(tile_id, []).append(scene)
 
                 # Add downloads for all tiles found
-                for tile_id, scene in scenes_by_tile.items():
-                    all_downloads.append(
-                        {
-                            "date": target_date,
-                            "scene": scene,
-                            "bands": bands,
-                            "tile_id": tile_id,
-                        }
-                    )
+                for tile_id, scene_list in scenes_by_tile.items():
+                    for scene in scene_list:
+                        all_downloads.append(
+                            {
+                                "date": target_date,
+                                "scene": scene,
+                                "bands": bands,
+                                "tile_id": tile_id,
+                            }
+                        )
 
                 # Log tiles not found for this date
                 missing_tiles = tiles_needed - set(scenes_by_tile.keys())

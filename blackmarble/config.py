@@ -20,7 +20,9 @@ class LandsatAcquisitionConfig:
     """Configuration for time-window based Landsat acquisition."""
 
     # Time window settings
-    window_days: int = 7 
+    window_days: int = (
+        5  # Search ±5 days from each target date (balanced approach)
+    )
 
     # Quality scoring weights (must sum to 1.0)
     quality_weights: dict[str, float] = field(
@@ -34,7 +36,7 @@ class LandsatAcquisitionConfig:
 
     # Minimum quality thresholds
     min_coverage_threshold: float = 0.7  # Minimum acceptable coverage
-    max_cloud_threshold: float = 80.0  # Maximum cloud cover percentage
+    max_cloud_threshold: float = 95.0  # Maximum cloud cover percentage (very permissive)
 
     # Seasonal filter (optional)
     seasonal_filter: Callable[[datetime], bool] | None = None
@@ -42,15 +44,19 @@ class LandsatAcquisitionConfig:
     # Scene selection preferences
     prefer_newer_sensors: bool = True  # Prefer L8/L9 over L7
     allow_incomplete_coverage: bool = False  # Allow partial tile coverage
-    
+
     # Date-grouped selection settings
-    # Design: With 12 dates × ±45 day windows throughout the year, we have ample
+    # Design: With 12 dates × ±8 day windows throughout the year, we ensure catching
     # opportunities to find dates with complete coverage. Therefore we prioritize:
-    # 1. Temporal consistency (tolerance_days=0) - all tiles from exact same date
+    # 1. Temporal consistency (tolerance_days=16) - all tiles from within 16 days
     # 2. Spatial completeness (require_complete_coverage=True) - no missing tiles
     # 3. Quality optimization - among complete dates, pick the one with lowest cloud cover
-    selection_strategy: Literal["per_tile", "date_grouped"] = "date_grouped"  # New default for spatial consistency
-    tolerance_days: float = 7.0  # Max days between scenes in same group (allows up to 7 days apart)
+    selection_strategy: Literal["per_tile", "date_grouped"] = (
+        "date_grouped"  # New default for spatial consistency
+    )
+    tolerance_days: float = (
+        10.0  # Max days between scenes in same group (balanced grouping)
+    )
     require_complete_coverage: bool = True  # Only consider dates with all required tiles
 
 
@@ -61,7 +67,7 @@ class AcquisitionConfig:
     # Landsat settings
     landsat_collection: int = 2
     landsat_level: str = "L2SP"
-    cloud_cover_max: float = 30.0
+    cloud_cover_max: float = 50.0  # More permissive to accept T2 scenes
     composite_months: int = 12  # Number of months for temporal composite
 
     # Landsat time-window acquisition configuration
@@ -75,7 +81,10 @@ class AcquisitionConfig:
     road_types: list[str] = field(
         default_factory=lambda: ["motorway", "trunk", "primary", "secondary"]
     )
-    osm_buffer: float = 0.00005  # Buffer distance for OSM roads in decimal degrees
+    osm_buffer: float = 0.00005  # Buffer distance for OSM roads in decimal degrees (deprecated)
+    osm_buffer_meters: float | dict[str, float] | None = (
+        None  # Buffer in meters (float) or dict by road type
+    )
 
     # AWS settings
     aws_credentials: dict[str, str] | None = None
@@ -100,7 +109,9 @@ class PreparationConfig:
     qa_dilation_radius: int = 3
     qa_cloud_strategy: Literal["conservative", "moderate", "permissive"] = "moderate"
     # Separate strategy for compositing vs final masking
-    qa_composite_strategy: Literal["conservative", "moderate", "permissive"] | None = None  # If None, uses qa_cloud_strategy
+    qa_composite_strategy: Literal["conservative", "moderate", "permissive"] | None = (
+        None  # If None, uses qa_cloud_strategy
+    )
     qa_composite_dilation: int | None = None  # If None, uses qa_dilation_radius
 
     # VIIRS corrections
@@ -132,21 +143,23 @@ class AnalysisConfig:
     composite_method: Literal["median", "mean", "max", "percentile"] = "median"
     composite_percentile: int | None = None
     min_valid_observations: int = 1
-    
+
     # Index calculation settings (for mathematical correctness)
     calculate_indices_first: bool = True  # Calculate indices per-date before compositing
     mask_low_denom: bool = True  # Return NaN for low denominators (preserves correctness)
-    
+
     # Index-specific composite methods for diagnostic/export purposes
     # Note: These do NOT affect NDUI calculation - see ndvi_percentile_for_ndui below
     ndvi_composite_method: Literal["median", "mean", "percentile"] = "median"
     ndvi_composite_percentile: float = 50.0  # Only used when method="percentile"
     ndwi_composite_method: Literal["median", "mean", "percentile"] = "median"
     ndwi_composite_percentile: float = 50.0
-    
+
     # NDUI-specific settings
-    ndvi_percentile_for_ndui: float = 85.0  # Always uses percentile method for vegetation correction
-    
+    ndvi_percentile_for_ndui: float = (
+        85.0  # Always uses percentile method for vegetation correction
+    )
+
     # Legacy compatibility
     use_legacy_indices: bool = False  # If True, uses old band-first calculation
 
@@ -240,13 +253,13 @@ class ExportConfig:
 @dataclass
 class MemoryConfig:
     """Configuration for memory management during processing."""
-    
+
     # Memory optimization settings
     delete_bands_after_indices: bool = True  # Delete band arrays after calculating indices
     gc_interval: int = 3  # Run garbage collection every N dates
     memory_warning_gb: float = 8.0  # Warn if memory usage exceeds this
     memory_limit_gb: float | None = None  # Hard limit - abort if exceeded
-    
+
     # Streaming options
     use_streaming: bool = True  # Process dates incrementally vs all at once
     batch_size: int | None = None  # Process dates in batches if set

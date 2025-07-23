@@ -32,6 +32,32 @@ ArrayLike = npt.NDArray[Any]
 Transform = Affine
 BBox = tuple[float, float, float, float]
 
+# Default buffer sizes by road type (in meters)
+DEFAULT_BUFFER_BY_TYPE = {
+    "motorway": 15,  # ~30m total width
+    "motorway_link": 12,
+    "trunk": 12,
+    "trunk_link": 10,
+    "primary": 8,  # ~16m total width
+    "primary_link": 6,
+    "secondary": 6,
+    "secondary_link": 5,
+    "tertiary": 5,
+    "tertiary_link": 4,
+    "residential": 3,  # ~6m total width
+    "service": 2,
+    "unclassified": 2,
+    "road": 2,
+    "living_street": 3,
+    "pedestrian": 2,
+    "track": 2,
+    "bus_guideway": 4,
+    "busway": 4,
+    "footway": 1,
+    "cycleway": 1,
+    "path": 1,
+}
+
 
 def buffer_and_rasterize_roads_fractional(
     graph: nx.MultiDiGraph,
@@ -39,7 +65,7 @@ def buffer_and_rasterize_roads_fractional(
     transform: Transform,
     crs: str | CRS,
     shape: tuple[int, int],
-    buffer_meters: float = 30.0,
+    buffer_meters: float | dict[str, float] = 30.0,
     sub_pixels: int = 5,
     hierarchical: bool = False,
 ) -> ArrayLike:
@@ -56,7 +82,7 @@ def buffer_and_rasterize_roads_fractional(
         transform: Target transform for 30m output
         crs: Target CRS
         shape: Target shape (height, width) at 30m
-        buffer_meters: Buffer distance in meters
+        buffer_meters: Buffer distance in meters (float) or dict mapping road types to buffer distances
         sub_pixels: Sub-pixels per dimension (5 = 5x5 = 25 total)
         hierarchical: If True, raises NotImplementedError
 
@@ -111,8 +137,36 @@ def buffer_and_rasterize_roads_fractional(
     utm_crs = edges_gdf.estimate_utm_crs()
     log.debug(f"Estimated UTM CRS for buffering: {utm_crs}")
     edges_utm = edges_gdf.to_crs(utm_crs)
-    edges_utm["geometry"] = edges_utm.geometry.buffer(buffer_meters)
-    log.debug(f"Buffered {len(edges_utm)} road segments")
+
+    # Apply variable buffering by road type
+    if isinstance(buffer_meters, dict):
+        # Use type-specific buffers
+        buffer_dict = buffer_meters
+        default_buffer = 3.0  # Default for unknown types
+
+        # Apply buffer based on highway type
+        def apply_buffer(row):
+            highway_type = row.get("highway", "unclassified")
+            if isinstance(highway_type, list):
+                highway_type = highway_type[0]
+            buffer_size = buffer_dict.get(str(highway_type), default_buffer)
+            return row.geometry.buffer(buffer_size)
+
+        edges_utm["geometry"] = edges_utm.apply(apply_buffer, axis=1)
+        log.debug(f"Applied variable buffering to {len(edges_utm)} road segments")
+
+        # Log buffer statistics
+        unique_types = edges_utm["highway"].value_counts() if "highway" in edges_utm.columns else {}
+        log.debug("Buffer sizes by road type:")
+        for road_type, count in unique_types.items():
+            if isinstance(road_type, list):
+                road_type = road_type[0]
+            buffer = buffer_dict.get(str(road_type), default_buffer)
+            log.debug(f"  {road_type}: {buffer}m ({count} segments)")
+    else:
+        # Use uniform buffer
+        edges_utm["geometry"] = edges_utm.geometry.buffer(buffer_meters)
+        log.debug(f"Buffered {len(edges_utm)} road segments with uniform {buffer_meters}m buffer")
 
     # Convert to target CRS for rasterization
     # Ensure CRS is properly formatted

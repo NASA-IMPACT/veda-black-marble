@@ -23,6 +23,8 @@ from shapely.geometry import mapping, shape
 from shapely.geometry import mapping as geom_to_dict
 from shapely.ops import transform
 
+# Import default buffer sizes from fractional module
+
 # Type aliases
 BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
 ArrayLike = npt.NDArray[Any]
@@ -61,6 +63,10 @@ def download_osm_roads(
             pbar.set_postfix({"nodes": G.number_of_nodes(), "edges": G.number_of_edges()})
 
             print(f"Downloaded {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+
+            # Add CRS attribute to graph to avoid warnings
+            G.graph["crs"] = "EPSG:4326"
+
             return G
         except Exception as e:
             print(f"Error downloading roads: {type(e).__name__}: {e}")
@@ -199,6 +205,10 @@ def fetch_road_network(
                     f"Loaded {graph.number_of_nodes()} nodes, "
                     f"{graph.number_of_edges()} edges from cache"
                 )
+
+                # Add CRS attribute to graph to avoid warnings
+                graph.graph["crs"] = "EPSG:4326"
+
                 return graph
             except Exception as e:
                 print(f"Failed to load cache: {e}. Downloading fresh data...")
@@ -299,10 +309,23 @@ def buffer_and_rasterize_roads(
     transform: Transform,
     crs: str | CRS,
     shape: tuple[int, int],
-    buffer_meters: float = 30.0,
+    buffer_meters: float | dict[str, float] = 30.0,
     hierarchical: bool = True,
 ) -> ArrayLike:
-    """Buffer and rasterize an existing road network graph."""
+    """Buffer and rasterize an existing road network graph.
+
+    Args:
+        graph: NetworkX graph of road network
+        bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
+        transform: Target transform
+        crs: Target CRS
+        shape: Target shape (height, width)
+        buffer_meters: Buffer distance in meters (float) or dict mapping road types to buffer distances
+        hierarchical: If True, use hierarchical road values; if False, use binary
+
+    Returns:
+        Array with road values (hierarchical or binary)
+    """
     # Check if graph has CRS info (fix for cached graphs without CRS)
     if not hasattr(graph, "graph") or "crs" not in graph.graph:
         import logging
@@ -322,6 +345,16 @@ def buffer_and_rasterize_roads(
     lat_center = (bbox[1] + bbox[3]) / 2
 
     buffered_shapes = []
+
+    # Set up buffer logic
+    if isinstance(buffer_meters, dict):
+        # Use type-specific buffers
+        buffer_dict = buffer_meters
+        default_buffer = 3.0  # Default for unknown types
+    else:
+        # Use uniform buffer
+        buffer_dict = None
+        default_buffer = buffer_meters
 
     if hierarchical:
         road_hierarchy = {
@@ -350,19 +383,36 @@ def buffer_and_rasterize_roads(
             value = road_hierarchy.get(str(highway_type), 6)
             geom_dict = geom_to_dict(edge.geometry)
 
+            # Get buffer size for this road type
+            if buffer_dict:
+                buffer_size = buffer_dict.get(str(highway_type), default_buffer)
+            else:
+                buffer_size = default_buffer
+
             buffered_geom = buffer_roads_in_utm(
                 geometry=geom_dict,
-                buffer_meters=buffer_meters,
+                buffer_meters=buffer_size,
                 lon_center=lon_center,
                 lat_center=lat_center,
             )
             buffered_shapes.append({"geometry": buffered_geom, "value": value})
     else:
         for _, edge in edges_gdf.iterrows():
+            highway_type = edge["highway"] if "highway" in edge else "unclassified"
+            if isinstance(highway_type, list):
+                highway_type = highway_type[0]
+
             geom_dict = geom_to_dict(edge.geometry)
+
+            # Get buffer size for this road type
+            if buffer_dict:
+                buffer_size = buffer_dict.get(str(highway_type), default_buffer)
+            else:
+                buffer_size = default_buffer
+
             buffered_geom = buffer_roads_in_utm(
                 geometry=geom_dict,
-                buffer_meters=buffer_meters,
+                buffer_meters=buffer_size,
                 lon_center=lon_center,
                 lat_center=lat_center,
             )

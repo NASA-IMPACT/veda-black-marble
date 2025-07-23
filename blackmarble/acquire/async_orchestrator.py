@@ -70,8 +70,8 @@ class DownloadPlan:
         """Create download plan from pipeline configuration"""
         # Calculate Landsat dates based on compositing period
         composite_months = 12  # Default
-        if config:
-            composite_months = getattr(config, "composite_history_months", 12)
+        if config and hasattr(config, "acquisition"):
+            composite_months = getattr(config.acquisition, "composite_months", 12)
 
         landsat_dates = [date]
 
@@ -310,6 +310,20 @@ class AsyncDownloadOrchestrator:
         logger.debug("Plan bands: %s", plan.landsat_bands)
         logger.info(f"Target dates: {[d.strftime('%Y-%m-%d') for d in plan.landsat_dates]}")
         logger.info(f"Search bbox: {plan.bbox}")
+        
+        # Print WRS tile info once
+        from .wrs_utils import get_wrs_tiles_for_bbox_tuple
+        try:
+            tile_dicts = get_wrs_tiles_for_bbox_tuple(plan.bbox)
+            tiles = [f"{t['path']:03d}{t['row']:03d}" for t in tile_dicts]
+            print(f"\n📍 WRS tiles that should cover bbox {plan.bbox}:")
+            print(f"   Total tiles: {len(tiles)}")
+            print(f"   Tiles: {sorted(tiles)}")
+            paths = sorted(set(t['path'] for t in tile_dicts))
+            print(f"   Paths: {paths}")
+            print()  # Empty line for readability
+        except Exception as e:
+            logger.warning(f"Could not determine WRS tiles: {e}")
 
         # Phase 1 ───────────────────────────────────────────────────────────
         # Discover best scenes (one coroutine per target date)
