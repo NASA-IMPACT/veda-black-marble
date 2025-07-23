@@ -134,7 +134,7 @@ class AnalysisConfig:
 
     # NDUI parameters (matches existing config.py)
     ntl_floor: float = 0.1
-    ntl_ceiling: float = 10.0
+    ntl_ceiling: float = 100.0  # Raised from 10.0 to better capture urban gradients
     ndui_floor: float = 0.02
     ndui_epsilon: float = 1e-6
 

@@ -8,16 +8,17 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
+import psutil
 from typing import Any
 
 import numpy as np
 import numpy.typing as npt
 import rasterio
+from rasterio.transform import array_bounds
 from osgeo import gdal
 
 from . import acquire, analyze, enhance, export, prepare
 from .config import PipelineConfig
-from .prepare.diagnostic import save_temporal_stack
 
 # Create logger for spatial debugging
 log = logging.getLogger("bm.spatial")
@@ -283,7 +284,6 @@ async def black_marble_pipeline(
     processing_crs, reference_transform, reference_shape = create_processing_grid(bbox, target_resolution_landsat)
     
     # Get bounds for display
-    from rasterio.transform import array_bounds
     bounds = array_bounds(reference_shape[0], reference_shape[1], reference_transform)
     
     print(f"  Target grid: {reference_shape} pixels")
@@ -325,17 +325,8 @@ async def black_marble_pipeline(
     # Track which tiles we actually have data for
     tiles_with_data = set()
 
-    # Add memory monitoring if available
-    monitor_memory = False
-    process = None
-    try:
-        import psutil
-
-        process = psutil.Process()
-        monitor_memory = True
-    except ImportError:
-        monitor_memory = False
-        print("Note: Install psutil for memory monitoring (pip install psutil)")
+    process = psutil.Process()
+    monitor_memory = True
 
     # Original in-memory processing
     print(f"\n💾 Processing {len(landsat_files_by_date)} Landsat dates")
@@ -523,52 +514,6 @@ async def black_marble_pipeline(
                 index_stacks["ndwi"].append(ndwi_date)
                 index_dates.append(target_date)
 
-                if config and getattr(config, "save_diagnostics", False):
-                    date_str = target_date.strftime("%Y%m%d")
-                    os.makedirs("data/diagnostics/per_date", exist_ok=True)
-
-                    prepare.save_diagnostic(
-                        ndvi_date,
-                        profile,
-                        f"data/diagnostics/per_date/ndvi_{date_str}.tif",
-                        f"NDVI for {date_str}",
-                    )
-
-                    prepare.save_diagnostic(
-                        ndwi_date,
-                        profile,
-                        f"data/diagnostics/per_date/ndwi_{date_str}.tif",
-                        f"NDWI for {date_str}",
-                    )
-
-                    prepare.save_diagnostic(
-                        b3_data,
-                        profile,
-                        f"data/diagnostics/per_date/B3_{date_str}.tif",
-                        f"Band 3 (Green) for {date_str}",
-                    )
-                    prepare.save_diagnostic(
-                        b4_data,
-                        profile,
-                        f"data/diagnostics/per_date/B4_{date_str}.tif",
-                        f"Band 4 (Red) for {date_str}",
-                    )
-                    prepare.save_diagnostic(
-                        b5_data,
-                        profile,
-                        f"data/diagnostics/per_date/B5_{date_str}.tif",
-                        f"Band 5 (NIR) for {date_str}",
-                    )
-
-                    valid_ndvi = ndvi_date[~np.isnan(ndvi_date)]
-                    if valid_ndvi.size > 0:
-                        print(
-                            f"    NDVI stats: min={np.min(valid_ndvi):.3f}, max={np.max(valid_ndvi):.3f}, "
-                            f"mean={np.mean(valid_ndvi):.3f}, coverage={valid_ndvi.size/ndvi_date.size*100:.1f}%"
-                        )
-                    else:
-                        print(f"    NDVI: No valid pixels!")
-
                 # Optional: Delete bands to save memory
                 if config.memory.delete_bands_after_indices:
                     del b3_data, b4_data, b5_data
@@ -591,17 +536,6 @@ async def black_marble_pipeline(
             print(
                 f"  Memory after date: {memory_gb:.1f} GB (index arrays in memory: {total_arrays})"
             )
-
-    # Persist per-date arrays for diagnostics
-    if config and getattr(config, "save_temporal_stack", False) and reference_profile is not None:
-        for bn, stack in band_stacks.items():
-            if stack:
-                save_temporal_stack(
-                    stack=stack,
-                    band_name=bn,
-                    dates=band_dates[bn],
-                    reference_profile=reference_profile,
-                )
 
     # Check which tiles we got vs expected
     if tiles_with_data:
@@ -1002,6 +936,16 @@ async def black_marble_pipeline(
     # For now, we only have single date VIIRS, so no temporal compositing
     ntl_composite = viirs_reprojected if viirs_reprojected is not None else None
 
+    # Save raw NTL diagnostic before enhancement
+    if config and getattr(config, "save_diagnostics", False) and ntl_composite is not None:
+        prepare.save_diagnostic(
+            ntl_composite,
+            reference_transform,
+            "data/diagnostics/ntl_raw.tif",
+            "Raw NTL values (before enhancement)",
+            crs=processing_crs,
+        )
+
     # ENHANCE NTL WITH ROADS (before NDUI calculation)
     # This is the correct place to apply road enhancement - to the NTL data itself,
     # not to the derived NDUI index
@@ -1127,14 +1071,16 @@ async def black_marble_pipeline(
             f"  NDVI range (clamped to [0,1]): [{np.nanmin(ndvi):.3f}, {np.nanmax(ndvi):.3f}]"
         )
 
+        # Get ceiling value for debug
+        ceiling_value = config.analysis.ntl_ceiling if config and hasattr(config, "analysis") else 10.0
+        print(f"\n🔍 DEBUG: Using ntl_ceiling = {ceiling_value}")
+        
         ndui = analyze.calculate_ndui(
             ntl=ntl_composite,
             ndvi=ndvi,
             ndwi=ndwi,  # Optional, can be None
             ntl_floor=config.analysis.ntl_floor if config and hasattr(config, "analysis") else 0.1,
-            ntl_ceiling=config.analysis.ntl_ceiling
-            if config and hasattr(config, "analysis")
-            else 10.0,
+            ntl_ceiling=ceiling_value,
             ndui_floor=config.analysis.ndui_floor
             if config and hasattr(config, "analysis")
             else 0.02,
@@ -1210,10 +1156,9 @@ async def black_marble_pipeline(
         print(f"  Data type: {ndui.dtype}")
 
         # Apply inferno colormap to NDUI with appropriate scale range
-        # Use 0.3-0.8 range to focus on urban areas (matching sync pipeline)
         ntl_colored = enhance.apply_inferno_colormap(
             data=ndui,
-            scale_range=(0.3, 0.8),  # Focus colormap on urban range for better contrast
+            scale_range=(0.3, 1.0),
         )
 
         # DIAGNOSTIC: Print data after colormap

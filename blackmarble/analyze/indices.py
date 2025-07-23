@@ -30,7 +30,6 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSI
     A minimum denominator threshold is applied to prevent extreme values.
 
     NDVI values interpretation:
-    - [-1, 0]: Water, clouds, snow, bare soil
     - [0, 0.2]: Sparse vegetation, bare soil
     - [0.2, 0.4]: Shrubs and grasslands
     - [0.4, 0.8]: Dense vegetation, forests
@@ -252,9 +251,8 @@ def calculate_ndui(
     handle the wide dynamic range of nighttime lights data.
 
     Args:
-        ntl: Nighttime light radiance values.
-            Can be either raw DN values (0-5000) or scaled nW/cm²/sr (0-50).
-            Function auto-detects based on range and scales if needed.
+        ntl: Nighttime light radiance values (raw DN values).
+            Values are divided by 10 to convert to nW/cm²/sr units.
         ndvi: NDVI values from calculate_ndvi(), range [-1, 1].
             Used to suppress vegetation areas.
         ndwi: Optional NDWI values for water masking.
@@ -300,20 +298,26 @@ def calculate_ndui(
     if ndwi is not None and ndwi.shape != ntl.shape:
         raise ValueError(f"NDWI shape {ndwi.shape} must match NTL shape {ntl.shape}")
 
-    # Step 1: Handle raw DN values if needed (auto-detect based on range)
-    # If max value > 100, assume raw DN values and scale by /10
-    if np.nanmax(ntl) > 100:
-        # Raw DN values - scale to nW/cm²/sr
-        ntl_scaled = ntl.astype(np.float32) / 10.0
-    else:
-        # Already scaled to nW/cm²/sr
-        ntl_scaled = ntl
+    # Step 1: Scale raw DN values to nW/cm²/sr (always divide by 10 like bm.py)
+    ntl_scaled = ntl.astype(np.float32) / 10.0
+    
+    # DEBUG: Print scaling info
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"NDUI DEBUG: ntl_ceiling = {ntl_ceiling}, ntl_floor = {ntl_floor}")
+    logger.info(f"NDUI DEBUG: Raw NTL range: [{np.nanmin(ntl):.1f}, {np.nanmax(ntl):.1f}]")
+    logger.info(f"NDUI DEBUG: Scaled NTL range: [{np.nanmin(ntl_scaled):.1f}, {np.nanmax(ntl_scaled):.1f}]")
 
     # Step 2: Apply floor/ceiling and normalize by ceiling (like bm.py)
     # First clip to ceiling
     ntl_clipped = np.where(ntl_scaled > ntl_ceiling, ntl_ceiling, ntl_scaled)
     # Then apply floor
     ntl_clipped = np.where(ntl_clipped < ntl_floor, 0.0, ntl_clipped)
+    
+    # DEBUG: Check clipping effect
+    num_clipped = np.sum(ntl_scaled > ntl_ceiling)
+    logger.info(f"NDUI DEBUG: Pixels clipped at ceiling: {num_clipped} ({num_clipped/ntl.size*100:.1f}%)")
+    
     # Normalize by dividing by ceiling (not range)
     # This ceiling-only normalization keeps the 0-1 scale invariant when ceiling
     # is tuned year-to-year, as physical zero is unambiguous unlike the floor
