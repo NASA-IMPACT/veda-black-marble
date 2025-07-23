@@ -48,11 +48,6 @@ def run(
         "-d",
         help="Save diagnostic intermediate outputs to data/diagnostics/",
     ),
-    landsat_composite_method: str = typer.Option(
-        "mean",
-        "--composite-method",
-        help="Method for creating Landsat composites: 'mean' (smooth, no edges) or 'median' (robust but hard edges)",
-    ),
     log_level: str = typer.Option(
         "INFO",
         "--log-level",
@@ -158,9 +153,6 @@ def run(
     config.analysis.ntl_enhancement_mode = "multiplicative"
     typer.echo("🌃 NTL enhancement: Urban field (multiplicative mode)")
     typer.echo(f"   Urban field scales: {config.analysis.urban_field_sigmas} pixels")
-
-    # Set compositing method
-    config.landsat_composite_method = landsat_composite_method
 
     # Display processing info
     typer.echo("\nStarting Black Marble pipeline:")

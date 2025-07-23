@@ -625,42 +625,35 @@ async def black_marble_pipeline(
                 # This is a fallback - ideally we should have saved profiles with indices
                 logger.info("    Creating fallback reference profile from index shape")
 
-        # Create band composites from the stacks
-        logger.info("  Creating band composites...")
+        # Use bands from a single reference date for visualization
+        # We'll use the first date that has all bands available
         landsat_bands = {}
-        
-        composite_method = config.landsat_composite_method if config else "mean"
-        logger.info(f"  Using {composite_method} method for band compositing")
-        
-        for band_name in ["B3", "B4", "B5"]:
-            if band_stacks[band_name]:
-                logger.debug(f"  Creating {band_name} composite from {len(band_stacks[band_name])} dates")
-                
-                # Stack arrays and compute composite
-                stacked = np.stack(band_stacks[band_name], axis=0)
-                
-                if composite_method == "mean":
-                    # Use nanmean to handle masked/invalid pixels
-                    composite = np.nanmean(stacked, axis=0)
-                elif composite_method == "median":
-                    # Use nanmedian for more robust compositing
-                    composite = np.nanmedian(stacked, axis=0)
-                else:
-                    raise ValueError(f"Unknown composite method: {composite_method}")
-                
-                # Use the reference profile we saved earlier
-                if reference_profile is not None:
-                    landsat_bands[band_name] = (composite, reference_profile)
-                else:
-                    logger.warning(f"  No reference profile for {band_name} composite")
-                
-                # Log statistics
-                valid_pixels = ~np.isnan(composite)
-                if valid_pixels.any():
-                    logger.debug(
-                        f"  {band_name}: min={np.nanmin(composite):.3f}, max={np.nanmax(composite):.3f}, "
-                        f"coverage={valid_pixels.sum() / composite.size * 100:.1f}%"
-                    )
+        if band_stacks["B3"] and band_stacks["B4"] and band_stacks["B5"]:
+            # Find a date that has all three bands with good coverage
+            best_idx = 0
+            best_coverage = 0
+            
+            for idx in range(len(band_stacks["B3"])):
+                if idx < len(band_stacks["B4"]) and idx < len(band_stacks["B5"]):
+                    # Calculate combined coverage for this date
+                    b3_valid = ~np.isnan(band_stacks["B3"][idx])
+                    b4_valid = ~np.isnan(band_stacks["B4"][idx])
+                    b5_valid = ~np.isnan(band_stacks["B5"][idx])
+                    combined_valid = b3_valid & b4_valid & b5_valid
+                    coverage = combined_valid.sum() / combined_valid.size
+                    
+                    if coverage > best_coverage:
+                        best_coverage = coverage
+                        best_idx = idx
+            
+            logger.info(f"  Using bands from date index {best_idx} (coverage: {best_coverage*100:.1f}%)")
+            
+            if reference_profile is not None:
+                landsat_bands["B3"] = (band_stacks["B3"][best_idx], reference_profile)
+                landsat_bands["B4"] = (band_stacks["B4"][best_idx], reference_profile)
+                landsat_bands["B5"] = (band_stacks["B5"][best_idx], reference_profile)
+            else:
+                logger.warning("  No reference profile available for bands")
 
         landsat_reprojected = {}
 
@@ -894,21 +887,21 @@ async def black_marble_pipeline(
                 "This should never happen as we create the processing grid at the start of the pipeline."
             )
 
-    # Save diagnostic composite bands if requested
+    # Save diagnostic bands if requested
     if config and getattr(config, "save_diagnostics", False) and landsat_reprojected:
         diagnostic_bands = ["B3", "B4", "B5"]  # Always save Green, Red, NIR bands for diagnostics
-        logger.info("💾 Saving diagnostic composite bands: %s", diagnostic_bands)
+        logger.info("💾 Saving diagnostic Landsat bands: %s", diagnostic_bands)
 
         for band_name in diagnostic_bands:
             if band_name in landsat_reprojected:
                 band_data = landsat_reprojected[band_name]
-                output_path = f"data/diagnostics/composite_{band_name}.tif"
+                output_path = f"data/diagnostics/landsat_{band_name}.tif"
 
                 prepare.save_diagnostic(
                     band_data,
                     reference_transform,
                     output_path,
-                    f"Landsat {band_name} Temporal Composite",
+                    f"Landsat {band_name} Reference Date",
                     crs=processing_crs,
                 )
 

@@ -223,9 +223,6 @@ class PipelineConfig:
     save_diagnostics: bool = False
     save_temporal_stack: bool = True  # Persist per-date Landsat arrays before compositing
 
-    # Compositing options
-    landsat_composite_method: str = "mean"  # "mean" or "median"
-
     @classmethod
     def for_bm_parity(cls, bbox: BBox, date: datetime, output_path: str) -> "PipelineConfig":
         """Create configuration that exactly matches legacy bm.py behavior.
