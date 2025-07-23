@@ -34,7 +34,7 @@ BBox = tuple[float, float, float, float]
 #  via get_logger(__name__) above.)
 
 
-def quick_stats(data: ArrayLike, label: str) -> None:
+def quick_stats(data: ArrayLike | None, label: str) -> None:
     """Log array statistics for debugging."""
     if data is None:
         logger.debug(f"{label}: None")
@@ -1378,9 +1378,62 @@ async def black_marble_pipeline(
     }
 
 
-# Sync wrapper for CLI convenience
-def black_marble_pipeline_sync(**kwargs):
-    """Synchronous wrapper for the async pipeline."""
+def black_marble_pipeline_sync(
+    bbox: BBox,
+    date: datetime,
+    output_path: str,
+    config: PipelineConfig | None = None,
+    earthdata_token: str | None = None,
+) -> dict[str, Any]:
+    """Synchronous wrapper for the async Black Marble pipeline.
+    
+    This is a convenience function for using the pipeline in synchronous contexts
+    like Jupyter notebooks or scripts that don't use async/await.
+    
+    Args:
+        bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
+        date: Target date for processing
+        output_path: Where to save the final output
+        config: Optional configuration overrides
+        earthdata_token: NASA Earthdata token (or set EARTHDATA_TOKEN env var)
+        
+    Returns:
+        Dictionary with results and metadata
+        
+    Example:
+        >>> from datetime import datetime
+        >>> from blackmarble.pipeline import black_marble_pipeline_sync
+        >>> 
+        >>> # Process data for Madrid
+        >>> result = black_marble_pipeline_sync(
+        ...     bbox=(-3.8, 40.3, -3.6, 40.5),
+        ...     date=datetime(2023, 6, 15),
+        ...     output_path="madrid_nightlights.tif"
+        ... )
+        >>> print(f"Output saved to: {result['output_path']}")
+        
+    Note:
+        This function automatically handles environments with existing event loops
+        (like Jupyter notebooks) by using nest_asyncio when needed.
+    """
     import asyncio
-
-    return asyncio.run(black_marble_pipeline(**kwargs))
+    
+    # Check if there's already a running event loop
+    try:
+        asyncio.get_running_loop()
+        # There's already a loop running - use nest_asyncio
+        import nest_asyncio
+        nest_asyncio.apply()
+    except RuntimeError:
+        # No event loop running - asyncio.run will work fine
+        pass
+    
+    return asyncio.run(
+        black_marble_pipeline(
+            bbox=bbox,
+            date=date,
+            output_path=output_path,
+            config=config,
+            earthdata_token=earthdata_token,
+        )
+    )
