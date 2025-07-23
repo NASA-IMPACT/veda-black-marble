@@ -76,7 +76,7 @@ def run(
         "hybrid",
         "--ntl-enhancement",
         help="NTL enhancement method: 'hybrid' (urban field with dynamic scaling), "
-        "'multiplicative' (urban field), 'additive' (urban field), or 'legacy' (direct burn-in).",
+        "'multiplicative' (urban field), or 'additive' (urban field).",
     ),
 ):
     """
@@ -179,7 +179,7 @@ def run(
         )
 
     # Configure NTL enhancement
-    valid_enhancements = ["hybrid", "additive", "multiplicative", "legacy"]
+    valid_enhancements = ["hybrid", "additive", "multiplicative"]
     if ntl_enhancement not in valid_enhancements:
         typer.echo(
             f"Error: Invalid NTL enhancement '{ntl_enhancement}'. "
@@ -188,20 +188,15 @@ def run(
         )
         raise typer.Exit(code=1)
 
-    if ntl_enhancement == "legacy":
-        config.analysis.ntl_enhancement_approach = "legacy_burn"
-        typer.echo("🔥 NTL enhancement: Legacy burn-in (1.3x major roads, 1.1x minor roads)")
-    else:
-        config.analysis.ntl_enhancement_approach = "urban_field"
-        # Type narrow the enhancement mode
-        from typing import Literal, cast
+    # Type narrow the enhancement mode
+    from typing import Literal, cast
 
-        config.analysis.ntl_enhancement_mode = cast(
-            Literal["multiplicative", "additive", "hybrid"], ntl_enhancement
-        )
-        typer.echo(f"🌃 NTL enhancement: Urban field ({ntl_enhancement} mode)")
-        if fractional_roads:
-            typer.echo(f"   Urban field scales: {config.analysis.urban_field_sigmas} pixels")
+    config.analysis.ntl_enhancement_mode = cast(
+        Literal["multiplicative", "additive", "hybrid"], ntl_enhancement
+    )
+    typer.echo(f"🌃 NTL enhancement: Urban field ({ntl_enhancement} mode)")
+    if fractional_roads:
+        typer.echo(f"   Urban field scales: {config.analysis.urban_field_sigmas} pixels")
 
     # Set compositing method
     config.landsat_composite_method = landsat_composite_method

@@ -164,14 +164,7 @@ class AnalysisConfig:
     osm_sub_pixels: int = 5  # Sub-pixels per dimension (5x5 = 25 total)
     osm_all_touched: bool = True  # For legacy binary rasterization
 
-    # NTL enhancement approach
-    ntl_enhancement_approach: Literal["legacy_burn", "urban_field"] = "urban_field"
-    # - "legacy_burn": Direct multiplication at road pixels (1.3x major, 1.1x minor)
-    # - "urban_field": Multi-scale Gaussian field-based enhancement
-
-    # Legacy burn-in factors (used when approach="legacy_burn")
-    legacy_major_road_factor: float = 1.3  # Factor for major roads
-    legacy_minor_road_factor: float = 1.1  # Factor for minor roads
+    # NTL enhancement uses multi-scale Gaussian field-based enhancement
 
     # Urban field computation (used when approach="urban_field")
     urban_field_sigmas: list[float] = field(
@@ -200,11 +193,6 @@ class EnhancementConfig:
 
     # Enhancement mode
     quality_mode: Literal["basic", "enhanced"] = "basic"
-
-    # Road enhancement (matches existing config.py for bm.py parity)
-    road_major_factor: float = 1.3
-    road_minor_factor: float = 1.1
-    custom_road_factors: dict[int, float] | None = None
 
     # Contrast enhancement
     contrast_method: Literal["linear", "percentile"] = "linear"
@@ -318,8 +306,6 @@ class PipelineConfig:
                 quality_mode="basic",
                 contrast_method="linear",
                 colormap="inferno",
-                road_major_factor=1.3,
-                road_minor_factor=1.1,
             ),
             analysis=AnalysisConfig(ntl_floor=0.1, ntl_ceiling=10.0, ndui_floor=0.02),
             export=ExportConfig(generate_web_image=True, validate_before_export=False),

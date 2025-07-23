@@ -428,8 +428,8 @@ async def black_marble_pipeline(
         print(f"  Calculating indices for {target_date.strftime('%Y-%m-%d')}")
         if "B5" in processed_data and "B4" in processed_data and "B3" in processed_data:
                 # Get the masked data
-                b3_data, b3_profile = processed_data["B3"]
-                b4_data, b4_profile = processed_data["B4"]
+                b3_data, _ = processed_data["B3"]
+                b4_data, _ = processed_data["B4"]
                 b5_data, profile = processed_data["B5"]
                 
                 # DEBUG: Log shapes
@@ -897,11 +897,10 @@ async def black_marble_pipeline(
         )
 
     if ntl_composite is not None:
-        enhancement_approach = config.analysis.ntl_enhancement_approach if config else "urban_field"
+        # NTL enhancement now always uses urban field approach
 
         if (
-            enhancement_approach == "urban_field"
-            and config
+            config
             and config.analysis.osm_fractional
             and roads_fractional is not None
         ):

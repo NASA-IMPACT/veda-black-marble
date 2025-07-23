@@ -1,12 +1,10 @@
 """Enhancement module for Black Marble pipeline."""
 
 from .contrast import enhance_contrast
-from .features import enhance_roads
 from .visualize import apply_inferno_colormap, create_false_color_composite
 
 __all__ = [
     "enhance_contrast",
-    "enhance_roads",
     "apply_inferno_colormap",
     "create_false_color_composite",
 ]

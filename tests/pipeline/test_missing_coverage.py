@@ -1,9 +1,8 @@
-"""Tests for the 3 remaining uncovered processing steps in the pipeline.
+"""Tests for the 2 remaining uncovered processing steps in the pipeline.
 
 These tests cover:
 1. Binary road rasterization (when osm_fractional=False)
-2. Legacy burn-in enhancement (when ntl_enhancement_approach="legacy_burn")  
-3. Statistics calculation (urban area km², mean radiance)
+2. Statistics calculation (urban area km², mean radiance)
 """
 
 import numpy as np
@@ -13,7 +12,6 @@ from rasterio.transform import from_origin
 from rasterio.crs import CRS
 
 from blackmarble.acquire.osm import buffer_and_rasterize_roads
-from blackmarble.enhance.features import enhance_roads
 
 
 class TestBinaryRoadRasterization:
@@ -56,41 +54,6 @@ class TestBinaryRoadRasterization:
         except Exception as e:
             # If OSM download fails, just verify function exists
             pytest.skip(f"OSM download failed: {e}")
-
-
-class TestLegacyBurnInEnhancement:
-    """Test legacy road burn-in enhancement."""
-    
-    def test_enhance_roads_basic(self):
-        """Test enhance_roads function enhances values correctly."""
-        # Create NTL data in valid range [0, 1]
-        shape = (50, 50)
-        ntl_data = np.ones(shape, dtype=np.float32) * 0.5
-        
-        # Create road mask
-        road_mask = np.zeros(shape, dtype=np.uint8)
-        road_mask[20:22, :] = 1  # Major road
-        
-        # Apply enhancement
-        enhanced = enhance_roads(
-            data=ntl_data,
-            road_mask=road_mask,
-            major_factor=1.5
-        )
-        
-        # Verify enhancement
-        assert enhanced.shape == ntl_data.shape
-        assert enhanced.dtype == ntl_data.dtype
-        
-        # Roads should be enhanced (but clipped to 1.0)
-        road_pixels = road_mask > 0
-        expected = np.clip(ntl_data[road_pixels] * 1.5, 0, 1)
-        np.testing.assert_array_almost_equal(enhanced[road_pixels], expected)
-        
-        # Non-roads should be unchanged
-        non_road_pixels = road_mask == 0
-        np.testing.assert_array_equal(enhanced[non_road_pixels], ntl_data[non_road_pixels])
-
 
 class TestStatisticsCalculation:
     """Test pipeline statistics calculation."""
