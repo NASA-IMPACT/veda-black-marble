@@ -512,7 +512,7 @@ async def black_marble_pipeline(
                 index_dates.append(target_date)
 
                 # Optional: Delete bands to save memory
-                if config.memory.delete_bands_after_indices:
+                if config and config.memory.delete_bands_after_indices:
                     del b3_data, b4_data, b5_data
                     import gc
 
@@ -1211,9 +1211,9 @@ async def black_marble_pipeline(
                 crs=processing_crs,
             )
 
-    landsat_viz = None
+    # Create false color composite if requested
     if "B5" in landsat_reprojected and "B4" in landsat_reprojected and "B3" in landsat_reprojected:
-        landsat_viz = enhance.create_false_color_composite(
+        _ = enhance.create_false_color_composite(
             red_channel=landsat_reprojected["B5"],  # NIR in red
             green_channel=landsat_reprojected["B4"],  # Red in green
             blue_channel=landsat_reprojected["B3"],  # Green in blue
@@ -1271,7 +1271,7 @@ async def black_marble_pipeline(
         indices_calculated=["ndvi", "ndwi", "ndui"] if ndui is not None else [],
         date_processed=datetime.now(),
         bbox=bbox,
-        crs=processing_crs,
+        crs=str(processing_crs),
         resolution=target_resolution_landsat,
     )
 
@@ -1350,6 +1350,39 @@ async def black_marble_pipeline(
                 compress=compress_setting,  # type: ignore[arg-type]
                 nodata=np.nan,  # Properly handle NaN values from masking
             )
+
+    # Export EPSG:4326 version if requested
+    if (
+        config
+        and getattr(config.export, "generate_wgs84", False)
+        and ntl_colored is not None
+        and reference_transform is not None
+    ):
+        logger.info("🌍 Creating EPSG:4326 version...")
+        
+        # Reproject to WGS84
+        wgs84_data, wgs84_transform, _ = prepare.reproject_image(
+            data=ntl_colored,
+            src_transform=reference_transform,
+            src_crs=processing_crs,
+            dst_crs="EPSG:4326",
+            resampling="bilinear",
+        )
+        
+        # Save as COG
+        wgs84_path = output_path.replace(".tif", "_wgs84.tif")
+        wgs84_compress = config.export.compress if config.export.compress in {"deflate", "lzw"} else "deflate"
+        export.create_cog(
+            data=wgs84_data,
+            output_path=wgs84_path,
+            transform=wgs84_transform,
+            crs="EPSG:4326",
+            metadata=metadata,
+            compress=wgs84_compress,  # type: ignore[arg-type]
+            tiled=True,
+            overviews=[2, 4, 8, 16],
+        )
+        logger.info(f"  Saved WGS84 version to: {wgs84_path}")
 
     statistics: dict[str, float | None] = {
         "urban_area_km2": None,

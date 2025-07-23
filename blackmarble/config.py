@@ -139,6 +139,7 @@ class ExportConfig:
     generate_urban_mask: bool = False
     generate_indices_file: bool = False
     generate_web_image: bool = True
+    generate_wgs84: bool = False
     web_image_quality: int = 85
 
     # Validation
