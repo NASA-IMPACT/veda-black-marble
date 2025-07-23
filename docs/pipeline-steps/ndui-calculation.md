@@ -1,6 +1,6 @@
 # NDUI (Normalized Difference Urban Index) Calculation
 
-This step combines nighttime lights with vegetation indices to identify urban areas.
+This step combines nighttime lights with vegetation indices to identify urban areas using the Black Marble v3 algorithm.
 
 ## Overview
 
@@ -10,66 +10,72 @@ NDUI quantifies the "urbanness" of pixels by comparing nighttime light intensity
 
 **Function**: `blackmarble.analyze.indices.calculate_ndui()`
 
-**Formula**:
+**Processing Steps**:
+
+### 1. Input Preparation
+
+The function first prepares the NTL (nighttime lights) data:
+
+- **DN to Radiance Conversion**: If max(NTL) > 100, assumes DN values and converts: `ntl = ntl / 10.0`
+- **Ceiling Clipping**: `ntl = min(ntl, ntl_ceiling)` (default ceiling = 10.0 nW/cm²/sr)
+- **Floor Clipping**: `ntl = 0 if ntl < ntl_floor else ntl` (default floor = 0.1)
+- **Ceiling-Only Normalization**: `ntl_normalized = ntl / ntl_ceiling`
+
+**Why ceiling-only normalization?** We divide by the fixed radiance ceiling instead of the (ceiling-floor) range so that an NDUI value of 1.0 always represents the same absolute radiance, independent of year-specific gain adjustments. The floor is used only to suppress sensor noise and is not part of the scaling.
+
+### 2. Core Index Calculation
+
 ```
-NDUI = (NTL - NDVI) / (NTL + NDVI)
+ndui_raw = (ntl_normalized - ndvi) / (ntl_normalized + ndvi + epsilon)
 ```
 
 Where:
-- NTL: Nighttime lights (VIIRS radiance, 0-100+ nW/cm²/sr)
-- NDVI: Vegetation index (-1 to 1)
+- `ntl_normalized`: Normalized nighttime lights (0-1)
+- `ndvi`: Vegetation index (-1 to 1)
+- `epsilon`: Small value (1e-6) to prevent division by zero
 
-**Value Interpretation**:
-- `0.7 to 1.0`: Dense urban core
-- `0.3 to 0.7`: Urban/suburban
-- `0.0 to 0.3`: Rural with some lighting
-- `-1.0 to 0.0`: Natural areas (vegetation, no lights)
+The raw NDUI is then clamped to [-1, 1].
 
-## Key Features
+### 3. Water Masking
 
-### 1. Water Masking
+Water bodies are masked using NDWI (Normalized Difference Water Index):
 
-Water bodies can produce misleading NDUI values (low NDVI + low NTL). We mask them using NDWI:
-
-```python
-def calculate_ndui(ntl, ndvi, ndwi=None, water_threshold=0.0):
-    # Calculate base NDUI
-    ndui = (ntl - ndvi) / (ntl + ndvi + epsilon)
-    
-    # Mask water if NDWI provided
-    if ndwi is not None:
-        water_mask = ndwi > water_threshold
-        ndui[water_mask] = np.nan
-    
-    return ndui
+```
+if ndwi >= 0:
+    ndui_raw = -1  # Water pixels set to -1
 ```
 
-### 2. Parameter Scaling
+### 4. Range Transformation
 
-NDUI is sensitive to the scale difference between NTL (0-100+) and NDVI (-1 to 1):
+Convert from [-1, 1] to [0, 1] range for easier interpretation:
 
-**Options**:
-1. **Scale NTL**: Divide by maximum expected value
-2. **Apply floor/ceiling**: Clip extreme values
-3. **Log transform**: Reduce NTL dynamic range
-
-```python
-# Example: Scale and clip
-ntl_scaled = np.clip(ntl / 50.0, 0, 2)  # Scale to ~0-2 range
-ndui = calculate_ndui(ntl_scaled, ndvi, ndwi)
+```
+ndui = abs(ndui_raw + 1.0) / 2.0
 ```
 
-### 3. Urban Threshold Selection
+This transformation ensures:
+- Water pixels (-1) → 0
+- Non-urban areas → low values
+- Urban areas → high values
 
-Convert NDUI to binary urban mask:
+### 5. Floor Threshold
 
-```python
-urban_mask = ndui > 0.3  # Typical threshold
+Remove noise and spurious low values:
 
-# Or data-driven threshold
-threshold = np.percentile(ndui[ndui > 0], 70)  # Top 30% of positive values
-urban_mask = ndui > threshold
 ```
+if ndui < ndui_floor:
+    ndui = 0  # Default floor = 0.02
+```
+
+## Value Interpretation
+
+After all transformations, NDUI values represent:
+- `0.0`: Water bodies or non-urban (below threshold)
+- `0.0-0.2`: Natural areas with minimal lighting
+- `0.2-0.4`: Rural areas with some development
+- `0.4-0.6`: Suburban/mixed development
+- `0.6-0.8`: Urban areas
+- `0.8-1.0`: Dense urban cores/bright industrial
 
 ## Implementation
 
@@ -77,23 +83,58 @@ urban_mask = ndui > threshold
 from blackmarble.analyze.indices import calculate_ndui
 
 # Inputs from previous steps
-ntl = viirs_aligned  # Nighttime lights
-ndvi = calculate_ndvi(nir, red)  # Vegetation index
-ndwi = calculate_ndwi(green, nir)  # Water index
+ntl = viirs_composite      # Nighttime lights (can be DN or radiance)
+ndvi = ndvi_composite      # Vegetation index from Landsat
+ndwi = ndwi_composite      # Water index from Landsat (optional)
 
-# Calculate NDUI with water masking
+# Calculate NDUI with default Black Marble v3 parameters
 ndui = calculate_ndui(
     ntl=ntl,
     ndvi=ndvi,
-    ndwi=ndwi,
-    water_threshold=0.0,  # NDWI > 0 indicates water
-    floor=-1.0,
-    ceiling=1.0
+    ndwi=ndwi,              # Optional water masking
+    ntl_floor=0.1,          # Minimum NTL threshold (nW/cm²/sr)
+    ntl_ceiling=10.0,       # Maximum NTL for normalization
+    ndui_floor=0.02,        # Minimum NDUI threshold
+    epsilon=1e-6            # Numerical stability
 )
 
 # Create urban mask
-urban_mask = ndui > 0.3
+urban_mask = ndui > 0.3  # Typical threshold for urban areas
 ```
+
+## Key Differences from Standard NDVI-like Indices
+
+1. **Ceiling-only normalization**: Maintains temporal consistency
+2. **Water masking**: Prevents false positives in water bodies
+3. **Range transformation**: Converts to intuitive 0-1 scale
+4. **Floor thresholding**: Removes sensor noise
+
+## Configuration Parameters
+
+```python
+# In PipelineConfig
+config.analysis.ntl_floor = 0.1      # Min NTL radiance (nW/cm²/sr)
+config.analysis.ntl_ceiling = 10.0    # Max NTL for normalization
+config.analysis.ndui_floor = 0.02     # Min NDUI value to keep
+```
+
+## Common Issues and Solutions
+
+1. **Water Bodies Showing High NDUI**
+   - Cause: Missing NDWI input for water masking
+   - Solution: Always provide NDWI from Landsat processing
+
+2. **Unexpected Zero Values**
+   - Cause: NTL values below floor threshold
+   - Solution: Check if ntl_floor is appropriate for your region
+
+3. **Saturation in Bright Areas**
+   - Cause: NTL values exceeding ceiling
+   - Solution: Adjust ntl_ceiling based on regional statistics
+
+4. **Different Results from Legacy Black Marble**
+   - Note: Legacy bm.py included road boosting (1.3x for primary roads)
+   - Current implementation does not include road enhancement in NDUI
 
 ## Test Coverage
 
@@ -105,80 +146,17 @@ urban_mask = ndui > 0.3
 - Water masking behavior
 - Parameter effects (floor/ceiling)
 - Edge cases: all zeros, all NaN
-- Threshold sensitivity
-
-## Decision Points
-
-### 1. Water Masking Strategy
-
-**Options**:
-- `ndwi > 0.0`: Conservative, masks most water
-- `ndwi > 0.1`: Permissive, only deep water
-- `None`: No masking (not recommended)
-
-**Recommendation**: Use NDWI > 0.0 for coastal areas
-
-### 2. NTL Scaling
-
-**Trade-offs**:
-- No scaling: Preserves absolute radiance values
-- Linear scaling: Better NDUI distribution
-- Log scaling: Handles extreme bright spots
-
-**Recommendation**: Scale by regional 95th percentile
-
-### 3. Urban Threshold
-
-**Methods**:
-1. **Fixed**: 0.3 works globally
-2. **Percentile**: Adapt to local conditions
-3. **Otsu**: Automatic thresholding
-
-**Recommendation**: Start with 0.3, validate with ground truth
-
-## Common Issues
-
-1. **Water Bodies Classified as Urban**
-   - Cause: No water masking
-   - Fix: Always provide NDWI for masking
-
-2. **Rural Areas Over-classified**
-   - Cause: Low but non-zero NTL
-   - Fix: Increase threshold or apply NTL floor
-
-3. **Bright Spots Dominate**
-   - Cause: Industrial sites, airports
-   - Fix: Clip extreme NTL values or use log transform
-
-## Configuration
-
-```python
-# In PipelineConfig
-config.analysis.ndui_water_threshold = 0.0
-config.analysis.ndui_floor = -1.0
-config.analysis.ndui_ceiling = 1.0
-config.analysis.ndui_urban_threshold = 0.3
-config.analysis.scale_ntl_for_ndui = True
-```
-
-## Validation
-
-Compare NDUI-derived urban areas with:
-- OpenStreetMap urban polygons
-- Population density data
-- Impervious surface datasets
-
-Expected accuracy: 80-90% agreement with reference data
+- DN to radiance conversion
 
 ## Performance Notes
 
-- Calculation is element-wise and fast
-- Water masking adds ~10% overhead
-- No significant memory requirements
+- Calculation is element-wise and vectorized
+- Water masking adds minimal overhead
+- No significant memory requirements beyond input arrays
 
 ## Related Steps
 
 - Previous: [Spectral Indices](./spectral-indices.md) (NDVI, NDWI inputs)
+- Previous: [Temporal Composite](./temporal-composite.md) (NTL input)
 - Next: [Urban Field Enhancement](./urban-field-enhancement.md)
-- Uses: Aligned NTL, NDVI, NDWI
-- Outputs: Urban mask for enhancement and statistics
+- Outputs: NDUI array for final Black Marble product

@@ -73,9 +73,11 @@ class DownloadPlan:
         if config and hasattr(config, "acquisition"):
             composite_months = getattr(config.acquisition, "composite_months", 12)
 
+        # Start with the target date
         landsat_dates = [date]
 
-        for i in range(1, composite_months + 1):
+        # Add historical months (composite_months includes the target month)
+        for i in range(1, composite_months):
             historical_date = date - timedelta(days=i * 30)
             landsat_dates.append(historical_date)
 

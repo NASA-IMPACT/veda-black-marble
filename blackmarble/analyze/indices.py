@@ -315,6 +315,8 @@ def calculate_ndui(
     # Then apply floor
     ntl_clipped = np.where(ntl_clipped < ntl_floor, 0.0, ntl_clipped)
     # Normalize by dividing by ceiling (not range)
+    # This ceiling-only normalization keeps the 0-1 scale invariant when ceiling
+    # is tuned year-to-year, as physical zero is unambiguous unlike the floor
     ntl_normalized = ntl_clipped / ntl_ceiling
 
     # Step 2: Calculate NDUI using original Black Marble formula

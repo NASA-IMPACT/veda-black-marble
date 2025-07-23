@@ -68,7 +68,7 @@ class AcquisitionConfig:
     landsat_collection: int = 2
     landsat_level: str = "L2SP"
     cloud_cover_max: float = 50.0  # More permissive to accept T2 scenes
-    composite_months: int = 12  # Number of months for temporal composite
+    composite_months: int = 12  # Total number of months for temporal composite (including target date)
 
     # Landsat time-window acquisition configuration
     landsat_acquisition: LandsatAcquisitionConfig = field(default_factory=LandsatAcquisitionConfig)

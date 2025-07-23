@@ -88,7 +88,7 @@ async def black_marble_pipeline(
     # ==================== ASYNC DOWNLOAD PHASE ====================
     # Download ALL data upfront using async I/O
 
-    print(f"\n📥 Downloading all data for {composite_months + 1} dates...")
+    print(f"\n📥 Downloading all data for {composite_months} dates...")
     print(f"   Target date: {date.strftime('%Y-%m-%d')}")
     print(f"   Bounding box: {bbox}")
 
@@ -520,10 +520,6 @@ async def black_marble_pipeline(
                     green=b3_data, nir=b5_data, mask_low_denom=config.analysis.mask_low_denom
                 ).astype(np.float32)  # Control memory
                 
-                # Clamp negative NDWI values to 0
-                # Negative NDWI indicates dry soil/built-up areas
-                ndwi_date = np.maximum(ndwi_date, 0.0)
-
                 # Add to index stacks
                 index_stacks["ndvi"].append(ndvi_date)
                 index_stacks["ndwi"].append(ndwi_date)
