@@ -18,20 +18,15 @@ from .landsat import process_landsat_date
 from .landsat_qa import create_landsat_cloud_mask, print_qa_pixel_summary
 from .spatial import (
     align_rasters,
-    convert_to_wgs84,
     crop_to_bounds,
     reproject_image,
-    resample_image,
 )
 
 __all__ = [
-    # All coordinate, quality, scaling, and landsat_qa functions removed - unused files deleted
-    # Spatial functions
+    # Spatial functions (only the used ones)
     "align_rasters",
-    "convert_to_wgs84",
     "crop_to_bounds",
     "reproject_image",
-    "resample_image",
     # Diagnostic functions
     "save_diagnostic",
     # Landsat functions

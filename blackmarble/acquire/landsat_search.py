@@ -523,7 +523,6 @@ async def search_best_scenes_functional(
     find_scenes_func: Callable,  # Injected dependency
     s3_client: S3Client,  # Injected dependency
     bucket: str = "usgs-landsat",
-    collection: str = "collection02",
     max_concurrent_mtl: int = 32,
 ) -> list[SceneMeta]:
     """Search for best Landsat scenes within time window (functional pipeline).
