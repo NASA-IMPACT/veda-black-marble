@@ -1,4 +1,0 @@
-path,function_name,start_line,end_line,called_object,wrapper_type,LOC,initial_status
-acquire/osm.py,get_osm_cache_dir,105,107,Path,path,3,potential_wrapper
-blackmarble/config.py,for_bm_parity,206,232,cls,misc,27,potential_wrapper
-blackmarble/config.py,for_enhanced_quality,235,268,cls,misc,34,potential_wrapper
