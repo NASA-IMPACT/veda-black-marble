@@ -152,12 +152,6 @@ def reference_data_paths():
     # Return paths
     return {
         "viirs": reference_dir / "viirs" / "VNP46A2_h08v05_20231015.tif",
-        "landsat": {
-            "B3": reference_dir / "landsat" / "LC08_L2SP_044034_20231015_B3.TIF",
-            "B4": reference_dir / "landsat" / "LC08_L2SP_044034_20231015_B4.TIF",
-            "B5": reference_dir / "landsat" / "LC08_L2SP_044034_20231015_B5.TIF",
-            "QA_PIXEL": reference_dir / "landsat" / "LC08_L2SP_044034_20231015_QA_PIXEL.TIF",
-        },
         "osm": reference_dir / "osm" / "test_roads.gpkg"
     }
 
