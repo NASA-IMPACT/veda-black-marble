@@ -2,28 +2,28 @@
 
 ## Overview
 
-The scene search strategy ensures complete spatial coverage of Landsat imagery by searching for the best available scenes within a time window rather than requiring exact date matches. This functionality is integrated into the Black Marble pipeline and automatically selects optimal Landsat scenes based on quality metrics.
+The scene search strategy ensures complete spatial coverage and temporal consistency by finding all available Landsat scenes within a time window, then selecting the best date group that provides complete coverage. This date-grouped approach prioritizes getting all tiles from the same acquisition date when possible.
 
 ## Problem Solved
 
 Searching for scenes on a single date often results in:
-- Missing tiles due to satellite orbit patterns
+- Missing tiles due to satellite orbit patterns (16-day revisit cycle)
 - High cloud cover on the target date
-- Edge cropping when temporal composites use different numbers of tiles
+- Temporal inconsistency when composites mix different dates
 - Manual intervention to find cloud-free alternatives
 
 ## How It Works
 
 ### 1. Time Window Search
 
-Instead of searching for scenes on a specific date, the system searches within a configurable window (default ±15 days):
+The system searches within a configurable window (default ±7 days) around each target date:
 
 ```python
-from blackmarble.acquire import search_best_scenes
+from blackmarble.acquire.landsat_search_grouped import search_best_scenes
 from blackmarble.config import LandsatAcquisitionConfig
 
 config = LandsatAcquisitionConfig(
-    window_days=15,  # Search ±15 days from target
+    window_days=7,  # Search ±7 days from target
 )
 
 scenes = await search_best_scenes(
@@ -33,40 +33,62 @@ scenes = await search_best_scenes(
 )
 ```
 
-### 2. Quality Scoring
+### 2. Date Grouping with Tolerance
 
-Each candidate scene is scored based on weighted quality metrics:
+The key innovation is grouping scenes by acquisition date with a tolerance window:
+
+1. **Get ALL scenes** in the time window (no per-tile selection yet)
+2. **Group scenes by date** (just the date, ignoring time)
+3. **Build date groups** with tolerance (default 12 days):
+   - For each base date, include scenes within ±tolerance_days
+   - This handles multi-day acquisitions for large areas
+4. **Find complete groups** that cover all required tiles
+5. **Select best group** by lowest average cloud cover
 
 ```python
-quality_weights = {
-    "spatial_coverage": 0.5,   # Completeness of data
-    "cloud_free": 0.3,         # 1 - (cloud_cover/100)
-    "snow_free": 0.15,         # 1 - snow_fraction
-    "off_nadir": 0.05,         # Viewing angle penalty
-}
+config = LandsatAcquisitionConfig(
+    window_days=7,        # Search ±7 days from each target date
+    tolerance_days=12.0,  # Group scenes within 12 days together
+)
 ```
 
-The scoring formula:
+### 3. Complete Coverage Priority
+
+The algorithm prioritizes complete spatial coverage:
+- Identifies all WRS-2 tiles needed for the bbox
+- Checks each date group for complete tile coverage
+- Only considers groups with 100% coverage
+- Falls back to best partial coverage if `allow_incomplete=True`
+
+### 4. Implementation Details
+
+The grouped search is implemented in `landsat_search_grouped.py`:
+
+```python
+# Get all scenes in window
+all_scenes = await get_all_scenes_in_window(params, find_scenes_func, s3_client)
+
+# Group by date
+scenes_by_date = {}
+for scene in all_scenes:
+    date_key = scene.date.date()  # Just the date, no time
+    scenes_by_date[date_key].append(scene)
+
+# Find date groups with complete coverage
+complete_groups = []
+for base_date in sorted(scenes_by_date.keys()):
+    group_scenes = []
+    for date in scenes_by_date:
+        if abs((date - base_date).days) <= tolerance_days:
+            group_scenes.extend(scenes_by_date[date])
+    
+    tiles = {(s.path, s.row) for s in group_scenes}
+    if tiles >= required_tiles:
+        complete_groups.append((base_date, group_scenes))
+
+# Select group with lowest cloud cover
+best_group = min(complete_groups, key=lambda x: avg_cloud_cover(x[1]))
 ```
-Quality Score = Σ(weight[i] × metric[i])
-```
-
-### 3. Best Scene Selection
-
-For each WRS-2 path/row tile:
-1. Find all scenes within the time window
-2. Calculate quality scores
-3. Select the highest scoring scene
-4. Apply tie-breakers:
-   - Prefer newer sensors (L8/L9 > L7 > L5)
-   - Choose closest to target date
-
-### 4. Complete Coverage Guarantee
-
-The system ensures one scene per required tile:
-- Identifies all WRS-2 tiles intersecting the bounding box
-- Searches for scenes in each tile
-- Raises an error if any tile has no acceptable scenes (unless `allow_incomplete=True`)
 
 ## Configuration Options
 
@@ -74,44 +96,36 @@ The system ensures one scene per required tile:
 
 ```python
 config = LandsatAcquisitionConfig(
-    window_days=15,              # Search window size
-    max_cloud_threshold=80.0,    # Pre-filter scenes
-    quality_weights={...},       # Scoring weights
+    window_days=7,               # Search ±7 days from target
+    tolerance_days=12.0,         # Group scenes within 12 days
 )
 ```
 
-### Seasonal Filtering
+### Key Parameters
 
-Restrict scenes to specific seasons:
-
-```python
-def summer_only(date):
-    return 5 <= date.month <= 9
-
-config = LandsatAcquisitionConfig(
-    seasonal_filter=summer_only
-)
-```
+- **window_days**: How far to search from each target date (default: 7)
+  - Smaller windows ensure temporal consistency
+  - Larger windows find more cloud-free options
+  
+- **tolerance_days**: Maximum days between scenes in a group (default: 12)
+  - Allows grouping scenes from multiple passes
+  - Essential for large areas spanning multiple paths
 
 ### Handling Incomplete Coverage
 
 ```python
 # Allow partial results instead of error
-scenes = await downloader.search_best_scenes(
+scenes = await search_best_scenes(
     bbox=bbox,
     target_date=target_date,
     config=config,
-    allow_incomplete=True  # Return available scenes
+    allow_incomplete=True  # Return best partial coverage
 )
 ```
 
-## Implementation Details
+## Scene Metadata
 
-The implementation uses a functional approach with pure functions and explicit dependencies.
-
-### Scene Metadata
-
-Each scene is represented as an immutable data structure:
+Each scene is represented with key attributes:
 
 ```python
 @dataclass(frozen=True)
@@ -121,56 +135,42 @@ class SceneMeta:
     row: int                # WRS-2 row
     date: datetime          # Acquisition date
     cloud_cover: float      # 0-100 percentage
-    spatial_coverage: float # 0-1 data completeness
-    snow_cover: float       # 0-1 snow fraction
-    off_nadir: bool         # Viewing angle flag
-    sensor: str             # "OLI_TIRS", "ETM", etc.
-    quality_score: float    # Calculated score
     s3_prefix: str          # S3 location
 ```
 
-### Performance Optimizations
+## Performance Optimizations
 
-1. **Pre-filtering**: Initial cloud cover filter before MTL download
-2. **S3 Client Reuse**: Single client for all MTL fetches
-3. **Parallel Processing**: Concurrent scene metadata retrieval
-4. **Duplicate Handling**: Automatic deduplication of re-indexed scenes
-
-### Error Handling
-
-The system handles various edge cases:
-- Missing MTL metadata files (scene rejected)
-- Duplicate scene IDs from S3 re-indexing
-- Timezone-aware date handling
-- Invalid weight configurations
-- Seasonal filter eliminating all candidates
+1. **Batch Processing**: Gets all scenes first, then groups
+2. **S3 Client Reuse**: Single client for all operations
+3. **Efficient Grouping**: Uses date tolerance to minimize groups
+4. **Cloud-based Selection**: Simple average cloud cover metric
 
 ## Pipeline Integration
 
-The time-window search is fully integrated into the Black Marble pipeline. To customize the search parameters:
+The date-grouped search is automatically used by the Black Marble pipeline:
 
 ```python
 from blackmarble.pipeline import black_marble_pipeline_sync
 from blackmarble.config import PipelineConfig
 
-# Create pipeline config
-config = PipelineConfig(
+# Create pipeline config with 12 target dates throughout the year
+config = PipelineConfig.for_bm_parity(
     bbox=bbox,
     date=date,
     output_path="output.tif"
 )
 
-# Customize Landsat acquisition parameters
-config.acquisition.landsat_acquisition.window_days = 20  # Search ±20 days
-config.acquisition.landsat_acquisition.max_cloud_threshold = 90.0  # Allow cloudier scenes
-config.acquisition.landsat_acquisition.quality_weights = {
-    "spatial_coverage": 0.6,  # Prioritize coverage
-    "cloud_free": 0.2,
-    "snow_free": 0.1,
-    "off_nadir": 0.1,
-}
+# The pipeline automatically:
+# 1. Creates 12 dates spanning the year
+# 2. Searches ±7 days around each date
+# 3. Groups scenes with 12-day tolerance
+# 4. Selects best cloud-free groups
 
-# Run pipeline with custom search config
+# Customize if needed
+config.acquisition.landsat_acquisition.window_days = 10  # Search ±10 days
+config.acquisition.landsat_acquisition.tolerance_days = 15.0  # Larger groups
+
+# Run pipeline
 result = black_marble_pipeline_sync(
     bbox=bbox,
     date=date,
@@ -180,97 +180,63 @@ result = black_marble_pipeline_sync(
 )
 ```
 
-## Usage Example
+## How the Pipeline Creates Multiple Dates
 
-Complete example with error handling:
+The pipeline automatically generates multiple target dates for temporal compositing:
 
 ```python
-import asyncio
-from datetime import datetime
-from blackmarble.acquire import search_best_scenes
-from blackmarble.config import LandsatAcquisitionConfig
+# In AsyncDownloadOrchestrator.from_pipeline_config()
+composite_months = config.acquisition.composite_months  # Default: 12
 
-async def acquire_landsat_scenes():
-    # Configure acquisition
-    config = LandsatAcquisitionConfig(
-        window_days=20,
-        quality_weights={
-            "spatial_coverage": 0.4,
-            "cloud_free": 0.4,
-            "snow_free": 0.1,
-            "off_nadir": 0.1,
-        },
-        max_cloud_threshold=70.0,
-    )
-    
-    try:
-        # Search for best scenes
-        scenes = await search_best_scenes(
-            bbox=(-74.0, 40.0, -73.0, 41.0),  # NYC area
-            target_date=datetime(2023, 8, 15),
-            config=config,
-        )
-        
-        print(f"Found {len(scenes)} scenes:")
-        for scene in scenes:
-            print(f"  {scene.scene_id}: "
-                  f"Path/Row {scene.path}/{scene.row}, "
-                  f"Cloud {scene.cloud_cover:.1f}%, "
-                  f"Score {scene.quality_score:.3f}")
-        
-        return scenes
-        
-    except ValueError as e:
-        print(f"Failed to find complete coverage: {e}")
-        
-        # Try again allowing incomplete coverage
-        scenes = await search_best_scenes(
-            bbox=(-74.0, 40.0, -73.0, 41.0),
-            target_date=datetime(2023, 8, 15),
-            config=config,
-            allow_incomplete=True,
-        )
-        
-        print(f"Found {len(scenes)} scenes with incomplete coverage")
-        return scenes
+# Start with the target date
+landsat_dates = [date]
 
-# Run the async function
-scenes = asyncio.run(acquire_landsat_scenes())
+# Add historical months (going back in time)
+for i in range(1, composite_months):
+    historical_date = date - timedelta(days=i * 30)
+    landsat_dates.append(historical_date)
 ```
+
+With `composite_months=12`, this creates 12 dates at ~30-day intervals:
+- Target date (e.g., 2023-06-15)
+- Target - 30 days (2023-05-16)
+- Target - 60 days (2023-04-16)
+- ... up to Target - 330 days
+
+For each date, the grouped search finds the best available scenes within the time window.
 
 ## Benefits
 
-1. **Automatic Coverage**: No manual searching for cloud-free dates
-2. **Consistent Processing**: Same number of scenes per composite
-3. **Quality Optimization**: Automatically selects clearest scenes
-4. **Flexible Constraints**: Seasonal and quality thresholds
-5. **Robust to Edge Cases**: Handles missing data, duplicates, timezones
+1. **Temporal Consistency**: Prioritizes scenes from the same date
+2. **Complete Coverage**: Ensures all tiles are covered
+3. **Cloud Optimization**: Selects date groups with lowest average cloud cover
+4. **Flexible Grouping**: Tolerance allows handling multi-day acquisitions
+5. **Automatic Date Generation**: Pipeline creates optimal date spacing
 
-## AWS Credentials Requirement
+## AWS Credentials
 
-The Landsat search functionality requires AWS credentials to access the USGS Landsat bucket on S3. Set these environment variables before running:
+The Landsat search uses the AWS credential chain:
+1. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+2. AWS CLI configuration (~/.aws/credentials)
+3. IAM roles (if running on AWS)
 
-```bash
-export AWS_ACCESS_KEY_ID=your_access_key_id
-export AWS_SECRET_ACCESS_KEY=your_secret_access_key
-```
+The USGS Landsat bucket requires authenticated requests with `RequestPayer='requester'`.
 
-**Important**: The USGS Landsat bucket requires signed requests with `RequestPayer='requester'` parameter. Unsigned (anonymous) access is not supported.
+## Key Differences from Per-Tile Selection
 
-## Testing
+The old per-tile "best scene" approach:
+- Selected scenes independently for each tile
+- Could mix dates within a single composite
+- Used complex quality scoring weights
 
-The implementation includes comprehensive tests covering:
-- Happy path with multiple tiles
-- Duplicate scene handling
-- Missing metadata rejection
-- Timezone boundary cases
-- Seasonal filter edge cases
-- Invalid configuration detection
-- Quality score monotonicity (property-based)
-- Zero coverage handling
-- Multiple sensor parsing
+The new date-grouped approach:
+- Gets all scenes first, then groups by date
+- Prioritizes temporal consistency
+- Uses simple cloud cover average for selection
+- Better for change detection and time series analysis
 
-Run tests with:
-```bash
-pytest tests/acquire/test_landsat_time_window_functional.py -v
-```
+## Related Steps
+
+- Previous: Data acquisition setup
+- Next: [QA Masking](./landsat-qa-masking.md) - Apply cloud masks
+- Outputs to: All Landsat processing steps

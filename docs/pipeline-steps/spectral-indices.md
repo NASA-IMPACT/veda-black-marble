@@ -8,7 +8,7 @@ Spectral indices use ratios of different wavelengths to highlight specific land 
 - **NDVI** (Normalized Difference Vegetation Index): Vegetation density
 - **NDWI** (Normalized Difference Water Index): Water bodies and moisture
 
-**Critical Update**: As of the index-first calculation fix, indices are now calculated **per-date before temporal compositing** to ensure mathematical correctness.
+**Key Point**: Indices are calculated **per-date before temporal compositing** to ensure mathematical correctness. This happens automatically in the pipeline after QA masking.
 
 ## Algorithms
 
@@ -45,207 +45,162 @@ NDWI = (Green - NIR) / (Green + NIR)
 - NIR: Landsat Band 5 (0.85-0.88 μm)
 
 **Value Interpretation**:
-- `0.3 to 1.0`: Open water
-- `0.0 to 0.3`: Wet surfaces
-- `-0.3 to 0.0`: Dry surfaces
-- `-1.0 to -0.3`: Vegetation, built-up areas
+- `0.0 to 1.0`: Water bodies (threshold at 0.0 for water masking)
+- `-0.2 to 0.0`: Moist soil, wetlands
+- `-0.5 to -0.2`: Dry vegetation
+- `-1.0 to -0.5`: Dry soil, built-up areas
 
-## Index-First Temporal Compositing
+## Pipeline Implementation
+
+### Index-First Calculation
+
+The pipeline calculates indices per-date, immediately after QA masking:
+
+```python
+# For each Landsat date
+for target_date in landsat_dates:
+    # Process bands with QA masking
+    processed_data = prepare.process_landsat_date(
+        bands_data=bands_data,
+        apply_qa_mask=True,
+        cloud_strategy="moderate"
+    )
+    
+    # Calculate indices immediately
+    if all bands present:
+        # Calculate NDVI
+        ndvi_date = analyze.calculate_ndvi(
+            nir=b5_data, 
+            red=b4_data, 
+            mask_low_denom=True  # Return NaN for low denominators
+        )
+        
+        # Clamp negative NDVI to 0 (water/bare soil)
+        # Note: Only NDVI is clamped, not NDWI
+        ndvi_date = np.maximum(ndvi_date, 0.0)
+        
+        # Calculate NDWI (NOT clamped)
+        ndwi_date = analyze.calculate_ndwi(
+            green=b3_data, 
+            nir=b5_data, 
+            mask_low_denom=True
+        )
+        
+        # Add to stacks for temporal compositing
+        index_stacks["ndvi"].append(ndvi_date)
+        index_stacks["ndwi"].append(ndwi_date)
+```
 
 ### Mathematical Correctness
 
-The pipeline now calculates indices **per-date before temporal compositing**. This is critical because:
+Calculating indices per-date is critical because:
+- **median(NDVI_t) ≠ NDVI(median(NIR_t), median(RED_t))**
+- The median of ratios is not the ratio of medians
+- Band-first compositing produces incorrect results
 
-```
-median(NDVI_t) ≠ NDVI(median(NIR_t), median(RED_t))
-```
+### Memory Optimization
 
-The median of ratios is not equal to the ratio of medians. The old approach (band-first) produces mathematically incorrect results, particularly affecting agricultural areas with seasonal vegetation changes.
-
-### Implementation
-
+The pipeline includes memory management:
 ```python
-# NEW APPROACH (Correct)
-# 1. Calculate indices for each date
-index_stacks = {"ndvi": [], "ndwi": []}
-for date in landsat_dates:
-    nir, red, green = load_bands(date)
-    ndvi = calculate_ndvi(nir, red, mask_low_denom=True)
-    ndwi = calculate_ndwi(green, nir, mask_low_denom=True)
-    index_stacks["ndvi"].append(ndvi)
-    index_stacks["ndwi"].append(ndwi)
-
-# 2. Create temporal composites
-ndvi_composite = create_index_temporal_composite(
-    index_stacks["ndvi"],
-    method="percentile",
-    percentile=85.0  # Peak vegetation for NDUI
-)
+# Optional: Delete bands after index calculation
+if config.memory.delete_bands_after_indices:
+    del b3_data, b4_data, b5_data
+    gc.collect()
 ```
 
-### Why 85th Percentile NDVI for NDUI?
-
-NDUI uses NDVI to correct for vegetation's light-dimming effect:
-```
-NDUI = NTL / (1 - NDVI + epsilon)
-```
-
-Using the 85th percentile:
-- Captures maximum vegetation light-blocking potential
-- Prevents over-estimation of urban extent in agricultural areas
-- Better represents the "greenest" state
-
-### Configuration
-
-```python
-config = PipelineConfig(
-    analysis=AnalysisConfig(
-        # Index-first calculation (always enabled)
-        calculate_indices_first=True,
-        mask_low_denom=True
-        
-        # Temporal compositing is now hardcoded:
-        # - NDVI: Always uses 85th percentile
-        # - NDWI: Always uses median
-    )
-)
-```
-
-## Critical Implementation Detail: Epsilon Handling
+## Epsilon Handling
 
 ### The Problem
 
-When NIR ≈ Red (or Green ≈ NIR), the denominator approaches zero, causing:
+When band values are very similar (e.g., NIR ≈ Red), the denominator approaches zero, causing:
 1. Division by zero → NaN
-2. Near-zero division → Extreme values (e.g., NDVI = 137.0)
+2. Near-zero division → Extreme values outside [-1, 1]
 
 ### The Solution
 
-**Key Fix**: Use `np.copysign()` to preserve sign when adding epsilon
+The implementation uses two strategies:
+
+1. **mask_low_denom=True** (used in pipeline):
+   - Returns NaN for denominators < epsilon
+   - Preserves mathematical correctness for temporal compositing
+   - NaN pixels are handled properly by `np.nanmedian()`
+
+2. **Adaptive floor** (when mask_low_denom=False):
+   - Uses both absolute and relative thresholds
+   - Applies `np.copysign()` to preserve sign
+   - Clamps output to [-1, 1]
 
 ```python
-def calculate_ndvi(nir, red, epsilon=1e-8):
-    numerator = nir - red
-    denominator = nir + red
-    
-    # CRITICAL: Preserve sign of denominator when adding epsilon
-    safe_denominator = np.where(
-        np.abs(denominator) < epsilon,
-        np.copysign(epsilon, denominator),  # ✅ Correct
-        denominator
-    )
-    
-    # NOT: np.sign(denominator) * epsilon  # ❌ Returns 0 when denominator=0
-    
-    return numerator / safe_denominator
+# Pipeline approach
+ndvi = calculate_ndvi(nir, red, mask_low_denom=True)
+# Low denominators → NaN → excluded from temporal composite
+
+# Adaptive floor approach (for single-date analysis)
+epsilon_rel = 0.05  # 5% of signal magnitude
+signal_magnitude = (np.abs(nir) + np.abs(red)) / 2
+adaptive_floor = np.maximum(epsilon, epsilon_rel * signal_magnitude)
 ```
 
-**Why This Matters**:
-- `np.sign(0)` returns 0, making safe_denominator = 0
-- `np.copysign(epsilon, 0)` returns epsilon, preventing division by zero
+## Default Parameters
 
-## Implementation
+The indices functions use these defaults:
 
 ```python
-from blackmarble.analyze.indices import calculate_ndvi, calculate_ndwi
+# From indices.py
+LANDSAT_EPSILON = 0.02  # 2% reflectance threshold
 
-# Apply Landsat scaling first
-nir = band5_data * 0.0000275 - 0.2
-red = band4_data * 0.0000275 - 0.2
-green = band3_data * 0.0000275 - 0.2
+# Function signatures (note: mask_low_denom defaults to False)
+calculate_ndvi(nir, red, epsilon=LANDSAT_EPSILON, mask_low_denom=False)
+calculate_ndwi(green, nir, epsilon=LANDSAT_EPSILON, mask_low_denom=False)
 
-# Calculate indices
-ndvi = calculate_ndvi(nir, red)
-ndwi = calculate_ndwi(green, nir)
-
-# Validate ranges
-assert -1.0 <= np.nanmin(ndvi) <= np.nanmax(ndvi) <= 1.0
-assert -1.0 <= np.nanmin(ndwi) <= np.nanmax(ndwi) <= 1.0
+# But pipeline always passes mask_low_denom=True:
+ndvi = calculate_ndvi(nir, red, mask_low_denom=True)
 ```
 
 ## Test Coverage
 
-**Primary Test**: `tests/pipeline/test_pipeline_flow.py::test_09_calculate_indices`
+**Unit Tests**: `tests/analyze/`
 - Basic calculation verification
-- Range validation
+- Edge cases with near-zero denominators
+- Range validation [-1, 1]
+- NaN handling
 
-**Critical Edge Case Tests**: `tests/analyze/test_ndvi_critical_edge_cases.py`
-- Tests near-zero denominators
-- Verifies epsilon handling
-- Checks the 137.0 bug is fixed
-
-**Additional Tests**: `tests/analyze/test_indices.py`
-- Comprehensive value range tests
-- NaN propagation
-- Array shape handling
+**Integration**: Full pipeline tests verify index calculation in context
 
 ## Common Issues
 
-1. **Extreme NDVI Values (>1.0 or <-1.0)**
-   - Cause: Near-zero denominator
-   - Fix: Epsilon handling with `np.copysign()`
+1. **Bands Not Scaled**
+   - Problem: Raw DN values instead of reflectance
+   - Solution: Pipeline automatically applies Landsat scaling
+   - Scaling: `reflectance = DN * 0.0000275 - 0.2`
 
-2. **Unexpected NaN Values**
-   - Cause: Masked/invalid input pixels
-   - Fix: Use `np.nanmin/nanmax` for statistics
+2. **Missing Data After Compositing**
+   - Problem: Too many NaN values from mask_low_denom
+   - Solution: Temporal composite handles NaN properly
+   - Check: Ensure enough valid observations
 
-3. **Wrong Index Values**
-   - Cause: Forgetting to apply Landsat scaling
-   - Fix: Always scale before index calculation
-
-## Performance Optimization
-
-```python
-# Efficient: Single pass calculation
-ndvi = calculate_ndvi(nir, red)
-
-# Inefficient: Multiple passes
-numerator = nir - red
-denominator = nir + red
-ndvi = numerator / denominator  # Risk of division by zero!
-```
+3. **Negative NDVI in NDUI**
+   - Problem: Water/bare soil has negative NDVI
+   - Solution: Pipeline clamps to 0 before NDUI calculation
+   - `ndvi_date = np.maximum(ndvi_date, 0.0)`
 
 ## Configuration
 
 ```python
-# In PipelineConfig
-config.analysis.index_epsilon = 1e-8  # Epsilon for safe division
-config.analysis.calculate_ndvi = True
-config.analysis.calculate_ndwi = True
+# Configuration is minimal - indices are always calculated
+config.memory.delete_bands_after_indices = True  # Save memory
 ```
 
-## Quality Checks
+## Performance Notes
 
-Always validate index ranges after calculation:
-
-```python
-def validate_index(data, name, expected_range=(-1, 1)):
-    min_val, max_val = np.nanmin(data), np.nanmax(data)
-    if not (expected_range[0] <= min_val <= max_val <= expected_range[1]):
-        logger.warning(f"{name} outside expected range: [{min_val:.3f}, {max_val:.3f}]")
-```
-
-## Comparison Tool
-
-A tool is provided to compare NDUI outputs between the legacy and new calculation methods:
-
-```bash
-python tools/compare_ndui.py old_ndui.tif new_ndui.tif -o comparison/
-```
-
-This generates:
-- `comparison_stats.json`: Statistical analysis of differences
-- `ndui_difference_raw.tif`: Raw difference values
-- `ndui_difference_classes.tif`: Classified changes (decreased/unchanged/increased)
-
-Expected differences:
-- Agricultural areas: Higher NDUI with new method (better vegetation correction)
-- Urban areas: Minimal change
-- Overall: More accurate urban/rural discrimination
+- Index calculation is fast (< 0.1s per date)
+- Memory usage: ~4 bytes per pixel per index
+- Temporal stacks grow with number of dates
+- Memory optimization available via config
 
 ## Related Steps
 
-- Previous: [Spatial Alignment](./spatial-alignment.md)
-- Next: [NDUI Calculation](./ndui-calculation.md) 
-- Uses: Scaled Landsat bands
-- Required for: Urban area detection, water masking
+- Previous: [QA Masking](./landsat-qa-masking.md) - Provides clean bands
+- Next: [Temporal Compositing](./temporal-compositing.md) - Creates final indices
+- Uses: QA-masked Landsat bands (already scaled)
+- Outputs: Index stacks for temporal compositing

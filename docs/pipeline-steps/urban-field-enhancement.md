@@ -18,73 +18,106 @@ Urban areas have characteristic spatial patterns - roads create "fields" of urba
 3. Combine with weighted average
 
 ```python
-def compute_urban_fields(road_fraction, sigmas=[2, 5, 10], weights=[0.5, 0.3, 0.2]):
+def compute_urban_fields(
+    road_fraction: ArrayLike,
+    sigmas: list[float] = [2.0, 5.0, 10.0],
+    weights: list[float] = [0.2, 0.3, 0.3, 0.2],
+) -> ArrayLike:
     """
     Create multi-scale urban influence field from roads.
     
     Args:
-        road_fraction: Road pixels (0-1)
+        road_fraction: Fractional road coverage (0.0-1.0) per pixel
         sigmas: Gaussian blur scales in pixels
-        weights: Weight for each scale (must sum to ~1)
+        weights: Weights for [original, scale1, scale2, ...]
     
-    Note: len(weights) must equal len(sigmas) + 1 (for original)
+    Note: len(weights) must equal len(sigmas) + 1
     """
-    fields = [road_fraction]  # Original roads
+    # Direct coverage (unblurred)
+    fields = [road_fraction.astype(np.float32)]
     
     # Add blurred versions at each scale
     for sigma in sigmas:
-        blurred = gaussian_filter(road_fraction, sigma=sigma)
-        fields.append(blurred)
+        density = gaussian_filter(
+            road_fraction.astype(np.float32), 
+            sigma=sigma, 
+            mode="reflect"  # Handle edges properly
+        )
+        fields.append(density)
     
     # Weighted combination
-    urban_field = np.zeros_like(road_fraction)
+    urban_field = np.zeros_like(road_fraction, dtype=np.float32)
     for field, weight in zip(fields, weights):
-        urban_field += field * weight
+        urban_field += weight * field
     
-    return np.clip(urban_field, 0, 1)
+    return np.clip(urban_field, 0.0, 1.0)
 ```
 
-**Key Parameters**:
-- `sigmas`: Controls influence distance
+**Default Parameters (from config)**:
+- `sigmas`: [2.0, 5.0, 10.0] pixels
   - 2 pixels (~60m): Immediate road vicinity
   - 5 pixels (~150m): Neighborhood scale
   - 10 pixels (~300m): District scale
-- `weights`: Relative importance of each scale
-  - Higher weight on original → sharper roads
-  - Higher weight on blurred → smoother fields
+- `weights`: [0.2, 0.3, 0.3, 0.2]
+  - 20% original (sharp roads)
+  - 30% each for 2 and 5 pixel scales
+  - 20% for 10 pixel scale
+  - Balanced approach between sharp roads and smooth fields
 
-### Step 2: Enhance NTL with Urban Field {#ntl-enhancement}
+### Step 2: Enhance NTL with Urban Field
 
 **Function**: `blackmarble.analyze.urban_fields.enhance_ntl_with_urban_field()`
 
-**Enhancement Modes**:
+**How it works**:
 
-#### 1. Multiplicative Enhancement
 ```python
-enhanced = ntl * (1 + urban_field * enhancement_factor)
-```
-- Scales existing lights
-- Preserves relative brightness
-- Good for areas with some lighting
+# Calculate enhancement factor based on urban field density
+# Areas with roads get up to 30% brighter (factor of 1.3)
+enhancement_factor = 1.0 + (0.3 * urban_field)
 
-#### 2. Additive Enhancement  
+# Apply enhancement to nighttime lights
+enhanced = ntl * enhancement_factor
+
+# Rescale to preserve original dynamic range
+# This prevents the whole image from getting brighter
+max_factor = enhancement_factor.max()
+result = enhanced / max_factor
+```
+
+**Why this approach**:
+- Roads indicate urban activity, even if lights are dim
+- Enhancement is proportional to road density
+- Original brightness relationships are preserved
+- No artificial brightening of the entire image
+
+## Pipeline Implementation
+
+The pipeline applies urban field enhancement after VIIRS reprojection:
+
 ```python
-enhanced = ntl + (urban_field * enhancement_factor)
+# From blackmarble/pipeline.py
+if config and roads_fractional is not None:
+    logger.info("🌃 Enhancing NTL with urban fields (fractional roads)")
+    
+    # Step 1: Compute multi-scale urban fields
+    urban_field = analyze.compute_urban_fields(
+        road_fraction=roads_fractional,
+        sigmas=config.analysis.urban_field_sigmas,      # [2.0, 5.0, 10.0]
+        weights=config.analysis.urban_field_weights,    # [0.2, 0.3, 0.3, 0.2]
+    )
+    
+    # Step 2: Enhance NTL using multiplicative mode
+    ntl_enhanced = analyze.enhance_ntl_with_urban_field(
+        ntl=ntl_composite,
+        urban_field=urban_field,
+        enhancement_mode="multiplicative",
+        multiplicative_factor=config.analysis.enhancement_multiplicative_factor,  # 0.3
+    )
+    
+    ntl_composite = ntl_enhanced
 ```
-- Adds light to dark areas
-- Can reveal unlit roads
-- Risk of over-brightening
 
-#### 3. Hybrid Enhancement (Recommended)
-```python
-multiplicative = ntl * (1 + urban_field * mult_factor)
-additive = ntl + (urban_field * add_factor)
-enhanced = mult_weight * multiplicative + (1 - mult_weight) * additive
-```
-- Best of both approaches
-- Configurable blend
-
-## Implementation
+## Standalone Usage
 
 ```python
 from blackmarble.analyze.urban_fields import (
@@ -92,36 +125,33 @@ from blackmarble.analyze.urban_fields import (
     enhance_ntl_with_urban_field
 )
 
-# Step 1: Create urban field from roads
+# Create urban field from fractional roads
 urban_field = compute_urban_fields(
-    road_fraction=roads_fractional,  # From road rasterization
-    sigmas=[2.0, 5.0, 10.0],        # Multi-scale blur
-    weights=[0.5, 0.3, 0.15, 0.05]  # Original + 3 scales
+    road_fraction=roads_fractional,
+    sigmas=[2.0, 5.0, 10.0],
+    weights=[0.2, 0.3, 0.3, 0.2]
 )
 
-# Step 2: Enhance nighttime lights
+# Enhance NTL
 ntl_enhanced = enhance_ntl_with_urban_field(
-    ntl=viirs_aligned,
+    ntl=viirs_data,
     urban_field=urban_field,
-    enhancement_mode="hybrid",
-    enhancement_factor=0.5,      # Overall strength
-    mult_factor=0.3,            # Multiplicative component
-    add_factor=2.0,             # Additive component  
-    mult_weight=0.7             # 70% multiplicative, 30% additive
+    enhancement_mode="multiplicative",
+    multiplicative_factor=0.3
 )
 ```
 
 ## Test Coverage
 
-**Primary Test**: `tests/pipeline/test_pipeline_flow.py::test_10_urban_field_enhancement`
+**Integration Test**: `tests/pipeline/test_pipeline_flow.py::test_10_urban_field_enhancement`
 - End-to-end urban field creation and enhancement
-- Verifies enhancement increases values
+- Verifies enhancement increases values appropriately
 
-**Detailed Tests**: `tests/pipeline/test_urban_field_enhancement.py`
+**Unit Tests**: `tests/analyze/test_urban_fields.py`
 - Multi-scale field computation
-- Each enhancement mode
 - Weight array validation
 - Edge cases: no roads, all roads
+- Dynamic range preservation
 
 ## Key Decisions
 
@@ -146,55 +176,55 @@ ntl_enhanced = enhance_ntl_with_urban_field(
 
 **Validation**: Compare with ground truth urban extent
 
-### 3. Enhancement Parameters
+### 3. Enhancement Strength
 
-**Factors**:
-- Base NTL brightness: Dimmer areas need more enhancement
-- Urban density: Dense areas need less enhancement
-- Output goals: Visualization vs analysis
+**Default**: 0.3 (up to 30% enhancement)
 
-**Typical Values**:
-- Enhancement factor: 0.3-0.7
-- Multiplicative weight: 0.6-0.8
-- Additive factor: 1.0-5.0 (in radiance units)
+**Tuning Guidelines**:
+- Lower values (0.1-0.2): Subtle enhancement for already bright areas
+- Default (0.3): Good balance for most regions
+- Higher values (0.4-0.5): Stronger enhancement for dim rural areas
+
+**Note**: Values above 0.5 may create artifacts
 
 ## Common Issues
 
-1. **Over-enhancement in Suburbs**
-   - Cause: Additive component too strong
-   - Fix: Reduce add_factor or increase mult_weight
+1. **Over-enhancement in Dense Urban Areas**
+   - Cause: Enhancement factor too high
+   - Fix: Reduce multiplicative_factor (try 0.2)
 
-2. **Roads Not Visible**
-   - Cause: Weights favor blurred scales
-   - Fix: Increase weight on original (index 0)
+2. **Roads Not Visible in Output**
+   - Cause: Weights favor blurred scales too much
+   - Fix: Increase weight on original road fraction (index 0)
 
-3. **Blocky Artifacts**
-   - Cause: Integer sigma values
-   - Fix: Use float sigmas (2.5, 5.5, etc.)
+3. **Blocky Artifacts Around Roads**
+   - Cause: Sharp transitions in urban field
+   - Fix: Adjust sigma values (try 2.5, 5.5, 10.5)
 
-## Performance Optimization
+## Performance Notes
 
-```python
-# Efficient: Single-pass enhancement
-enhanced = enhance_ntl_with_urban_field(ntl, field, **params)
-
-# Inefficient: Multiple temporary arrays
-temp1 = ntl * (1 + field * 0.3)
-temp2 = ntl + field * 2.0
-enhanced = 0.7 * temp1 + 0.3 * temp2  # 3x memory
-```
+- Gaussian filtering is the slowest operation
+- Urban field computation is done once and reused
+- Enhancement calculation is fast (element-wise multiplication)
+- Memory usage: ~3x the input array size during processing
 
 ## Configuration
 
 ```python
 # In PipelineConfig
 config.analysis.urban_field_sigmas = [2.0, 5.0, 10.0]
-config.analysis.urban_field_weights = [0.5, 0.3, 0.15, 0.05]
-config.enhancement.ntl_enhancement_mode = "hybrid"
-config.enhancement.ntl_enhancement_factor = 0.5
+config.analysis.urban_field_weights = [0.2, 0.3, 0.3, 0.2]
+config.analysis.enhancement_multiplicative_factor = 0.3
 ```
 
-## Visual Examples
+## Diagnostic Outputs
+
+When `config.save_diagnostics = True`:
+- `data/diagnostics/urban_field.tif`: Multi-scale urban density field
+- `data/diagnostics/ntl_enhancement.tif`: Enhancement delta (enhanced - original)
+- Logger outputs urban field statistics and enhancement coverage
+
+## Visual Impact
 
 Before enhancement:
 - Dark suburban roads
@@ -208,7 +238,7 @@ After enhancement:
 
 ## Related Steps
 
-- Previous: [Road Rasterization](./road-rasterization.md) (provides road fraction)
-- Previous: [NDUI Calculation](./ndui-calculation.md) (urban context)
-- Next: [Contrast Enhancement](./contrast-enhancement.md)
-- Alternative: Legacy road burn-in (when fractional=False)
+- Previous: [VIIRS Preprocessing](./viirs-preprocessing.md) - Provides NTL data
+- Previous: [Road Rasterization](./road-rasterization.md) - Provides fractional roads
+- Next: [NDUI Calculation](./ndui-calculation.md) - Uses enhanced NTL
+- Outputs: Enhanced NTL array for NDUI calculation

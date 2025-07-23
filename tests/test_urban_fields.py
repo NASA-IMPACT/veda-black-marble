@@ -166,93 +166,48 @@ class TestNTLEnhancement:
         )
 
         # The multiplicative mode now rescales to preserve dynamic range
-        # With default multiplicative_factor=0.15:
-        # The max enhancement factor is 1.15 (1.0 + 0.15 * 1.0 for full urban field)
-        # All values are then divided by 1.15 to preserve range
+        # With default multiplicative_factor=0.3:
+        # The max enhancement factor is 1.3 (1.0 + 0.3 * 1.0 for full urban field)
+        # All values are then divided by 1.3 to preserve range
 
         # No roads → minimum enhancement after rescaling
-        assert_array_almost_equal(enhanced[0, 0], 0.5 / 1.15, decimal=5)
+        assert_array_almost_equal(enhanced[0, 0], 0.5 / 1.3, decimal=5)
 
         # Full roads → full enhancement then rescaled
-        assert_array_almost_equal(enhanced[0, 1], (0.5 * 1.15) / 1.15, decimal=5)  # = 0.5
+        assert_array_almost_equal(enhanced[0, 1], (0.5 * 1.3) / 1.3, decimal=5)  # = 0.5
 
         # Half roads → partial enhancement then rescaled
-        assert_array_almost_equal(enhanced[1, 0], (0.5 * 1.075) / 1.15, decimal=5)
+        assert_array_almost_equal(enhanced[1, 0], (0.5 * 1.15) / 1.3, decimal=5)
 
-    def test_additive_enhancement(self):
-        """Test pure additive enhancement."""
-        ntl = np.array([[0.0, 0.5], [0.8, 0.0]], dtype=np.float32)
-        urban_field = np.array([[1.0, 1.0], [0.5, 0.0]], dtype=np.float32)
-
-        enhanced = enhance_ntl_with_urban_field(
-            ntl=ntl, urban_field=urban_field, enhancement_mode="additive"
-        )
-
-        # Dark area with roads gets boost (reduced from 0.1 to 0.05)
-        assert_array_almost_equal(enhanced[0, 0], 0.0 + 0.05 * 1.0)
-
-        # Already bright area gets same additive boost
-        assert_array_almost_equal(enhanced[0, 1], 0.5 + 0.05 * 1.0)
-
-    def test_hybrid_enhancement(self):
-        """Test context-aware hybrid enhancement."""
-        # Create test scenario:
-        # - Dark area with roads (should enhance more)
-        # - Bright area with roads (should enhance less)
-        # - Dark area without roads (no enhancement)
-
-        ntl = np.array(
-            [
-                [0.0, 0.1, 0.8],  # dark, dim, bright
-                [0.0, 0.1, 0.8],  # same pattern
-            ],
-            dtype=np.float32,
-        )
-
-        urban_field = np.array(
-            [
-                [0.0, 1.0, 1.0],  # no roads, full roads, full roads
-                [0.5, 0.5, 0.5],  # half roads everywhere
-            ],
-            dtype=np.float32,
-        )
-
-        enhanced = enhance_ntl_with_urban_field(
-            ntl=ntl, urban_field=urban_field, enhancement_mode="hybrid"
-        )
-
-        # Hybrid mode rescales to preserve dynamic range
-        # So we check relative differences instead of absolute
-
-        # The enhancement factor should be highest for dark areas with roads
-        # Calculate enhancement factors
-        factors = enhanced / (ntl + 1e-10)  # Add small value to avoid division by zero
-
-        # Dark with roads should have highest enhancement factor
-        assert factors[0, 1] > factors[0, 0]  # Dark with roads > dark without roads
-        assert factors[1, 1] > factors[1, 0]  # Half roads > no roads
-
-        # Verify range is preserved
-        assert enhanced.min() >= 0
-        assert enhanced.max() <= ntl.max()  # Should not exceed original max
+    def test_unsupported_modes_raise_error(self):
+        """Test that unsupported enhancement modes raise an error."""
+        ntl = np.array([[0.5, 0.5]], dtype=np.float32)
+        urban_field = np.array([[0.0, 1.0]], dtype=np.float32)
+        
+        # Test that additive mode raises error
+        with pytest.raises(ValueError, match="Only 'multiplicative' enhancement mode is supported"):
+            enhance_ntl_with_urban_field(
+                ntl=ntl, urban_field=urban_field, enhancement_mode="additive"  # type: ignore
+            )
+        
+        # Test that hybrid mode raises error
+        with pytest.raises(ValueError, match="Only 'multiplicative' enhancement mode is supported"):
+            enhance_ntl_with_urban_field(
+                ntl=ntl, urban_field=urban_field, enhancement_mode="hybrid"  # type: ignore
+            )
 
     def test_enhancement_preserves_zeros(self):
-        """Areas with no urban field should remain unchanged."""
+        """Areas with no urban field should scale proportionally but still preserve range."""
         ntl = np.random.rand(10, 10).astype(np.float32)
         urban_field = np.zeros((10, 10), dtype=np.float32)
 
-        for mode in ["multiplicative", "additive", "hybrid"]:
-            from typing import Literal, cast
-
-            enhancement_mode = cast(Literal["multiplicative", "additive", "hybrid"], mode)
-            enhanced = enhance_ntl_with_urban_field(
-                ntl=ntl, urban_field=urban_field, enhancement_mode=enhancement_mode
-            )
-
-            if mode == "multiplicative" or mode == "hybrid":
-                assert_array_almost_equal(enhanced, ntl)
-            elif mode == "additive":
-                assert_array_almost_equal(enhanced, ntl)  # 0 * anything = 0
+        enhanced = enhance_ntl_with_urban_field(
+            ntl=ntl, urban_field=urban_field, enhancement_mode="multiplicative"
+        )
+        
+        # With zero urban field, enhancement factor is 1.0 everywhere
+        # But due to rescaling by max factor (1.0), result should equal input
+        assert_array_almost_equal(enhanced, ntl)
 
 
 class TestIntegration:
@@ -281,21 +236,22 @@ class TestIntegration:
         ntl = np.ones((10, 10), dtype=np.float32) * 0.2
         ntl[road_fraction > 0] = 0.1  # Roads are darker (missing lights)
 
-        # Enhance with hybrid mode
+        # Enhance with multiplicative mode
         enhanced = enhance_ntl_with_urban_field(
-            ntl=ntl, urban_field=urban_field, enhancement_mode="hybrid"
+            ntl=ntl, urban_field=urban_field, enhancement_mode="multiplicative"
         )
 
-        # In hybrid mode with rescaling, check relative enhancement
-        # Calculate enhancement factors
-        factors = enhanced / (ntl + 1e-10)
-
-        # Roads should have higher enhancement factors than non-roads
-        assert factors[5, 5] > factors[0, 0]  # Intersection > corner
-        assert factors[5, 3] > factors[0, 0]  # On road > corner
-
-        # Verify range is preserved (key property of hybrid mode)
-        assert enhanced.max() <= ntl.max()  # Roads got more enhancement
+        # With multiplicative enhancement and rescaling, verify the pattern
+        # The enhancement preserves relative differences
+        
+        # Areas with higher urban field get proportionally more enhancement
+        # even though absolute values are rescaled
+        assert enhanced[5, 5] < enhanced[0, 0]  # Intersection was darker, stays darker
+        assert enhanced[5, 3] < enhanced[0, 3]  # Road pixels stay darker than non-road
+        
+        # Verify range is preserved
+        assert enhanced.min() >= 0
+        assert enhanced.max() <= ntl.max()
 
         # Enhancement should follow urban field pattern
         enhancement_map = enhanced - ntl

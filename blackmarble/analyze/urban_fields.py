@@ -77,105 +77,59 @@ def compute_urban_fields(
 def enhance_ntl_with_urban_field(
     ntl: ArrayLike,
     urban_field: ArrayLike,
-    enhancement_mode: Literal["additive", "multiplicative", "hybrid"] = "hybrid",
-    multiplicative_factor: float = 0.15,
-    additive_factor: float = 0.05,
-    hybrid_expected_scale: float = 0.15,
-    hybrid_expected_sqrt_scale: float = 0.05,
-    hybrid_application_factor: float = 0.5,
+    enhancement_mode: Literal["multiplicative"] = "multiplicative",
+    multiplicative_factor: float = 0.3,
 ) -> ArrayLike:
     """Enhance NTL based on urban density field.
 
-    Applies enhancement to nighttime lights based on the urban density
-    field, which represents the presence and influence of road infrastructure.
+    Applies multiplicative enhancement to nighttime lights based on the urban
+    density field. Areas with higher road density receive proportionally more
+    enhancement, up to a maximum factor.
+
+    The enhancement preserves the original dynamic range by rescaling after
+    enhancement, preventing artificial brightening of the entire image.
 
     Args:
-        ntl: Nighttime lights data (can be in any range, e.g., 0-3000 nW/cm²/sr)
+        ntl: Nighttime lights data (any units, e.g., DN values or nW/cm²/sr)
         urban_field: Urban density field from compute_urban_fields (0.0-1.0)
-        enhancement_mode: How to apply enhancement:
-            - "multiplicative": Simple multiplication (legacy approach)
-            - "additive": Add urban glow independent of current brightness
-            - "hybrid": Context-aware enhancement based on expected vs actual light
-        multiplicative_factor: Factor for multiplicative mode (default: 0.15)
-        additive_factor: Factor for additive mode (default: 0.05)
-        hybrid_expected_scale: Scale for linear term in hybrid mode (default: 0.15)
-        hybrid_expected_sqrt_scale: Scale for sqrt term in hybrid mode (default: 0.05)
-        hybrid_application_factor: How much of the missing light to add (default: 0.5)
+        enhancement_mode: Must be "multiplicative" (kept for compatibility)
+        multiplicative_factor: Maximum enhancement factor minus 1.0
+            (default: 0.3 means up to 1.3x enhancement)
 
     Returns:
-        Enhanced NTL array
+        Enhanced NTL array with preserved dynamic range
 
-    Notes:
-        The hybrid mode implements the key insight that roads indicate where
-        we expect urban activity, so areas with roads but low NTL are likely
-        undermeasured (e.g., residential areas with tree cover, new LED lights).
-
-        For VIIRS data with high values (0-3000), the enhancement uses percentage-based
-        scaling to ensure visible enhancement regardless of the absolute NTL range.
+    Examples:
+        >>> # Enhance NTL with 30% maximum boost in urban areas
+        >>> enhanced = enhance_ntl_with_urban_field(
+        ...     ntl=viirs_data,
+        ...     urban_field=urban_field,
+        ...     multiplicative_factor=0.3
+        ... )
     """
-    if enhancement_mode == "multiplicative":
-        # Multiplicative enhancement with dynamic range preservation
-        enhancement_factor = 1.0 + multiplicative_factor * urban_field
-        enhanced = ntl * enhancement_factor
-        # Rescale to preserve dynamic range (like old 1.3x then /1.3 approach)
-        max_factor = enhancement_factor.max()
-        return enhanced / max_factor
-
-    elif enhancement_mode == "additive":
-        # Pure additive: NTL + (factor * urban_field)
-        # Adds urban glow/scatter independent of current brightness
-        return ntl + (additive_factor * urban_field)
-
-    elif enhancement_mode == "hybrid":
-        # Context-aware enhancement with proper dynamic range preservation
-
-        # DEBUG: Print parameters being used
-        logger.debug("🔍 HYBRID ENHANCEMENT PARAMETERS:")
-        logger.debug("  - expected_scale: %s", hybrid_expected_scale)
-        logger.debug("  - expected_sqrt_scale: %s", hybrid_expected_sqrt_scale)
-        logger.debug("  - application_factor: %s", hybrid_application_factor)
-
-        # Calculate enhancement factor based on urban density
-        # This will be used to create a multiplicative enhancement similar to the old 1.3x approach
-        enhancement_factor = (
-            1.0
-            + (
-                hybrid_expected_scale * urban_field
-                + hybrid_expected_sqrt_scale * np.sqrt(urban_field)
-            )
-            * hybrid_application_factor
-        )
-
-        # Apply enhancement multiplicatively
-        enhanced = ntl * enhancement_factor
-
-        # Find the maximum enhancement factor applied
-        max_enhancement_factor = enhancement_factor.max()
-
-        # Rescale everything to preserve dynamic range
-        # This is like the old approach: multiply by up to 1.3, then divide everything by 1.3
-        result = enhanced / max_enhancement_factor
-
-        # DEBUG: Print enhancement statistics
-        logger.debug("📊 HYBRID ENHANCEMENT STATS:")
-        logger.debug("  - NTL range before: [%.1f, %.1f]", ntl.min(), ntl.max())
-        logger.debug("  - NTL range after: [%.1f, %.1f]", result.min(), result.max())
-        logger.debug("  - Max enhancement factor: %.3f", max_enhancement_factor)
-        logger.debug(
-            "  - Enhancement factors range: [%.3f, %.3f]",
-            enhancement_factor.min(),
-            enhancement_factor.max(),
-        )
-        logger.debug(
-            "  - Pixels enhanced: %d (%.1f%%)",
-            np.sum(enhancement_factor > 1.001),
-            np.sum(enhancement_factor > 1.001) / enhancement_factor.size * 100,
-        )
-
-        return result
-
-    else:
+    if enhancement_mode != "multiplicative":
         raise ValueError(
-            f"Unknown enhancement_mode: {enhancement_mode}. "
-            f"Must be one of: 'multiplicative', 'additive', 'hybrid'"
+            f"Only 'multiplicative' enhancement mode is supported, got: {enhancement_mode}"
         )
+    
+    # Multiplicative enhancement with dynamic range preservation
+    enhancement_factor = 1.0 + multiplicative_factor * urban_field
+    enhanced = ntl * enhancement_factor
+    
+    # Rescale to preserve dynamic range
+    # This prevents the whole image from getting brighter
+    max_factor = enhancement_factor.max()
+    result = enhanced / max_factor
+    
+    # Log enhancement statistics
+    enhanced_pixels = np.sum(enhancement_factor > 1.001)
+    if enhanced_pixels > 0:
+        logger.debug(
+            "Urban field enhancement: %d pixels enhanced (%.1f%%), "
+            "max factor: %.3f",
+            enhanced_pixels,
+            enhanced_pixels / enhancement_factor.size * 100,
+            max_factor
+        )
+    
+    return result

@@ -4,7 +4,7 @@ This step identifies and masks clouds, shadows, and other artifacts in Landsat i
 
 ## Overview
 
-Landsat Collection 2 provides a QA_PIXEL band with bit-packed quality flags. We decode these flags to create masks that exclude poor-quality pixels from analysis.
+Landsat Collection 2 provides a QA_PIXEL band with bit-packed quality flags. We decode these flags to create masks that exclude poor-quality pixels from analysis. The masking is applied per-date before temporal compositing to ensure consistent cloud removal across the time series.
 
 ## Algorithm
 
@@ -21,11 +21,11 @@ The QA_PIXEL band uses 16-bit integers where each bit represents a quality flag:
 | 4 | Cloud Shadow | Shadow cast by clouds |
 | 5 | Snow | Snow/ice pixels |
 | 6 | Clear | Clear sky conditions |
-| 7 | Water | Water body |
-| 8-9 | Cloud Confidence | 0=None, 1=Low, 2=Medium, 3=High |
-| 10-11 | Cloud Shadow Confidence | Same as above |
-| 12-13 | Snow/Ice Confidence | Same as above |
-| 14-15 | Cirrus Confidence | Same as above |
+| 7-8 | Water | Two-bit code: 00=land, 01=water, 10=reserved (snow/ice), 11=reserved |
+| 9-10 | Cloud Confidence | 0=None, 1=Low, 2=Medium, 3=High |
+| 11-12 | Cloud Shadow Confidence | Same as above |
+| 13-14 | Snow/Ice Confidence | Same as above |
+| 15 | Cirrus Confidence | 0=Low, 1=High |
 
 ### Masking Strategies
 
@@ -34,19 +34,21 @@ The QA_PIXEL band uses 16-bit integers where each bit represents a quality flag:
 We provide three pre-configured strategies:
 
 #### 1. Conservative Strategy
-- **Masks**: Cloud (high confidence only), shadow (high confidence)
-- **Keeps**: Medium/low confidence clouds, all snow, cirrus
-- **Use Case**: Maximize data retention, some clouds acceptable
+- **Implementation**: Only accepts known clear values (21824, 21888) OR pixels with CLEAR_BIT set
+  - 21824 = 0b0101010101000000 (clear land, high confidence clear)
+  - 21888 = 0b0101010110000000 (clear water, high confidence clear)
+- **Keeps**: Maximum data retention, accepts lower quality pixels
+- **Use Case**: Areas with persistent cloud cover
 
 #### 2. Moderate Strategy (Default)
-- **Masks**: Cloud (medium & high), shadow (medium & high), snow
-- **Keeps**: Low confidence artifacts, clear cirrus
+- **Masks**: Fill, dilated cloud, cirrus, cloud, shadow, snow, water
+- **Implementation**: Rejects pixels if ANY problematic bits are set
 - **Use Case**: Balance between quality and coverage
 
 #### 3. Permissive Strategy  
-- **Masks**: All clouds, all shadows, cirrus, snow
-- **Keeps**: Only highest quality pixels
-- **Use Case**: Highest quality requirements
+- **Masks**: Only high-confidence (≥2) clouds, shadows, and cirrus
+- **Keeps**: Low confidence artifacts
+- **Use Case**: When some cloud contamination is acceptable
 
 ### Mask Dilation
 
@@ -54,29 +56,36 @@ We provide three pre-configured strategies:
 
 **Parameter**: `dilate_pixels` (default: 3)
 - Creates buffer around detected features
-- Uses circular structuring element
+- Uses square structuring element (2*dilate_pixels+1)
 - Prevents cloud/shadow edges from contaminating analysis
 
-## Implementation
+## Pipeline Integration
+
+The pipeline applies QA masking during the `process_landsat_date()` function:
+
+1. **Multi-tile Handling**: Creates windowed mosaics for multiple Landsat tiles
+2. **Grid Alignment**: Reprojects to locally-optimized Albers Equal Area projection
+3. **Per-date Masking**: Applies masks before temporal compositing
+4. **Diagnostic Output**: Optionally saves cloud masks as GeoTIFFs
 
 ```python
-from blackmarble.prepare.landsat_qa import create_landsat_cloud_mask
-
-# Load QA_PIXEL band
-with rasterio.open("LC08_QA_PIXEL.TIF") as src:
-    qa_pixel = src.read(1)
-
-# Create mask with moderate strategy
-cloud_mask = create_landsat_cloud_mask(
-    qa_pixel=qa_pixel,
-    strategy="moderate",  # or "conservative", "permissive"
-    dilate_pixels=3
+# In process_landsat_date() - actual pipeline code
+processed_data = prepare.process_landsat_date(
+    bands_data=bands_data,
+    bbox=bbox,
+    apply_qa_mask=True,
+    dilate_pixels=3,
+    cloud_strategy="moderate",
+    save_diagnostics=True,
+    date_str=target_date.strftime('%Y-%m-%d'),
 )
-
-# Apply to spectral bands
-for band in ["B3", "B4", "B5"]:
-    data[band][~cloud_mask] = np.nan
 ```
+
+The function:
+- Processes QA_PIXEL first to create cloud mask
+- Applies mask to all spectral bands (B3, B4, B5)
+- Handles multiple tiles with windowed reads and mosaicking
+- Outputs masked data ready for index calculation
 
 ## Key Decisions
 
@@ -100,46 +109,41 @@ for band in ["B3", "B4", "B5"]:
 
 ## Test Coverage
 
-**Primary Test**: `tests/pipeline/test_pipeline_flow.py::test_04_landsat_processing`
-- Verifies mask creation and application
-- Checks clear pixel percentage
+**Unit Tests**: Located in `blackmarble/prepare/landsat_qa.py`
+- `qa_mask()`: Tests all three strategies with bit manipulation
+- `create_landsat_cloud_mask()`: Tests with dilation
+- `decode_qa_pixel()`: Validates bit field extraction
 
-**Comprehensive Tests**: `tests/pipeline/test_qa_masking.py`
-- Tests all three strategies
-- Validates bit flag interpretation  
-- Tests mask dilation
-- Edge cases: All clear, all cloudy scenes
+**Integration**: Full pipeline tests verify end-to-end masking
 
 ## Common Issues
 
 1. **Over-masking in Snowy Regions**
-   - Solution: Use conservative strategy or custom bit flags
+   - Solution: Use conservative strategy (keeps snow pixels)
+   - Note: Moderate strategy masks snow by default
    
 2. **Under-masking Cloud Edges**
    - Solution: Increase dilation to 5-7 pixels
+   - Trade-off: More data loss vs better edge removal
 
-3. **Missing Thin Clouds**
-   - Solution: Include cirrus bit in custom strategy
+3. **Water Bodies Masked**
+   - Solution: Moderate strategy excludes definite water (code 01)
+   - For water analysis: Use custom strategy without water bit
 
-## Custom Strategies
-
-For specific requirements, create custom bit flag combinations:
-
-```python
-# Custom: Mask only thick clouds
-custom_mask = (
-    (qa_pixel & (1 << 3)) |  # Cloud bit
-    ((qa_pixel >> 8) & 3) == 3  # High confidence only
-)
-```
+4. **Multi-tile Boundaries**
+   - Solution: Pipeline uses 120-pixel margin for seamless mosaics
+   - Prevents gaps at UTM zone boundaries
 
 ## Configuration
 
 ```python
 # In PipelineConfig
-config.preparation.qa_strategy = "moderate"
-config.preparation.qa_dilate_pixels = 3
-config.preparation.qa_custom_bits = None  # Or list of bits to mask
+config.preparation.qa_cloud_strategy = "moderate"  # or "conservative", "permissive"
+config.preparation.qa_dilation_radius = 3          # pixels to dilate
+
+# Per-composite settings (optional)
+config.preparation.qa_composite_strategy = "conservative"  # Less aggressive for compositing
+config.preparation.qa_composite_dilation = 1              # Less dilation for compositing
 ```
 
 ## Performance Notes
@@ -147,9 +151,17 @@ config.preparation.qa_custom_bits = None  # Or list of bits to mask
 - Bit operations are very fast (~0.1s for 5000×5000 pixels)
 - Dilation is the slowest part (~1s for same size)
 - Strategy choice has minimal performance impact
+- Multi-tile mosaicking uses windowed reads to minimize memory
+
+## Diagnostic Outputs
+
+When `save_diagnostics=True`:
+- Cloud masks saved as: `data/diagnostics/cloud_masks/cloud_mask_YYYY-MM-DD.tif`
+- QA pixel summary printed to console
+- Shows percentage of clear pixels per date
 
 ## Related Steps
 
-- Previous: Landsat data loading
-- Next: [Temporal Compositing](./temporal-compositing.md)
-- Affects: All Landsat-based indices (NDVI, NDWI)
+- Previous: [Landsat Search](./landsat-search.md) - Scene selection
+- Next: [Spectral Indices](./spectral-indices.md) - Calculate NDVI/NDWI
+- Affects: All Landsat-based analysis (indices, temporal composites)

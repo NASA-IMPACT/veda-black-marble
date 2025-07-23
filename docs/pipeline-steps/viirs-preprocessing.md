@@ -4,11 +4,34 @@ This step prepares VIIRS nighttime lights data for integration with Landsat imag
 
 ## Overview
 
-VIIRS (Visible Infrared Imaging Radiometer Suite) provides nighttime lights data at ~500m resolution. We preprocess it to a 12m resolution grid (≈ 0.000111111°) for enhanced spatial detail in urban corridors.
+VIIRS (Visible Infrared Imaging Radiometer Suite) provides nighttime lights data at ~500m resolution. We preprocess it to match a 30m resolution grid in a locally-optimized Albers Equal Area projection for accurate area calculations and consistent spatial analysis.
 
 ## Processing Steps
 
-### 1. Crop to Bounds
+### 1. Data Acquisition and Mosaicking
+
+**Function**: `blackmarble.acquire.viirs` + `gdal.BuildVRT()`
+
+**Purpose**: Download VIIRS gap-filled NTL data and create mosaic if multiple tiles
+
+**Key Points**:
+- Uses NASA's gap-filled product (VNP46A2) that already incorporates quality filtering
+- Lunar irradiance is already removed in VNP46A2 (pipeline does NOT subtract it)
+- Data is in DN units with 0.1 scale factor (converted to radiance later in NDUI calculation)
+- Creates VRT mosaic for multiple tiles
+- Fill value: 65530 (handled during mosaicking)
+
+**Implementation**:
+```python
+if len(viirs_ntl_files) > 1:
+    vrt_options = gdal.BuildVRTOptions(
+        separate=False,  # Mosaic tiles together
+        resolution='highest'  # Use highest resolution from input files
+    )
+    gdal.BuildVRT(viirs_ntl_vrt, [str(f) for f in viirs_ntl_files], options=vrt_options)
+```
+
+### 2. Crop to Bounds
 
 **Function**: `blackmarble.prepare.spatial.crop_to_bounds()`
 
@@ -20,112 +43,100 @@ VIIRS (Visible Infrared Imaging Radiometer Suite) provides nighttime lights data
 
 **Implementation**:
 ```python
-viirs_cropped, viirs_transform, viirs_bounds = crop_to_bounds(
-    data=viirs_data,
+viirs_ntl, viirs_transform, viirs_bounds = prepare.crop_to_bounds(
+    data=viirs_ntl,
     src_transform=viirs_profile["transform"],
     bounds=bbox
 )
 ```
 
-### 2. Reprojection {#reprojection}
+### 3. Reprojection to Processing CRS {#reprojection}
 
 **Function**: `blackmarble.prepare.spatial.reproject_image()`
 
-**Purpose**: Transform from geographic (WGS84) to projected coordinate system
+**Purpose**: Transform from geographic (WGS84) to locally-optimized Albers Equal Area projection
 
 **Key Decisions**:
-- **Target CRS**: Automatically selected based on:
-  - Landsat UTM zone if available
-  - Local UTM zone based on bbox centroid
-  - Rationale: Minimize distortion, enable accurate distance calculations
+- **Target CRS**: Locally-optimized Albers Equal Area
+  - Created by `get_processing_crs()` based on bbox centroid
+  - Rationale: Minimize distortion, enable accurate area calculations
+  - Resolution: 30m default (can override via config.preparation.target_resolution)
 - **Resampling During Reprojection**: Bilinear
   - Maintains smooth radiance gradients
 
 **Implementation**:
 ```python
-viirs_reprojected, viirs_transform, viirs_bounds = reproject_image(
-    data=viirs_resampled,
-    src_transform=viirs_transform,
-    src_crs="EPSG:4326",
-    dst_crs=target_crs,  # e.g., "EPSG:32610" for UTM Zone 10N
+# Get processing CRS and grid
+processing_crs = get_processing_crs(bbox)
+processing_crs, reference_transform, reference_shape = create_processing_grid(bbox, 30.0)
+
+# Reproject VIIRS to processing CRS
+viirs_reprojected, viirs_transform, viirs_bounds = prepare.reproject_image(
+    data=viirs_corrected,
+    src_transform=viirs_profile["transform"],
+    src_crs=viirs_profile["crs"],
+    dst_crs=processing_crs,
+    dst_transform=reference_transform,
+    dst_shape=reference_shape,
     resampling="bilinear"
 )
 ```
 
-### 3. Spatial Alignment to Landsat Grid
+### 4. Grid Alignment
 
-**Function**: `blackmarble.prepare.spatial.align_rasters()`
+**Purpose**: Ensure VIIRS aligns perfectly with the processing grid
 
-**Purpose**: Align VIIRS to a common 12m grid for consistent analysis
+**Key Points**:
+- Uses pre-computed reference grid from `create_processing_grid()`
+- All rasters are aligned to this common 30m grid
+- No additional resampling needed - alignment happens during reprojection
 
-**Key Decisions**:
-- **Target Resolution**: 12m (≈ 0.000111111°)
-  - Rationale: Provides better spatial detail for urban areas while maintaining computational efficiency
-  - Process: VIIRS is resampled from ~500m to 12m during alignment
-- **Resampling Method**: Bilinear
-  - Rationale: Smooth interpolation for continuous radiance values
-  - Preserves nighttime light gradients
-
-**Implementation**:
-```python
-# After reprojecting both to UTM
-aligned_rasters = align_rasters(
-    rasters=[landsat_band, viirs_reprojected],
-    transforms=[landsat_transform, viirs_transform],
-    reference_idx=0,  # Use Landsat as reference
-    resampling="bilinear"
-)
-viirs_aligned = aligned_rasters[1][0]
-```
-
-**Note**: The resolution change happens during alignment, not as a separate resampling step.
+**Note**: The pipeline no longer resamples to 12m. Instead, it uses 30m resolution throughout for consistency with Landsat's native resolution.
 
 ## Test Coverage
 
-**Primary Test**: `tests/pipeline/test_pipeline_flow.py::test_03_viirs_processing`
-- Verifies cropping reduces data size correctly
-- Checks reprojection to UTM
-- Tests alignment with common grid (12m resolution)
+**Primary Test**: `tests/acquire/test_viirs_orientation.py`
+- Verifies VIIRS data loading and orientation
+- Checks coordinate transformations
 
-**Additional Tests**: 
-- `tests/pipeline/test_viirs_processing.py`
-  - Edge cases: Empty bounds, polar regions
-  - Performance: Large area processing
-- `tests/pipeline/test_alignment.py`
-  - Multi-raster alignment scenarios
+**Pipeline Integration**: 
+- Full pipeline test in `tests/pipeline/` verifies end-to-end processing
+- Includes cropping, reprojection, and alignment
 
 ## Common Issues
 
-1. **Memory Usage**: Alignment to 12m can increase memory ~1700x (500m→12m)
-   - Solution: Process in tiles for large areas
+1. **Memory Usage**: Processing large areas at 30m resolution
+   - Solution: Use VRT mosaics to handle tiles efficiently
+   - Pipeline automatically creates VRTs for multiple tiles
 
-2. **Nodata Handling**: VIIRS uses 0 for no data
-   - Solution: Preserve zeros during alignment
+2. **Nodata Handling**: VIIRS uses 0 for no data, fill value is 65530
+   - Solution: Gap-filled product handles this automatically
+   - Zeros are preserved as valid data (no lights)
 
-3. **CRS Selection**: Automatic UTM selection may cross zone boundaries
-   - Solution: Allow manual CRS override in config
+3. **CRS Selection**: Albers Equal Area parameters optimized per region
+   - Solution: Automatic optimization based on bbox centroid
+   - Ensures minimal distortion for the area of interest
 
-4. **Alignment Failure**: VIIRS and Landsat don't overlap spatially
-   - Solution: Check spatial footprints before processing
+4. **Multiple Tiles**: VIIRS data may span multiple tiles
+   - Solution: Automatic VRT mosaicking handles this seamlessly
 
 ## Configuration
 
 ```python
-# In PipelineConfig
-config.preparation.viirs_resampling = "bilinear"  # or "cubic"
-config.preparation.auto_select_utm = True  # Auto-select UTM zone
-config.spatial.alignment_nodata = 0.0  # Preserve VIIRS zeros
+# No configuration needed - pipeline handles automatically
+# Processing CRS is determined by get_processing_crs(bbox)
+# Resolution is fixed at 30m to match Landsat
 ```
 
 ## Performance Notes
 
-- Cropping first reduces processing time by 10-100x
-- Bilinear resampling is 3x faster than cubic with minimal quality loss
-- Alignment is the slowest step (~70% of preprocessing time)
-- Reprojection before alignment reduces memory usage
+- Cropping first reduces processing time significantly
+- VRT mosaics avoid loading all tiles into memory
+- Bilinear resampling preserves smooth radiance gradients
+- Single reprojection step (no separate resampling)
 
 ## Related Steps
 
-- Next: [Spatial Alignment](./spatial-alignment.md) - Align with Landsat
-- Uses: VIIRS data from acquisition phase
+- Next: [Landsat Processing](./landsat-qa-masking.md) - Process Landsat imagery
+- Uses: VIIRS gap-filled NTL data from NASA Earthdata
 - Outputs to: NDUI calculation, NTL enhancement

@@ -1,6 +1,6 @@
 # NDUI (Normalized Difference Urban Index) Calculation
 
-This step combines nighttime lights with vegetation indices to identify urban areas using the Black Marble v3 algorithm.
+This step combines nighttime lights with vegetation indices to identify urban areas using the Black Marble algorithm.
 
 ## Overview
 
@@ -14,57 +14,58 @@ NDUI quantifies the "urbanness" of pixels by comparing nighttime light intensity
 
 ### 1. Input Preparation
 
-The function first prepares the NTL (nighttime lights) data:
+The function prepares the NTL (nighttime lights) data:
 
-- **DN to Radiance Conversion**: If max(NTL) > 100, assumes DN values and converts: `ntl = ntl / 10.0`
-- **Ceiling Clipping**: `ntl = min(ntl, ntl_ceiling)` (default ceiling = 10.0 nW/cm²/sr)
-- **Floor Clipping**: `ntl = 0 if ntl < ntl_floor else ntl` (default floor = 0.1)
-- **Ceiling-Only Normalization**: `ntl_normalized = ntl / ntl_ceiling`
+- **DN to Radiance Conversion**: Always divides by 10.0 to convert DN to nW/cm²/sr
+- **Ceiling Clipping**: Values above `ntl_ceiling` are clipped (default = 10.0 nW/cm²/sr)
+- **Floor Application**: Values below `ntl_floor` are set to 0 (default = 0.1)
+- **Ceiling-Only Normalization**: `ntl_normalized = ntl_clipped / ntl_ceiling`
 
-**Why ceiling-only normalization?** We divide by the fixed radiance ceiling instead of the (ceiling-floor) range so that an NDUI value of 1.0 always represents the same absolute radiance, independent of year-specific gain adjustments. The floor is used only to suppress sensor noise and is not part of the scaling.
+**Why ceiling-only normalization?** This keeps the 0-1 scale invariant when ceiling is tuned year-to-year, as physical zero is unambiguous unlike the floor.
 
 ### 2. Core Index Calculation
 
+The original Black Marble formula:
 ```
-ndui_raw = (ntl_normalized - ndvi) / (ntl_normalized + ndvi + epsilon)
+ndui = (ntl_normalized - ndvi) / (ntl_normalized + ndvi + epsilon)
 ```
 
 Where:
 - `ntl_normalized`: Normalized nighttime lights (0-1)
-- `ndvi`: Vegetation index (-1 to 1)
-- `epsilon`: Small value (1e-6) to prevent division by zero
+- `ndvi`: Vegetation index from Landsat
+- `epsilon`: Small value (default 0.00001) to prevent division by zero
 
-The raw NDUI is then clamped to [-1, 1].
+The result is then clamped to [-1, 1].
 
 ### 3. Water Masking
 
-Water bodies are masked using NDWI (Normalized Difference Water Index):
+Water bodies are masked using NDWI:
 
-```
-if ndwi >= 0:
-    ndui_raw = -1  # Water pixels set to -1
+```python
+if ndwi >= 0.0:
+    ndui = -1.0  # Water pixels set to -1
 ```
 
 ### 4. Range Transformation
 
-Convert from [-1, 1] to [0, 1] range for easier interpretation:
+Convert from [-1, 1] to [0, 1] range using the bm.py formula:
 
-```
-ndui = abs(ndui_raw + 1.0) / 2.0
+```python
+ndui = np.abs(ndui + 1.0) / 2.0
 ```
 
-This transformation ensures:
-- Water pixels (-1) → 0
-- Non-urban areas → low values
-- Urban areas → high values
+This transformation:
+- Maps water pixels (-1) → 0
+- Maps the range [-1, 1] → [0, 1]
+- Uses absolute value (matching legacy behavior)
 
 ### 5. Floor Threshold
 
 Remove noise and spurious low values:
 
-```
+```python
 if ndui < ndui_floor:
-    ndui = 0  # Default floor = 0.02
+    ndui = 0.0  # Default floor = 0.02
 ```
 
 ## Value Interpretation
@@ -79,27 +80,50 @@ After all transformations, NDUI values represent:
 
 ## Implementation
 
+### Pipeline Usage
+
+The pipeline calculates NDUI after aligning all inputs to the same grid:
+
+```python
+# From blackmarble/pipeline.py
+if ntl_composite is not None and ndvi is not None:
+    # Verify shapes match before calculating NDUI
+    if ntl_composite.shape != ndvi.shape:
+        raise ValueError(
+            f"NTL and NDVI shapes don't match: "
+            f"{ntl_composite.shape} vs {ndvi.shape}"
+        )
+    
+    # Calculate NDUI with configuration parameters
+    ndui = analyze.calculate_ndui(
+        ntl=ntl_composite,      # Enhanced NTL (raw DN values)
+        ndvi=ndvi,              # NDVI composite (clamped to [0,1])
+        ndwi=ndwi,              # NDWI composite (optional water masking)
+        ntl_floor=config.analysis.ntl_floor,      # Default: 0.1
+        ntl_ceiling=config.analysis.ntl_ceiling,  # Default: 10.0
+        ndui_floor=config.analysis.ndui_floor,    # Default: 0.02
+        epsilon=1e-6
+    )
+    
+    # Create urban mask for statistics
+    urban_mask = ndui > 0.3
+```
+
+### Function Interface
+
 ```python
 from blackmarble.analyze.indices import calculate_ndui
 
-# Inputs from previous steps
-ntl = viirs_composite      # Nighttime lights (can be DN or radiance)
-ndvi = ndvi_composite      # Vegetation index from Landsat
-ndwi = ndwi_composite      # Water index from Landsat (optional)
-
-# Calculate NDUI with default Black Marble v3 parameters
+# Example standalone usage
 ndui = calculate_ndui(
-    ntl=ntl,
-    ndvi=ndvi,
-    ndwi=ndwi,              # Optional water masking
-    ntl_floor=0.1,          # Minimum NTL threshold (nW/cm²/sr)
-    ntl_ceiling=10.0,       # Maximum NTL for normalization
-    ndui_floor=0.02,        # Minimum NDUI threshold
+    ntl=viirs_dn_values,    # Raw VIIRS DN values (NOT radiance)
+    ndvi=ndvi_composite,    # NDVI from Landsat (range [0, 1])
+    ndwi=ndwi_composite,    # Optional NDWI for water masking
+    ntl_floor=0.1,          # Min NTL radiance threshold
+    ntl_ceiling=10.0,       # Max NTL for normalization
+    ndui_floor=0.02,        # Min NDUI value to keep
     epsilon=1e-6            # Numerical stability
 )
-
-# Create urban mask
-urban_mask = ndui > 0.3  # Typical threshold for urban areas
 ```
 
 ## Key Differences from Standard NDVI-like Indices
@@ -123,40 +147,62 @@ config.analysis.ndui_floor = 0.02     # Min NDUI value to keep
 1. **Water Bodies Showing High NDUI**
    - Cause: Missing NDWI input for water masking
    - Solution: Always provide NDWI from Landsat processing
+   - Note: Water pixels (NDWI >= 0) are set to -1, then mapped to 0
 
 2. **Unexpected Zero Values**
-   - Cause: NTL values below floor threshold
+   - Cause: NTL values below floor threshold (0.1 nW/cm²/sr)
    - Solution: Check if ntl_floor is appropriate for your region
+   - Note: Floor is applied after conversion to radiance
 
 3. **Saturation in Bright Areas**
-   - Cause: NTL values exceeding ceiling
+   - Cause: NTL values exceeding ceiling (10.0 nW/cm²/sr)
    - Solution: Adjust ntl_ceiling based on regional statistics
+   - Debug: Check logger output for clipping percentage
 
-4. **Different Results from Legacy Black Marble**
-   - Note: Legacy bm.py included road boosting (1.3x for primary roads)
-   - Current implementation does not include road enhancement in NDUI
+4. **Shape Mismatch Errors**
+   - Cause: Inputs not aligned to same spatial grid
+   - Solution: Pipeline handles alignment automatically
+   - Debug: Check that all inputs go through reprojection
+
+5. **NTL Values Seem Too Low**
+   - Note: Input should be raw DN values, NOT pre-converted radiance
+   - Function automatically divides by 10.0 for conversion
+   - Check: Raw VIIRS DN values typically range 0-1000+
 
 ## Test Coverage
 
-**Primary Test**: `tests/pipeline/test_pipeline_flow.py::test_09_calculate_indices`
-- Basic NDUI calculation
-- Value range verification
+**Integration Tests**: `tests/pipeline/test_pipeline_flow.py`
+- End-to-end NDUI calculation in pipeline context
+- Alignment verification before calculation
+- Urban mask generation
 
-**Detailed Tests**: `tests/pipeline/test_ndui_calculation.py`
-- Water masking behavior
-- Parameter effects (floor/ceiling)
+**Unit Tests**: `tests/analyze/test_indices.py`
+- Basic NDUI calculation verification
+- Water masking behavior (NDWI >= 0 → NDUI = 0)
+- Floor/ceiling parameter effects
 - Edge cases: all zeros, all NaN
-- DN to radiance conversion
+- DN to radiance conversion (÷10.0)
+- Range transformation verification
+- Shape mismatch error handling
 
 ## Performance Notes
 
-- Calculation is element-wise and vectorized
+- Calculation is element-wise and vectorized (fast)
 - Water masking adds minimal overhead
-- No significant memory requirements beyond input arrays
+- Debug logging can be enabled for troubleshooting
+- Memory usage: Same as input arrays (no additional copies)
+
+## Diagnostic Outputs
+
+When `config.save_diagnostics = True`:
+- `data/diagnostics/ndui_raw.tif`: NDUI after calculation
+- Logger outputs scaling info and clipping statistics
+- Shape verification logs for debugging alignment issues
 
 ## Related Steps
 
-- Previous: [Spectral Indices](./spectral-indices.md) (NDVI, NDWI inputs)
-- Previous: [Temporal Composite](./temporal-composite.md) (NTL input)
-- Next: [Urban Field Enhancement](./urban-field-enhancement.md)
-- Outputs: NDUI array for final Black Marble product
+- Previous: [Spectral Indices](./spectral-indices.md) - Provides NDVI, NDWI
+- Previous: [Urban Field Enhancement](./urban-field-enhancement.md) - Enhanced NTL input
+- Previous: [Spatial Alignment](./spatial-alignment.md) - Ensures matching grids
+- Next: Final Black Marble product export
+- Outputs: NDUI array (0-1 range) for urban area identification
