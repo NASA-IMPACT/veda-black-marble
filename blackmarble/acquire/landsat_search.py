@@ -17,9 +17,7 @@ from blackmarble.config import LandsatAcquisitionConfig
 logger = logging.getLogger(__name__)
 
 
-# ============================================================================
 # Pure Data Structures (Immutable)
-# ============================================================================
 
 @dataclass(frozen=True)
 class SceneMeta:
@@ -60,9 +58,7 @@ class SearchParams:
     allow_incomplete: bool = False
 
 
-# ============================================================================
 # Pure Functions (No Side Effects)
-# ============================================================================
 
 def calculate_quality_score(scene: SceneMeta, weights: dict[str, float]) -> float:
     """Calculate quality score for a scene (pure function).
@@ -236,9 +232,7 @@ def parse_scene_id(scene_id: str) -> dict[str, Any]:
     }
 
 
-# ============================================================================
 # MTL Parsing Functions (Pure)
-# ============================================================================
 
 def parse_mtl_text(text: str) -> dict[str, Any]:
     """Parse MTL text format into dictionary (pure function)."""
@@ -397,9 +391,7 @@ def parse_scene_metadata(scene_dict: dict[str, Any], mtl_data: dict[str, Any] | 
     # Other exceptions (e.g. programming errors) propagate.
 
 
-# ============================================================================
 # I/O Functions (Side Effects Isolated)
-# ============================================================================
 
 class S3Client(Protocol):
     """Protocol for S3 client operations."""
@@ -490,9 +482,7 @@ async def fetch_mtl_with_semaphore(
         return parse_scene_metadata(scene_dict, mtl_data)
 
 
-# ============================================================================
 # Resource Management (Bracket Pattern)
-# ============================================================================
 
 async def with_s3_client(
     func: Callable[[S3Client], Any],
@@ -514,9 +504,7 @@ async def with_s3_client(
         return await func(s3_client)
 
 
-# ============================================================================
 # Main Pipeline (Composition of Pure Functions)
-# ============================================================================
 
 async def search_best_scenes_functional(
     params: SearchParams,
@@ -601,9 +589,7 @@ async def search_best_scenes_functional(
     return selected_scenes
 
 
-# ============================================================================
 # Public API (Convenience wrapper)
-# ============================================================================
 
 async def search_best_scenes(
     bbox: tuple[float, float, float, float],

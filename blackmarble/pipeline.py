@@ -70,10 +70,8 @@ async def black_marble_pipeline(
         Dictionary with results and metadata
     """
 
-    # ==================== SETUP PHASE ====================
     print("🚀 Starting Black Marble pipeline with async downloads")
 
-    # Get Earthdata token from parameter or environment
     if earthdata_token is None:
         earthdata_token = os.environ.get("EARTHDATA_TOKEN")
         if not earthdata_token:
@@ -82,35 +80,27 @@ async def black_marble_pipeline(
                 "or pass earthdata_token parameter. VIIRS downloads will be skipped."
             )
 
-    # Get configuration values
     composite_months = config.acquisition.composite_months if config else 12
-    data_dir = "./data"  # Use default data directory
-
-    # ==================== ASYNC DOWNLOAD PHASE ====================
-    # Download ALL data upfront using async I/O
+    data_dir = "./data"
 
     print(f"\n📥 Downloading all data for {composite_months} dates...")
     print(f"   Target date: {date.strftime('%Y-%m-%d')}")
     print(f"   Bounding box: {bbox}")
 
-    # Create download plan and orchestrator
     from .acquire.async_orchestrator import AsyncDownloadOrchestrator, DownloadPlan
 
     plan = DownloadPlan.from_pipeline_config(bbox, date, config)
     orchestrator = AsyncDownloadOrchestrator(earthdata_token=earthdata_token, show_progress=True)
 
-    # Run async downloads
     download_results = await orchestrator.download_all(plan)
 
     print("\n✅ Downloads complete!")
     print(download_results.summary())
 
-    # Check for critical failures
     if not download_results.viirs_data and earthdata_token:
         logger.error("VIIRS downloads failed - cannot continue without nighttime lights data")
         print("❌ Pipeline failed: VIIRS data is required but download failed")
         print("   Please check your EARTHDATA_TOKEN and network connection")
-        # Check if there were specific download errors
         viirs_errors = [err for err in download_results.failed_downloads if "VIIRS" in err]
         if viirs_errors:
             print(f"   Error details: {viirs_errors[0]}")
@@ -124,15 +114,10 @@ async def black_marble_pipeline(
         )
         print("⚠️  No Landsat data available - creating minimal output with available data")
 
-    # ==================== PREPARE PHASE ====================
-    # Process raw data into analysis-ready format
-
     print("\n🔧 Processing downloaded data...")
 
-    # Ensure temp directory exists for VRTs
     os.makedirs(f"{data_dir}/temp", exist_ok=True)
 
-    # Extract downloaded data
     viirs_files = download_results.viirs_data
     landsat_files_by_date = download_results.landsat_data
     road_network = download_results.osm_data
@@ -159,7 +144,6 @@ async def black_marble_pipeline(
         except Exception as e:
             log.debug(f"  - Could not extract bounds: {e}")
 
-    # Process VIIRS data (if available)
     viirs_corrected = None
     viirs_profile = None
     viirs_transform = None
@@ -170,14 +154,12 @@ async def black_marble_pipeline(
         for key, files in viirs_files.items():
             print(f"  {key}: {len(files)} files")
 
-        # Check if we have the expected layers - match sync pipeline names
         viirs_ntl_files = viirs_files.get("gap_filled_ntl", [])
         viirs_quality_files = viirs_files.get("quality", [])
 
         if not viirs_ntl_files:
             print("⚠️  No VIIRS NTL files found - skipping VIIRS processing")
         else:
-            # Create VRT mosaic if multiple tiles
             if len(viirs_ntl_files) > 1:
                 print(f"Creating VRT mosaic for {len(viirs_ntl_files)} VIIRS tiles")
                 viirs_ntl_vrt = f"{data_dir}/temp/viirs_gap_filled_ntl_mosaic.vrt"
@@ -209,7 +191,6 @@ async def black_marble_pipeline(
                     viirs_ntl = src.read(1)
                     viirs_profile = src.profile
 
-            # Crop VIIRS to bounding box
             logger.debug(f"Cropping VIIRS data to bbox: {bbox}")
             logger.debug(f"Original VIIRS shape: {viirs_ntl.shape}")
             logger.debug(f"Original VIIRS CRS: {viirs_profile['crs']}")
@@ -228,12 +209,10 @@ async def black_marble_pipeline(
                 f"Non-zero pixels after crop: {(viirs_ntl > 0).sum()} ({(viirs_ntl > 0).sum() / viirs_ntl.size * 100:.1f}%)"
             )
 
-            # Update profile
             viirs_profile["transform"] = viirs_transform
             viirs_profile["height"] = viirs_ntl.shape[0]
             viirs_profile["width"] = viirs_ntl.shape[1]
 
-            # Save diagnostic output if requested
             if config and getattr(config, "save_diagnostics", False):
                 prepare.save_diagnostic(
                     viirs_ntl,
@@ -246,7 +225,6 @@ async def black_marble_pipeline(
             # by using the best available pixels from recent observations
             viirs_corrected = viirs_ntl
 
-        # Save final VIIRS data
         if config and getattr(config, "save_diagnostics", False) and viirs_profile is not None:
             if viirs_corrected is not None:
                 prepare.save_diagnostic(
@@ -259,7 +237,6 @@ async def black_marble_pipeline(
     if viirs_corrected is None:
         print("⚠️  No VIIRS data - using Landsat as reference")
 
-    # Get locally-optimized Albers Equal Area projection
     from .crs import get_processing_crs
     
     processing_crs = get_processing_crs(bbox)
@@ -274,26 +251,19 @@ async def black_marble_pipeline(
     log.debug(f"  - BBox: {bbox}")
     log.debug(f"  - CRS WKT: {processing_crs.to_wkt()}")
 
-    # Pre-compute target grid for deterministic alignment
-    # This ensures all reprojections use the exact same grid
     print("\n📐 Computing target grid for spatial alignment...")
     from .crs import create_processing_grid
     
-    # Create the standard processing grid
-    # This will be used for EVERYTHING: Landsat, VIIRS, roads, indices, etc.
     processing_crs, reference_transform, reference_shape = create_processing_grid(bbox, target_resolution_landsat)
     
-    # Get bounds for display
     bounds = array_bounds(reference_shape[0], reference_shape[1], reference_transform)
     
     print(f"  Target grid: {reference_shape} pixels")
     print(f"  Bounds in processing CRS: ({bounds[0]:.1f}, {bounds[1]:.1f}, {bounds[2]:.1f}, {bounds[3]:.1f})")
     print(f"  Pixel-aligned to {target_resolution_landsat}m grid")
 
-    # Process Landsat data
     print("\n🛰️ Processing Landsat data...")
 
-    # Get scale factors from config
     scale_factor = (
         config.preparation.landsat_scale_factor
         if config and hasattr(config, "preparation")
@@ -306,29 +276,23 @@ async def black_marble_pipeline(
         config.preparation.qa_dilation_radius if config and hasattr(config, "preparation") else 3
     )
 
-    # Initialize band stacks and index stacks
     band_stacks = {"B3": [], "B4": [], "B5": []}
-    band_dates = {"B3": [], "B4": [], "B5": []}  # Track dates for diagnostics
+    band_dates = {"B3": [], "B4": [], "B5": []}
 
-    # Initialize index stacks for index-first calculation
     index_stacks = {"ndvi": [], "ndwi": []}
-    index_dates = []  # Dates for index composites
+    index_dates = []
 
-    # Initialize composite variables (for index-first calculation)
     ndvi_composite = None
     ndwi_composite = None
     reference_profile = None
 
-    # Track all landsat files for metadata
     all_landsat_files = {"B3": [], "B4": [], "B5": []}
 
-    # Track which tiles we actually have data for
     tiles_with_data = set()
 
     process = psutil.Process()
     monitor_memory = True
 
-    # Original in-memory processing
     print(f"\n💾 Processing {len(landsat_files_by_date)} Landsat dates")
 
     # Debug configuration
@@ -571,7 +535,6 @@ async def black_marble_pipeline(
         # Create index composites (indices already calculated per-date)
         print("  Creating index composites from per-date indices")
 
-        # Create NDVI composite
         if index_stacks["ndvi"]:
             print(f"  Creating NDVI composite from {len(index_stacks['ndvi'])} dates")
             ndvi_composite = analyze.create_index_temporal_composite(
@@ -589,7 +552,6 @@ async def black_marble_pipeline(
         else:
             ndvi_composite = None
 
-        # Create NDWI composite
         if index_stacks["ndwi"]:
             print(f"  Creating NDWI composite from {len(index_stacks['ndwi'])} dates")
             ndwi_composite = analyze.create_index_temporal_composite(
@@ -620,11 +582,8 @@ async def black_marble_pipeline(
                 # This is a fallback - ideally we should have saved profiles with indices
                 print("    Creating fallback reference profile from index shape")
 
-        # We still need to reproject indices to target CRS
-        # Create a dummy "landsat_reprojected" dict for compatibility
         landsat_reprojected = {}
 
-        # Skip band compositing entirely
 
     else:
         print("⚠️  No valid Landsat data found - skipping index calculations")
@@ -877,14 +836,11 @@ async def black_marble_pipeline(
                 else:
                     print(f"  {band_name}: No valid pixels")
 
-    # ==================== ANALYZE PHASE ====================
     print("\n📈 Calculating indices...")
 
-    # Calculate spectral indices
     ndvi = None
     ndwi = None
 
-    # We already have composited indices - just need to reproject them
     if ndvi_composite is not None and reference_profile is not None:
         print("  Reprojecting pre-calculated NDVI composite...")
         print(f"    Using reference grid: {reference_shape}")
@@ -933,10 +889,8 @@ async def black_marble_pipeline(
                 crs=processing_crs,
             )
 
-    # For now, we only have single date VIIRS, so no temporal compositing
     ntl_composite = viirs_reprojected if viirs_reprojected is not None else None
 
-    # Save raw NTL diagnostic before enhancement
     if config and getattr(config, "save_diagnostics", False) and ntl_composite is not None:
         prepare.save_diagnostic(
             ntl_composite,
@@ -946,9 +900,6 @@ async def black_marble_pipeline(
             crs=processing_crs,
         )
 
-    # ENHANCE NTL WITH ROADS (before NDUI calculation)
-    # This is the correct place to apply road enhancement - to the NTL data itself,
-    # not to the derived NDUI index
     if ntl_composite is not None:
         enhancement_approach = config.analysis.ntl_enhancement_approach if config else "urban_field"
 
@@ -968,7 +919,6 @@ async def black_marble_pipeline(
                 weights=config.analysis.urban_field_weights,
             )
 
-            # DEBUG: Print urban field statistics
             print("\n🏙️ URBAN FIELD STATS:")
             print(f"  - Max urban field: {urban_field.max():.3f}")
             print(f"  - Mean urban field (where > 0): {urban_field[urban_field > 0].mean():.3f}")
@@ -1022,7 +972,6 @@ async def black_marble_pipeline(
 
 
 
-    # Verify all arrays are aligned to the reference grid
     if reference_transform is not None and reference_shape is not None:
         print(f"\\n✅ Verifying spatial alignment to reference grid {reference_shape}:")
 
@@ -1041,7 +990,6 @@ async def black_marble_pipeline(
 
         print("  All arrays properly aligned!")
 
-    # Calculate urban index combining NTL and vegetation
     ndui = None
     if ntl_composite is not None and ndvi is not None:
         # Verify shapes match before calculating NDUI
@@ -1055,7 +1003,6 @@ async def black_marble_pipeline(
                 f"with the spatial alignment step."
             )
 
-        # DIAGNOSTIC: Print data statistics before NDUI
         print("\nBefore NDUI Calculation:")
         print(f"  NTL composite shape: {ntl_composite.shape}")
         print(
@@ -1071,7 +1018,6 @@ async def black_marble_pipeline(
             f"  NDVI range (clamped to [0,1]): [{np.nanmin(ndvi):.3f}, {np.nanmax(ndvi):.3f}]"
         )
 
-        # Get ceiling value for debug
         ceiling_value = config.analysis.ntl_ceiling if config and hasattr(config, "analysis") else 10.0
         print(f"\n🔍 DEBUG: Using ntl_ceiling = {ceiling_value}")
         
@@ -1087,7 +1033,6 @@ async def black_marble_pipeline(
             epsilon=1e-6,
         )
 
-        # DIAGNOSTIC: Print NDUI statistics
         print("\nAfter NDUI Calculation:")
         print(
             f"  NDUI non-zero pixels: {(ndui > 0).sum()} "
@@ -1105,15 +1050,12 @@ async def black_marble_pipeline(
                 crs=processing_crs,
             )
 
-    # Create urban mask
     urban_mask = None
     if ndui is not None:
-        urban_mask = ndui > 0.3  # Reasonable threshold for urban areas
+        urban_mask = ndui > 0.3
 
-    # ==================== ENHANCE PHASE ====================
     print("\n✨ Enhancing results...")
 
-    # Enhance contrast for better visualization
     ntl_enhanced = None
     if ntl_composite is not None:
         # Map config contrast method to valid options
@@ -1144,11 +1086,8 @@ async def black_marble_pipeline(
             )
 
 
-    # Apply color mapping for visualization
-    # CRITICAL FIX: Use NDUI for colormap like sync pipeline, not NTL
     ntl_colored = None
     if ndui is not None:
-        # DIAGNOSTIC: Print data before colormap
         print("\nBefore Colormap Application (USING NDUI):")
         print(f"  Data shape: {ndui.shape}")
         print(f"  Non-zero pixels: {(ndui > 0).sum()} ({(ndui > 0).sum() / ndui.size * 100:.1f}%)")
@@ -1161,7 +1100,6 @@ async def black_marble_pipeline(
             scale_range=(0.3, 1.0),
         )
 
-        # DIAGNOSTIC: Print data after colormap
         print("\nAfter Colormap Application:")
         print(f"  Output shape: {ntl_colored.shape}")
         print(f"  Output channels: {ntl_colored.shape[0] if len(ntl_colored.shape) == 3 else 1}")
@@ -1179,7 +1117,6 @@ async def black_marble_pipeline(
                 crs=processing_crs,
             )
 
-    # Create false color composite for context (optional)
     landsat_viz = None
     if "B5" in landsat_reprojected and "B4" in landsat_reprojected and "B3" in landsat_reprojected:
         landsat_viz = enhance.create_false_color_composite(
@@ -1190,10 +1127,8 @@ async def black_marble_pipeline(
             gamma=None,  # Use default gamma
         )
 
-    # ==================== EXPORT PHASE ====================
     print("\n💾 Exporting results...")
 
-    # Validate output before saving
     validation_results = {"valid": True, "errors": []}
     if ntl_colored is not None and reference_transform is not None:
         validation_results = export.validate_for_cog(
@@ -1208,7 +1143,6 @@ async def black_marble_pipeline(
         if not validation_results["valid"]:
             print(f"Warning: Output validation failed: {validation_results['errors']}")
 
-    # Generate metadata
     road_types = ["motorway", "trunk", "primary", "secondary"]
     metadata = export.create_metadata(
         data_sources={
@@ -1247,10 +1181,7 @@ async def black_marble_pipeline(
         resolution=target_resolution_landsat,
     )
 
-    # Create Cloud-Optimized GeoTIFF
     if ntl_colored is not None and reference_transform is not None:
-        # Get compression setting with proper type casting
-
         compress_setting = config.export.compress if config else "deflate"
         valid_compressions: set[str] = {"deflate", "lzw", "jpeg", "webp", "zstd"}
         if compress_setting not in valid_compressions:
@@ -1270,7 +1201,6 @@ async def black_marble_pipeline(
             # No nodata for RGB imagery
         )
 
-    # Generate auxiliary outputs if requested
     if (
         config
         and config.export.generate_urban_mask
@@ -1327,7 +1257,6 @@ async def black_marble_pipeline(
                 nodata=np.nan,  # Properly handle NaN values from masking
             )
 
-    # Calculate basic statistics for the results
     statistics: dict[str, float | None] = {
         "urban_area_km2": None,
         "mean_radiance": None,

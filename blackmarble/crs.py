@@ -50,7 +50,6 @@ def make_local_albers(west: float, south: float, east: float, north: float) -> C
             "Consider using a polar projection for better accuracy."
         )
     
-    # Check for antimeridian crossing
     if west > 0 and east < 0:
         import logging
         logger = logging.getLogger(__name__)

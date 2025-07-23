@@ -1,4 +1,4 @@
-"""Feature enhancement - ONLY WHAT'S USED."""
+"""Feature enhancement functions."""
 
 from typing import Any
 

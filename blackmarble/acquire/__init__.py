@@ -11,11 +11,9 @@ from .osm import buffer_and_rasterize_roads, fetch_road_network
 from .osm_fractional import buffer_and_rasterize_roads_fractional
 
 __all__ = [
-    # Async download orchestration (used by pipeline)
     "AsyncDownloadOrchestrator",
     "DownloadPlan",
-    # OSM functions (used by pipeline and tests)
     "fetch_road_network",
-    "buffer_and_rasterize_roads",  # Used in tests
+    "buffer_and_rasterize_roads",
     "buffer_and_rasterize_roads_fractional",
 ]

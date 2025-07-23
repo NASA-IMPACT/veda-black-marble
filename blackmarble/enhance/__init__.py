@@ -1,4 +1,4 @@
-"""Enhancement module - ONLY WHAT'S USED."""
+"""Enhancement module for Black Marble pipeline."""
 
 from .contrast import enhance_contrast
 from .features import enhance_roads
