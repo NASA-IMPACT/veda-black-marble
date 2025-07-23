@@ -689,33 +689,7 @@ async def black_marble_pipeline(
         else:
             ndvi_for_ndui = ndvi_composite  # Fallback to regular composite if no stack
 
-        if config and getattr(config, "save_diagnostics", False) and reference_profile is not None:
-            if ndvi_composite is not None:
-                prepare.save_diagnostic(
-                    ndvi_composite,
-                    reference_profile["transform"],
-                    "data/diagnostics/ndvi_composite_original.tif",
-                    f"NDVI {config.analysis.ndvi_composite_method} composite (original CRS)",
-                    crs=reference_profile["crs"],
-                )
-
-            if ndvi_for_ndui is not None and ndvi_for_ndui is not ndvi_composite:
-                prepare.save_diagnostic(
-                    ndvi_for_ndui,
-                    reference_profile["transform"],
-                    f"data/diagnostics/ndvi_{config.analysis.ndvi_percentile_for_ndui}th_percentile_for_ndui_original.tif",
-                    f"NDVI {config.analysis.ndvi_percentile_for_ndui}th percentile for NDUI (original CRS)",
-                    crs=reference_profile["crs"],
-                )
-
-            if ndwi_composite is not None:
-                prepare.save_diagnostic(
-                    ndwi_composite,
-                    reference_profile["transform"],
-                    "data/diagnostics/ndwi_composite_original.tif",
-                    f"NDWI {config.analysis.ndwi_composite_method} composite (original CRS)",
-                    crs=reference_profile["crs"],
-                )
+        # Skip saving original CRS versions - we'll save the reprojected versions later
 
         # Validate that we have a reference profile for reprojection
         if reference_profile is None and (ndvi_composite is not None or ndwi_composite is not None):
@@ -1005,6 +979,16 @@ async def black_marble_pipeline(
             resampling="bilinear",
         )
         print(f"    Reprojected NDVI shape: {ndvi.shape}")
+        
+        # Save NDVI diagnostic
+        if config and getattr(config, "save_diagnostics", False) and ndvi is not None:
+            prepare.save_diagnostic(
+                ndvi,
+                reference_transform,
+                "data/diagnostics/ndvi.tif",
+                f"NDVI temporal composite ({config.analysis.ndvi_composite_method})",
+                crs=processing_crs,
+            )
 
         # Also reproject the high-percentile NDVI for NDUI if different
         if ndvi_for_ndui is not None and ndvi_for_ndui is not ndvi_composite:
@@ -1017,6 +1001,16 @@ async def black_marble_pipeline(
                 dst_shape=reference_shape,
                 resampling="bilinear",
             )
+            
+            # Save high-percentile NDVI if diagnostics enabled
+            if config and getattr(config, "save_diagnostics", False):
+                prepare.save_diagnostic(
+                    ndvi_for_ndui_reprojected,
+                    reference_transform,
+                    "data/diagnostics/ndvi_for_ndui.tif",
+                    f"NDVI {config.analysis.ndvi_percentile_for_ndui}th percentile (for NDUI calculation)",
+                    crs=processing_crs,
+                )
         else:
             ndvi_for_ndui_reprojected = ndvi
 
@@ -1040,7 +1034,7 @@ async def black_marble_pipeline(
                 ndwi,
                 reference_transform,
                 "data/diagnostics/ndwi.tif",
-                "NDWI (reprojected to target CRS)",
+                f"NDWI temporal composite ({config.analysis.ndwi_composite_method})",
                 crs=processing_crs,
             )
 
