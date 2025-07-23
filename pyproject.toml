@@ -70,6 +70,7 @@ addopts = "-raqs"
 testpaths = ["tests"]
 markers = [
     "edgecase: mark test as testing mathematical or algorithmic edge cases with synthetic data",
+    "integration: mark test as integration test requiring real data downloads (skip by default)",
 ]
 
 [tool.pyright]

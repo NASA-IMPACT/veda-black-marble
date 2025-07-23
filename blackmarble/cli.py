@@ -48,6 +48,12 @@ def run(
         "-d",
         help="Save diagnostic intermediate outputs to data/diagnostics/",
     ),
+    wgs84: bool = typer.Option(
+        False,
+        "--wgs84",
+        "-w",
+        help="Also export output in EPSG:4326 (WGS84) projection",
+    ),
     log_level: str = typer.Option(
         "INFO",
         "--log-level",
@@ -147,6 +153,10 @@ def run(
         # Create diagnostics directory
         os.makedirs("data/diagnostics", exist_ok=True)
 
+    # Enable WGS84 export if requested
+    if wgs84:
+        config.export.generate_wgs84 = True
+        typer.echo("🌍 WGS84 (EPSG:4326) export enabled")
 
 
     # Configure NTL enhancement - always use multiplicative mode
