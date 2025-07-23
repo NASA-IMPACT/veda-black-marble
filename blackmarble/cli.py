@@ -48,20 +48,10 @@ def run(
         "-d",
         help="Save diagnostic intermediate outputs to data/diagnostics/",
     ),
-    diagnostic_bands: str = typer.Option(
-        "B3,B4,B5",
-        "--diagnostic-bands",
-        help="Comma-separated list of Landsat bands to save as diagnostics (e.g., 'B3,B4,B5')",
-    ),
     landsat_composite_method: str = typer.Option(
         "mean",
         "--composite-method",
         help="Method for creating Landsat composites: 'mean' (smooth, no edges) or 'median' (robust but hard edges)",
-    ),
-    cache_downloads: bool = typer.Option(
-        False,
-        "--cache-downloads",
-        help="Cache downloaded files in data/cache/ for faster re-runs (development mode).",
     ),
     permissive_compositing: bool = typer.Option(
         False,
@@ -173,21 +163,7 @@ def run(
         # Create diagnostics directory
         os.makedirs("data/diagnostics", exist_ok=True)
 
-        # Parse diagnostic bands
-        if diagnostic_bands:
-            bands = [b.strip() for b in diagnostic_bands.split(",") if b.strip()]
-            config.diagnostic_bands = bands
-            typer.echo(f"   Composite bands to save: {', '.join(bands)}")
 
-    # Enable download caching if requested
-    if cache_downloads:
-        config.cache_downloads = True
-        # Set default cache directory if not specified
-        if not config.cache_dir:
-            config.cache_dir = os.path.expanduser("~/.cache/black_marble")
-        typer.echo(f"💾 Download caching enabled: {config.cache_dir}")
-        # Create cache directory
-        os.makedirs(config.cache_dir, exist_ok=True)
 
     # Configure NTL enhancement
     valid_enhancements = ["hybrid", "additive", "multiplicative"]
@@ -213,11 +189,8 @@ def run(
     
     # Enable permissive compositing if requested
     if permissive_compositing:
-        config.preparation.qa_composite_strategy = "permissive"
-        config.preparation.qa_composite_dilation = 0  # No dilation for compositing
-        config.log_composite_coverage = True  # Enable coverage logging
-        typer.echo("🌤️  Using permissive cloud masking for compositing (less NaN regions)")
-        typer.echo("   Final output will still have proper cloud masking applied")
+        typer.echo("⚠️  Warning: --permissive-compositing option is deprecated and has no effect")
+        typer.echo("   Cloud masking strategy is now fixed in the pipeline")
 
     # Display processing info
     typer.echo("\nStarting Black Marble pipeline:")

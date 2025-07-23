@@ -16,7 +16,7 @@ ArrayLike = npt.NDArray[Any]
 def create_index_temporal_composite(
     index_stack: list[ArrayLike],
     method: Literal["median", "mean", "percentile"] = "median",
-    percentile: float = 50.0,
+    percentile: float | None = None,
     mask_nan: bool = True,
     min_valid_observations: int = 1,
 ) -> ArrayLike:
@@ -48,8 +48,12 @@ def create_index_temporal_composite(
     if not index_stack:
         raise ValueError("No index data provided for compositing")
     
+    # Validate percentile parameter
+    if method == "percentile" and percentile is None:
+        raise ValueError("percentile parameter must be provided when method='percentile'")
+    
     # Use streaming algorithm for 85th percentile
-    if method == "percentile" and 84.5 <= percentile <= 85.5:
+    if method == "percentile" and percentile is not None and 84.5 <= percentile <= 85.5:
         from .streaming import streaming_percentile_85
         composite, valid_count = streaming_percentile_85(
             index_stack, min_valid_observations
@@ -85,6 +89,8 @@ def create_index_temporal_composite(
         elif method == "mean":
             composite = np.nanmean(stacked, axis=0)
         elif method == "percentile":
+            if percentile is None:
+                raise ValueError("percentile parameter must be provided when method='percentile'")
             composite = np.nanpercentile(stacked, percentile, axis=0)
         else:
             raise ValueError(f"Unknown method: {method}. Use 'median', 'mean', or 'percentile'.")

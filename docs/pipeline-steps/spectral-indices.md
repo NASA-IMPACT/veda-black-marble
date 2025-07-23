@@ -100,17 +100,13 @@ Using the 85th percentile:
 ```python
 config = PipelineConfig(
     analysis=AnalysisConfig(
-        # Index-first calculation (default)
+        # Index-first calculation (always enabled)
         calculate_indices_first=True,
-        mask_low_denom=True,
+        mask_low_denom=True
         
-        # Temporal compositing methods
-        ndvi_composite_method="percentile",
-        ndvi_composite_percentile=85.0,
-        ndwi_composite_method="median",
-        
-        # Legacy mode (for backward compatibility)
-        use_legacy_indices=False
+        # Temporal compositing is now hardcoded:
+        # - NDVI: Always uses 85th percentile
+        # - NDWI: Always uses median
     )
 )
 ```

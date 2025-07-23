@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 # from .async_base import DownloadProgressTracker  # Currently unused
-from .landsat_search import search_best_scenes
 from .landsat_search_grouped import search_best_scenes as search_best_scenes_grouped
 from .landsat import AsyncLandsatDownloader
 from .viirs import download_viirs
@@ -80,6 +79,8 @@ class DownloadPlan:
         for i in range(1, composite_months):
             historical_date = date - timedelta(days=i * 30)
             landsat_dates.append(historical_date)
+        
+        logger.debug(f"Generated {len(landsat_dates)} Landsat dates for composite_months={composite_months}")
 
         # Get output directory
         output_dir = Path("./data")
@@ -329,15 +330,9 @@ class AsyncDownloadOrchestrator:
 
         # Phase 1 ───────────────────────────────────────────────────────────
         # Discover best scenes (one coroutine per target date)
-        # Choose search function based on config
-        search_func = search_best_scenes
-        if plan.landsat_acquisition_config and hasattr(plan.landsat_acquisition_config, 'selection_strategy'):
-            if plan.landsat_acquisition_config.selection_strategy == "date_grouped":
-                search_func = search_best_scenes_grouped
-                logger.info("Using date-grouped scene selection for spatial consistency")
-            else:
-                logger.info("Using per-tile scene selection (legacy mode)")
-        
+        # Always use date-grouped selection for spatial consistency
+        search_func = search_best_scenes_grouped
+        logger.info("Using date-grouped scene selection for spatial consistency")
         
         search_tasks: list[asyncio.Task[list[Any]]] = [
             asyncio.create_task(
@@ -358,6 +353,10 @@ class AsyncDownloadOrchestrator:
         for target_date, result in zip(plan.landsat_dates, scene_lists):
             if isinstance(result, Exception):
                 logger.error("Scene search failed for %s: %s", target_date.date(), result)
+                logger.error("Exception details: %s", str(result))
+                # Check if it's an AttributeError about max_cloud_threshold
+                if isinstance(result, AttributeError) and "max_cloud_threshold" in str(result):
+                    logger.error("Config is missing max_cloud_threshold - this was removed in recent cleanup")
                 raise result
             logger.info(f"Search result for {target_date.date()}: {len(result)} scenes found")
             if not result:

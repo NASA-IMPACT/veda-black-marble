@@ -6,7 +6,7 @@ Black Marble pipeline, with clear separation of concerns across phases.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 import numpy.typing as npt
 
@@ -24,26 +24,11 @@ class LandsatAcquisitionConfig:
         7  # Search ±7 days from each target date (balanced approach)
     )
 
-    # Quality scoring weights (must sum to 1.0)
-    quality_weights: dict[str, float] = field(
-        default_factory=lambda: {
-            "spatial_coverage": 0.5,  # Weight for spatial coverage
-            "cloud_free": 0.3,  # Weight for cloud-free percentage
-            "snow_free": 0.15,  # Weight for snow-free percentage
-            "off_nadir": 0.05,  # Weight for nadir viewing
-        }
-    )
-
     # Minimum quality thresholds
-    min_coverage_threshold: float = 0.7  # Minimum acceptable coverage
-    max_cloud_threshold: float = 95.0  # Maximum cloud cover percentage (very permissive)
-
-    # Seasonal filter (optional)
-    seasonal_filter: Callable[[datetime], bool] | None = None
+    min_coverage_threshold: float = 0.7  # Minimum acceptable coverage (trade-off between data vs no data)
 
     # Scene selection preferences
     prefer_newer_sensors: bool = True  # Prefer L8/L9 over L7
-    allow_incomplete_coverage: bool = False  # Allow partial tile coverage
 
     # Date-grouped selection settings
     # Design: With 12 dates × ±7 day windows throughout the year, we ensure catching
@@ -51,9 +36,6 @@ class LandsatAcquisitionConfig:
     # 1. Temporal consistency (tolerance_days=12) - all tiles from within 12 days
     # 2. Spatial completeness - prefer dates with more tile coverage
     # 3. Quality optimization - among available dates, pick the one with lowest cloud cover
-    selection_strategy: Literal["per_tile", "date_grouped"] = (
-        "date_grouped"  # New default for spatial consistency
-    )
     tolerance_days: float = (
         12.0  # Max days between scenes in same group (balanced grouping)
     )
@@ -84,8 +66,7 @@ class AcquisitionConfig:
         None  # Buffer in meters (float) or dict by road type
     )
 
-    # AWS settings
-    aws_credentials: dict[str, str] | None = None
+    # Processing settings
     ignore_missing_tiles: bool = False
 
 
@@ -106,20 +87,13 @@ class PreparationConfig:
     mask_water: bool = False
     qa_dilation_radius: int = 3
     qa_cloud_strategy: Literal["conservative", "moderate", "permissive"] = "moderate"
-    # Separate strategy for compositing vs final masking
-    qa_composite_strategy: Literal["conservative", "moderate", "permissive"] | None = (
-        None  # If None, uses qa_cloud_strategy
-    )
-    qa_composite_dilation: int | None = None  # If None, uses qa_dilation_radius
 
     # VIIRS corrections
-    viirs_fill_value: float = 65530
     quality_valid_flags: list[int] = field(default_factory=lambda: [0, 2])
 
     # Spatial processing
     target_crs: str = "EPSG:3857"  # Web Mercator
     target_resolution: float = 30.0  # meters
-    final_resolution: float = 0.0001  # decimal degrees
     resampling_method: str = "bilinear"
 
 
@@ -144,19 +118,6 @@ class AnalysisConfig:
 
     # Index calculation settings (for mathematical correctness)
     calculate_indices_first: bool = True  # Calculate indices per-date before compositing
-    mask_low_denom: bool = True  # Return NaN for low denominators (preserves correctness)
-
-    # Index composite methods
-    # NDVI: Use 85th percentile to capture peak vegetation for better urban/vegetation separation
-    ndvi_composite_method: Literal["median", "mean", "percentile"] = "percentile"
-    ndvi_composite_percentile: float = 85.0
-    
-    # NDWI: Median is appropriate for water detection
-    ndwi_composite_method: Literal["median", "mean", "percentile"] = "median"
-    ndwi_composite_percentile: float = 50.0
-
-    # Legacy compatibility
-    use_legacy_indices: bool = False  # If True, uses old band-first calculation
 
     # OSM road rasterization (fractional coverage)
     osm_sub_pixels: int = 5  # Sub-pixels per dimension (5x5 = 25 total)
@@ -196,11 +157,6 @@ class EnhancementConfig:
     contrast_percentiles: tuple[float, float] = (2.0, 98.0)
     contrast_output_range: tuple[float, float] = (0.0, 1.0)
 
-    # Advanced features (only used if quality_mode="enhanced")
-    suppress_blooming: bool = False
-    enhance_small_settlements: bool = False
-    detect_urban_corridors: bool = False
-
     # Colormap settings (matches existing config.py display range)
     colormap: Literal["inferno", "viridis", "plasma", "grayscale"] = "inferno"
     colormap_range: tuple[float, float] = (0.3, 0.8)
@@ -237,7 +193,6 @@ class MemoryConfig:
 
     # Memory optimization settings
     delete_bands_after_indices: bool = True  # Delete band arrays after calculating indices
-    gc_interval: int = 3  # Run garbage collection every N dates
     memory_warning_gb: float = 8.0  # Warn if memory usage exceeds this
     memory_limit_gb: float | None = None  # Hard limit - abort if exceeded
 
@@ -270,16 +225,12 @@ class PipelineConfig:
     min_valid_pixel_percentage: float = 10.0
     use_parallel: bool = True
 
-    # Caching and diagnostics
-    cache_downloads: bool = False
-    cache_dir: str | None = None
+    # Diagnostics
     save_diagnostics: bool = False
     save_temporal_stack: bool = True  # Persist per-date Landsat arrays before compositing
-    diagnostic_bands: list[str] = field(default_factory=lambda: ["B3", "B4", "B5"])
 
     # Compositing options
     landsat_composite_method: str = "mean"  # "mean" or "median"
-    log_composite_coverage: bool = False  # Log per-scene valid pixel coverage
 
     @classmethod
     def for_bm_parity(cls, bbox: BBox, date: datetime, output_path: str) -> "PipelineConfig":
@@ -333,8 +284,6 @@ class PipelineConfig:
             enhancement=EnhancementConfig(
                 quality_mode="enhanced",
                 contrast_method="percentile",
-                suppress_blooming=True,
-                enhance_small_settlements=True,
                 add_cartographic_elements=True,
             ),
             export=ExportConfig(

@@ -311,7 +311,7 @@ async def black_marble_pipeline(
     if config:
         logger.debug(
             "  Mask low denominator: %s",
-            getattr(config.analysis, "mask_low_denom", False),
+            True,  # Always mask low denominators for mathematical correctness
         )
 
     # Debug: Print structure of landsat_files_by_date
@@ -495,7 +495,7 @@ async def black_marble_pipeline(
 
                 # Calculate NDVI for this date
                 ndvi_date = analyze.calculate_ndvi(
-                    nir=b5_data, red=b4_data, mask_low_denom=config.analysis.mask_low_denom
+                    nir=b5_data, red=b4_data, mask_low_denom=True
                 ).astype(np.float32)  # Control memory
                 
                 # Clamp negative NDVI values to 0 for NDUI calculation
@@ -504,7 +504,7 @@ async def black_marble_pipeline(
 
                 # Calculate NDWI for this date
                 ndwi_date = analyze.calculate_ndwi(
-                    green=b3_data, nir=b5_data, mask_low_denom=config.analysis.mask_low_denom
+                    green=b3_data, nir=b5_data, mask_low_denom=True
                 ).astype(np.float32)  # Control memory
                 
                 # Add to index stacks
@@ -578,8 +578,8 @@ async def black_marble_pipeline(
             logger.info("  Creating NDVI composite from %d dates", len(index_stacks['ndvi']))
             ndvi_composite = analyze.create_index_temporal_composite(
                 index_stacks["ndvi"],
-                method=config.analysis.ndvi_composite_method,
-                percentile=config.analysis.ndvi_composite_percentile,
+                method="percentile",
+                percentile=85.0,
                 min_valid_observations=config.analysis.min_valid_observations,
             )
             logger.info(
@@ -598,8 +598,7 @@ async def black_marble_pipeline(
             logger.info("  Creating NDWI composite from %d dates", len(index_stacks['ndwi']))
             ndwi_composite = analyze.create_index_temporal_composite(
                 index_stacks["ndwi"],
-                method=config.analysis.ndwi_composite_method,
-                percentile=config.analysis.ndwi_composite_percentile,
+                method="median",
                 min_valid_observations=config.analysis.min_valid_observations,
             )
             logger.info(
@@ -859,7 +858,7 @@ async def black_marble_pipeline(
 
     # Save diagnostic composite bands if requested
     if config and getattr(config, "save_diagnostics", False) and landsat_reprojected:
-        diagnostic_bands = getattr(config, "diagnostic_bands", ["B3", "B4", "B5"])
+        diagnostic_bands = ["B3", "B4", "B5"]  # Always save Green, Red, NIR bands for diagnostics
         logger.info("💾 Saving diagnostic composite bands: %s", diagnostic_bands)
 
         for band_name in diagnostic_bands:
@@ -913,7 +912,7 @@ async def black_marble_pipeline(
                 ndvi,
                 reference_transform,
                 "data/diagnostics/ndvi.tif",
-                f"NDVI {config.analysis.ndvi_composite_percentile}th percentile composite",
+                "NDVI 85th percentile composite",
                 crs=processing_crs,
             )
 
@@ -937,7 +936,7 @@ async def black_marble_pipeline(
                 ndwi,
                 reference_transform,
                 "data/diagnostics/ndwi.tif",
-                f"NDWI temporal composite ({config.analysis.ndwi_composite_method})",
+                "NDWI median composite",
                 crs=processing_crs,
             )
 

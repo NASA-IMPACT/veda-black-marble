@@ -542,7 +542,7 @@ async def search_best_scenes_functional(
             year=year,
             bbox=params.bbox,
             date_range=(window_start, window_end),
-            cloud_cover_max=params.config.max_cloud_threshold,
+            cloud_cover_max=95.0,  # Very permissive to get Tier 2 scenes
         )
         all_scene_dicts.extend(scenes)
     
@@ -560,13 +560,6 @@ async def search_best_scenes_functional(
     # Filter out failed fetches (pure)
     valid_scenes = [s for s in scene_metas if s is not None]
     
-    # Apply seasonal filter if configured (pure)
-    if params.config.seasonal_filter:
-        valid_scenes = [
-            s for s in valid_scenes
-            if params.config.seasonal_filter(s.date)
-        ]
-    
     # Group by path/row (pure)
     scenes_by_tile = group_by_pathrow(valid_scenes)
     
@@ -574,10 +567,17 @@ async def search_best_scenes_functional(
     selected_scenes = []
     for candidates in scenes_by_tile.values():
         if candidates:
+            # Hardcoded quality weights (previously in config)
+            quality_weights = {
+                "spatial_coverage": 0.5,  # Weight for spatial coverage
+                "cloud_free": 0.3,       # Weight for cloud-free percentage
+                "snow_free": 0.15,       # Weight for snow-free percentage
+                "off_nadir": 0.05,       # Weight for nadir viewing
+            }
             best = select_best_scene(
                 candidates,
                 target_date_utc,
-                params.config.quality_weights
+                quality_weights
             )
             selected_scenes.append(best)
     
