@@ -24,17 +24,7 @@ logger = logging.getLogger(__name__)
 
 def create_s3_session() -> aioboto3.Session:
     """Create S3 session with explicit credentials if available."""
-    import os
-    aws_access_key = os.environ.get('AWS_ACCESS_KEY_ID')
-    aws_secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
-    
-    if aws_access_key and aws_secret_key:
-        return aioboto3.Session(
-            aws_access_key_id=aws_access_key,
-            aws_secret_access_key=aws_secret_key
-        )
-    else:
-        return aioboto3.Session()
+    return aioboto3.Session()
 
 
 class AsyncLandsatDownloader(AsyncDownloaderBase):
