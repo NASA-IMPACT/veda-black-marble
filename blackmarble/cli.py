@@ -115,9 +115,13 @@ def run(
         typer.echo(f"Error: Invalid date {year}-{month:02d}-{day:02d}: {e}", err=True)
         raise typer.Exit(code=1)
 
-    # Ensure output directory exists
-    output_path_obj = Path(output_path)
-    output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    # Ensure output directory exists (only for local paths)
+    if not output_path.startswith("s3://"):
+        output_path_obj = Path(output_path)
+        output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        # For S3 URLs, use the string directly (Path mangles the URL)
+        output_path_obj = output_path
 
     # Create configuration based on preset
     config = None
