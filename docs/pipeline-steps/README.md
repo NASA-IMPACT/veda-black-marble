@@ -38,11 +38,8 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
 
 ### 5. Road Processing
 - Load OSM road network
-- **[Road Rasterization](./road-rasterization.md)** ⚙️
-  - Decisions: Fractional vs binary, buffer size, sub-pixel grid
-- **Binary Road Rasterization** (when osm_fractional=False) ⚙️
-  - Hierarchical road type codes (1-6)
-  - Test: `tests/pipeline/test_missing_coverage.py::TestBinaryRoadRasterization`
+- **Fractional Road Rasterization** ⚙️
+  - Decisions: Buffer size, sub-pixel grid resolution
 
 ### 6. Index Calculations
 - **[Calculate NDVI/NDWI](./spectral-indices.md)** ⚙️
@@ -60,13 +57,13 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
   - Test: `tests/pipeline/test_missing_coverage.py::TestLegacyBurnInEnhancement`
 
 ### 8. Visualization
-- **[Contrast Enhancement](./contrast-enhancement.md)** ⚙️
+- **Contrast Enhancement** ⚙️
   - Decisions: Method (percentile/minmax), clipping range
-- **[Colormap Application](./colormap-application.md)** ⚙️
+- **Colormap Application** ⚙️
   - Decisions: Colormap choice, scaling range
 
 ### 9. Export
-- **[Create COG](./cog-export.md)** ⚙️
+- **Create COG** ⚙️
   - Decisions: Compression, tiling, overviews
 - Generate metadata
 - Optional: Export auxiliary products (urban mask, indices)
@@ -92,7 +89,7 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
 | Preprocessing | [VIIRS Preprocessing](./viirs-preprocessing.md), [QA Masking](./landsat-qa-masking.md) | Resolution, QA strategy |
 | Analysis | [Spectral Indices](./spectral-indices.md), [NDUI](./ndui-calculation.md) | Epsilon handling, water masking |
 | Enhancement | [Urban Fields](./urban-field-enhancement.md) | Scale parameters, enhancement mode |
-| Visualization | [Contrast](./contrast-enhancement.md), [Colormap](./colormap-application.md) | Percentiles, color range |
+| Visualization | Contrast Enhancement, Colormap Application | Percentiles, color range |
 
 ## Running Tests
 

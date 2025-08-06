@@ -54,7 +54,7 @@ We provide three pre-configured strategies:
 
 **Purpose**: Expand masks to catch edge effects
 
-**Parameter**: `dilate_pixels` (default: 3)
+**Parameter**: `dilate_pixels` (function default: 0, pipeline uses: 3)
 - Creates buffer around detected features
 - Uses square structuring element (2*dilate_pixels+1)
 - Prevents cloud/shadow edges from contaminating analysis

@@ -238,8 +238,8 @@ def calculate_ndui(
     vegetation indices. It leverages the fact that urban areas have high
     nighttime radiance and low vegetation density.
 
-    Formula: NDUI = NTL_norm / (1 + NDVI + epsilon)
-    Where: NTL_norm = clamp((NTL - floor) / (ceiling - floor), 0, 1)
+    Formula: NDUI = (NTL_norm - NDVI) / (NTL_norm + NDVI + epsilon)
+    Where: NTL_norm = clamp(NTL / ceiling, 0, 1) after floor application
 
     NDUI values interpretation:
     - [0.7, 1.0]: Dense urban areas, city centers
