@@ -56,7 +56,7 @@ async def download_viirs_h5(
     day_of_year = target_date.timetuple().tm_yday
 
     # Use the same API endpoint as synchronous version
-    api_url = f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details/allData/5000/VNP46A2/{year}/{day_of_year}"
+    api_url = f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details/allData/5200/VNP46A2/{year}/{day_of_year}"
 
     logger.debug(f"Querying NASA LAADS API: {api_url}")
     logger.debug(f"Looking for tile: {tile_id}")
