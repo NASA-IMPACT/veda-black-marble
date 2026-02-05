@@ -16,7 +16,6 @@ NDUI quantifies the "urbanness" of pixels by comparing nighttime light intensity
 
 The function prepares the NTL (nighttime lights) data:
 
-- **DN to Radiance Conversion**: Always divides by 10.0 to convert DN to nW/cm²/sr
 - **Ceiling Clipping**: Values above `ntl_ceiling` are clipped (default = 10.0 nW/cm²/sr)
 - **Floor Application**: Values below `ntl_floor` are set to 0 (default = 0.1)
 - **Ceiling-Only Normalization**: `ntl_normalized = ntl_clipped / ntl_ceiling`

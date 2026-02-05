@@ -14,6 +14,8 @@
 
 ## Algorithms
 
+- Moved to VNP46A2 v2 product as v1 is no longer published
+- Remove scaling from ntl product, as data now is published as uint32 
 - Binary road rasterization has been replaced with fractional road rasterization
 - OSM data no longer is burnt in in a binary fashion - instead the fraction of a 30 meter pixel covered by buffered road segments determines the degree of augmentation applied to NTL values
 - Replaced simple burn-in augmentation with field-based approach that uses road density and proximity to determine NTL augmentation levels

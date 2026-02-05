@@ -19,7 +19,7 @@ VIIRS (Visible Infrared Imaging Radiometer Suite) provides nighttime lights data
 - Lunar irradiance is already removed in VNP46A2 (pipeline does NOT subtract it)
 - Data is in DN units with 0.1 scale factor (converted to radiance later in NDUI calculation)
 - Creates VRT mosaic for multiple tiles
-- Fill value: 65530 (handled during mosaicking)
+- Fill value: -999.9 (handled during mosaicking)
 
 **Implementation**:
 ```python
@@ -109,7 +109,7 @@ viirs_reprojected, viirs_transform, viirs_bounds = prepare.reproject_image(
    - Solution: Use VRT mosaics to handle tiles efficiently
    - Pipeline automatically creates VRTs for multiple tiles
 
-2. **Nodata Handling**: VIIRS uses 0 for no data, fill value is 65530
+2. **Nodata Handling**: VIIRS uses fill value of -999.9
    - Solution: Gap-filled product handles this automatically
    - Zeros are preserved as valid data (no lights)
 
