@@ -16,6 +16,10 @@ from osgeo import gdal
 logger = logging.getLogger(__name__)
 
 
+LAADS_ENDPOINT = "https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details/allData"
+BM_SHORT_NAME = "VNP46A2"
+BM_ARCHIVE_SET = "5200"
+
 async def download_viirs_h5(
     session: aiohttp.ClientSession,
     earthdata_token: str,
@@ -56,7 +60,7 @@ async def download_viirs_h5(
     day_of_year = target_date.timetuple().tm_yday
 
     # Use the same API endpoint as synchronous version
-    api_url = f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details/allData/5000/VNP46A2/{year}/{day_of_year}"
+    api_url = f"{LAADS_ENDPOINT}/{BM_ARCHIVE_SET}/{BM_SHORT_NAME}/{year}/{day_of_year}"
 
     logger.debug(f"Querying NASA LAADS API: {api_url}")
     logger.debug(f"Looking for tile: {tile_id}")
@@ -168,8 +172,6 @@ async def download_viirs_tiles_async(
     Returns:
         Dictionary with keys:
         - 'gap_filled_ntl': List of gap-filled NTL GeoTIFF paths
-        - 'quality': List of quality flag GeoTIFF paths
-        - 'radiance': List of radiance GeoTIFF paths (if extracted)
     """
     logger.info(">>> download_viirs_tiles_async called")
     logger.info(f"    date: {date}")
