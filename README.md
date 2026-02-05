@@ -75,7 +75,7 @@ blackmarble \
 
 ## Documentation
 
-For detailed algorithm documentation (QA masking, temporal compositing, urban field enhancement), see [`docs/pipeline-steps/`](docs/pipeline-steps/). Start with [`SUMMARY.md`](docs/pipeline-steps/SUMMARY.md) for an overview.
+For detailed algorithm documentation (QA masking, temporal compositing, urban field enhancement), see [`docs/pipeline-steps/`](docs/pipeline-steps/). Start with [`README.md`](docs/pipeline-steps/README.md) for an overview.
 
 ## Python API
 
