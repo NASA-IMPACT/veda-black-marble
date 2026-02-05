@@ -242,6 +242,7 @@ def process_landsat_date(
     cloud_strategy: Literal["conservative", "moderate", "permissive"] = "moderate",
     save_diagnostics: bool = False,
     date_str: str | None = None,
+    diagnostics_dir: str | None = None,
     processing_crs: Any = None,
     reference_transform: Any = None,
     reference_shape: tuple[int, int] | None = None,
@@ -261,6 +262,7 @@ def process_landsat_date(
         cloud_strategy: Cloud masking strategy ("conservative", "moderate", or "permissive")
         save_diagnostics: Whether to save diagnostic outputs
         date_str: Date string for diagnostic filenames
+        diagnostics_dir: Base diagnostics directory (e.g., "./data/diagnostics")
 
     Returns:
         Dictionary mapping band names to tuples of (masked_data, profile)
@@ -506,7 +508,8 @@ def process_landsat_date(
                 
                 # Save cloud mask diagnostic if requested
                 if save_diagnostics and date_str:
-                    diag_dir = "data/diagnostics/cloud_masks"
+                    diag_base = diagnostics_dir or "data/diagnostics"
+                    diag_dir = f"{diag_base}/cloud_masks"
                     os.makedirs(diag_dir, exist_ok=True)
                     
                     # Save as GeoTIFF

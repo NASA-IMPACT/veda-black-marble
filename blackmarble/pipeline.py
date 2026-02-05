@@ -49,6 +49,7 @@ async def black_marble_pipeline(
     bbox: BBox,
     date: datetime,
     output_path: str,
+    data_dir: str = "./data",
     config: PipelineConfig | None = None,
     earthdata_token: str | None = None,
 ) -> dict[str, Any]:
@@ -61,6 +62,7 @@ async def black_marble_pipeline(
         bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
         date: Target date for processing
         output_path: Where to save the final output
+        data_dir: Base directory for data, cache, temp, and diagnostics
         config: Optional configuration overrides
         earthdata_token: NASA Earthdata token (or set EARTHDATA_TOKEN env var)
 
@@ -80,7 +82,8 @@ async def black_marble_pipeline(
             raise RuntimeError()
 
     composite_months = config.acquisition.composite_months if config else 12
-    data_dir = "./data"
+    temp_dir = f"{data_dir}/temp"
+    diagnostics_dir = f"{data_dir}/diagnostics"
 
     logger.info("📥 Downloading all data for %s dates...", composite_months)
     logger.info("   Target date: %s", date.strftime("%Y-%m-%d"))
@@ -88,7 +91,7 @@ async def black_marble_pipeline(
 
     from .acquire.async_orchestrator import AsyncDownloadOrchestrator, DownloadPlan
 
-    plan = DownloadPlan.from_pipeline_config(bbox, date, config)
+    plan = DownloadPlan.from_pipeline_config(bbox, date, config, data_dir=data_dir)
     orchestrator = AsyncDownloadOrchestrator(earthdata_token=earthdata_token, show_progress=True)
 
     download_results = await orchestrator.download_all(plan)
@@ -119,7 +122,7 @@ async def black_marble_pipeline(
 
     logger.info("🔧 Processing downloaded data...")
 
-    os.makedirs(f"{data_dir}/temp", exist_ok=True)
+    os.makedirs(temp_dir, exist_ok=True)
 
     viirs_files = download_results.viirs_data
     landsat_files_by_date = download_results.landsat_data
@@ -164,8 +167,8 @@ async def black_marble_pipeline(
         else:
             if len(viirs_ntl_files) > 1:
                 logger.info("Creating VRT mosaic for %d VIIRS tiles", len(viirs_ntl_files))
-                viirs_ntl_vrt = f"{data_dir}/temp/viirs_gap_filled_ntl_mosaic.vrt"
-                os.makedirs(f"{data_dir}/temp", exist_ok=True)
+                viirs_ntl_vrt = f"{temp_dir}/viirs_gap_filled_ntl_mosaic.vrt"
+                os.makedirs(temp_dir, exist_ok=True)
                 # VIIRS uses fill_value of -999.9 based on config
                 vrt_options = gdal.BuildVRTOptions(  # type: ignore[attr-defined]
                     separate=False,  # Mosaic tiles together
@@ -175,15 +178,16 @@ async def black_marble_pipeline(
 
                 # Save VRT to diagnostics if requested
                 if config and getattr(config, "save_diagnostics", False):
-                    os.makedirs(f"{data_dir}/diagnostics/vrts", exist_ok=True)
+                    os.makedirs(f"{diagnostics_dir}/vrts", exist_ok=True)
                     import shutil
 
                     shutil.copy(
                         viirs_ntl_vrt,
-                        f"{data_dir}/diagnostics/vrts/viirs_gap_filled_ntl_mosaic.vrt",
+                        f"{diagnostics_dir}/vrts/viirs_gap_filled_ntl_mosaic.vrt",
                     )
                     logger.debug(
-                        "Saved VRT to: data/diagnostics/vrts/viirs_gap_filled_ntl_mosaic.vrt"
+                        "Saved VRT to: %s",
+                        f"{diagnostics_dir}/vrts/viirs_gap_filled_ntl_mosaic.vrt",
                     )
 
                 with rasterio.open(viirs_ntl_vrt) as src:
@@ -220,7 +224,7 @@ async def black_marble_pipeline(
                 prepare.save_diagnostic(
                     viirs_ntl,
                     viirs_profile,
-                    "data/diagnostics/viirs_resampled.tif",
+                    f"{diagnostics_dir}/viirs_resampled.tif",
                     "VIIRS resampled to target resolution",
                 )
 
@@ -233,7 +237,7 @@ async def black_marble_pipeline(
                 prepare.save_diagnostic(
                     viirs_corrected,
                     viirs_profile,
-                    "data/diagnostics/viirs_final.tif",
+                    f"{diagnostics_dir}/viirs_final.tif",
                     "VIIRS final (gap-filled NTL)",
                 )
 
@@ -430,6 +434,7 @@ async def black_marble_pipeline(
             cloud_strategy=actual_strategy,
             save_diagnostics=config and getattr(config, "save_diagnostics", False),
             date_str=target_date.strftime('%Y-%m-%d'),
+            diagnostics_dir=diagnostics_dir,
         )
         
         # DEBUG: Log the transform from processed data
@@ -868,7 +873,7 @@ async def black_marble_pipeline(
             prepare.save_diagnostic(
                 roads_fractional,
                 reference_transform,
-                "data/diagnostics/roads_fractional.tif",
+                f"{diagnostics_dir}/roads_fractional.tif",
                 "Fractional road coverage (0.0-1.0)",
                 crs=processing_crs,
             )
@@ -892,7 +897,7 @@ async def black_marble_pipeline(
         for band_name in diagnostic_bands:
             if band_name in landsat_reprojected:
                 band_data = landsat_reprojected[band_name]
-                output_path = f"data/diagnostics/landsat_{band_name}.tif"
+                output_path = f"{diagnostics_dir}/landsat_{band_name}.tif"
 
                 prepare.save_diagnostic(
                     band_data,
@@ -939,7 +944,7 @@ async def black_marble_pipeline(
             prepare.save_diagnostic(
                 ndvi,
                 reference_transform,
-                "data/diagnostics/ndvi.tif",
+                f"{diagnostics_dir}/ndvi.tif",
                 "NDVI 85th percentile composite",
                 crs=processing_crs,
             )
@@ -963,7 +968,7 @@ async def black_marble_pipeline(
             prepare.save_diagnostic(
                 ndwi,
                 reference_transform,
-                "data/diagnostics/ndwi.tif",
+                f"{diagnostics_dir}/ndwi.tif",
                 "NDWI median composite",
                 crs=processing_crs,
             )
@@ -974,7 +979,7 @@ async def black_marble_pipeline(
         prepare.save_diagnostic(
             ntl_composite,
             reference_transform,
-            "data/diagnostics/ntl_raw.tif",
+            f"{diagnostics_dir}/ntl_raw.tif",
             "Raw NTL values (before enhancement)",
             crs=processing_crs,
         )
@@ -1007,7 +1012,7 @@ async def black_marble_pipeline(
                 prepare.save_diagnostic(
                     urban_field,
                     reference_transform,
-                    "data/diagnostics/urban_field.tif",
+                    f"{diagnostics_dir}/urban_field.tif",
                     "Multi-scale urban density field",
                     crs=processing_crs,
                 )
@@ -1028,7 +1033,7 @@ async def black_marble_pipeline(
                 prepare.save_diagnostic(
                     enhancement,
                     reference_transform,
-                    "data/diagnostics/ntl_enhancement.tif",
+                    f"{diagnostics_dir}/ntl_enhancement.tif",
                     "NTL enhancement from urban fields",
                     crs=processing_crs,
                 )
@@ -1125,7 +1130,7 @@ async def black_marble_pipeline(
             prepare.save_diagnostic(
                 ndui,
                 reference_transform,
-                "data/diagnostics/ndui_raw.tif",
+                f"{diagnostics_dir}/ndui_raw.tif",
                 "NDUI (calculated with enhanced NTL)",
                 crs=processing_crs,
             )
@@ -1160,7 +1165,7 @@ async def black_marble_pipeline(
             prepare.save_diagnostic(
                 ntl_enhanced,
                 reference_transform,
-                "data/diagnostics/ntl_contrast_enhanced.tif",
+                f"{diagnostics_dir}/ntl_contrast_enhanced.tif",
                 "NTL after contrast enhancement",
                 crs=processing_crs,
             )
@@ -1203,7 +1208,7 @@ async def black_marble_pipeline(
             prepare.save_diagnostic(
                 ndui,
                 reference_transform,
-                "data/diagnostics/ndui_final_before_colormap.tif",
+                f"{diagnostics_dir}/ndui_final_before_colormap.tif",
                 "Final NDUI before colormap",
                 crs=processing_crs,
             )
@@ -1402,6 +1407,7 @@ def black_marble_pipeline_sync(
     bbox: BBox,
     date: datetime,
     output_path: str,
+    data_dir: str = "./data",
     config: PipelineConfig | None = None,
     earthdata_token: str | None = None,
 ) -> dict[str, Any]:
@@ -1414,6 +1420,7 @@ def black_marble_pipeline_sync(
         bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
         date: Target date for processing
         output_path: Where to save the final output
+        data_dir: Base directory for data, cache, temp, and diagnostics
         config: Optional configuration overrides
         earthdata_token: NASA Earthdata token (or set EARTHDATA_TOKEN env var)
         
@@ -1453,6 +1460,7 @@ def black_marble_pipeline_sync(
             bbox=bbox,
             date=date,
             output_path=output_path,
+            data_dir=data_dir,
             config=config,
             earthdata_token=earthdata_token,
         )

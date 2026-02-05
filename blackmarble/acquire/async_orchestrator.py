@@ -65,6 +65,7 @@ class DownloadPlan:
         bbox: tuple[float, float, float, float],
         date: datetime,
         config: Any = None,  # PipelineConfig
+        data_dir: str | Path | None = None,
     ) -> "DownloadPlan":
         """Create download plan from pipeline configuration"""
         # Calculate Landsat dates based on compositing period
@@ -79,23 +80,27 @@ class DownloadPlan:
         for i in range(1, composite_months):
             historical_date = date - timedelta(days=i * 30)
             landsat_dates.append(historical_date)
-        
-        logger.debug(f"Generated {len(landsat_dates)} Landsat dates for composite_months={composite_months}")
+
+        logger.debug(
+            f"Generated {len(landsat_dates)} Landsat dates for composite_months={composite_months}"
+        )
 
         # Get output directory
-        output_dir = Path("./data")
+        output_dir = Path(data_dir) if data_dir is not None else Path("./data")
         cache_enabled = True
         cloud_cover_max = 30.0  # Default matching config.py
         landsat_acquisition_config = None
 
-        if config:
+        if config and data_dir is None:
             output_dir = Path(getattr(config, "data_dir", "./data"))
             cache_enabled = getattr(config, "cache_downloads", True)
             # Try to get cloud_cover_max from acquisition config
             if hasattr(config, "acquisition") and hasattr(config.acquisition, "cloud_cover_max"):
                 cloud_cover_max = config.acquisition.cloud_cover_max
             # Get landsat acquisition config
-            if hasattr(config, "acquisition") and hasattr(config.acquisition, "landsat_acquisition"):
+            if hasattr(config, "acquisition") and hasattr(
+                config.acquisition, "landsat_acquisition"
+            ):
                 landsat_acquisition_config = config.acquisition.landsat_acquisition
 
         return cls(
@@ -215,7 +220,9 @@ class AsyncDownloadOrchestrator:
         logger.info(f"Starting concurrent downloads: {', '.join(task_names)}")
 
         # Run all tasks
-        task_results: list[Any | BaseException] = await asyncio.gather(*tasks, return_exceptions=True)
+        task_results: list[Any | BaseException] = await asyncio.gather(
+            *tasks, return_exceptions=True
+        )
 
         # Process results
         for name, result in zip(task_names, task_results):
@@ -270,7 +277,7 @@ class AsyncDownloadOrchestrator:
         """Download VIIRS data"""
         logger.info(f"Downloading VIIRS data for {plan.primary_date}")
         logger.debug(f"Plan bbox: {plan.bbox}")
-        token_info = '***' + self.earthdata_token[-4:] if self.earthdata_token else 'None'
+        token_info = "***" + self.earthdata_token[-4:] if self.earthdata_token else "None"
         logger.debug(f"Earthdata token: {token_info}")
 
         try:
@@ -313,16 +320,17 @@ class AsyncDownloadOrchestrator:
         logger.debug("Plan bands: %s", plan.landsat_bands)
         logger.info(f"Target dates: {[d.strftime('%Y-%m-%d') for d in plan.landsat_dates]}")
         logger.info(f"Search bbox: {plan.bbox}")
-        
+
         # Print WRS tile info once
         from .wrs_utils import get_wrs_tiles_for_bbox_tuple
+
         try:
             tile_dicts = get_wrs_tiles_for_bbox_tuple(plan.bbox)
             tiles = [f"{t['path']:03d}{t['row']:03d}" for t in tile_dicts]
             logger.debug("📍 WRS tiles that should cover bbox %s:", plan.bbox)
             logger.debug("   Total tiles: %d", len(tiles))
             logger.debug("   Tiles: %s", sorted(tiles))
-            paths = sorted(set(t['path'] for t in tile_dicts))
+            paths = sorted(set(t["path"] for t in tile_dicts))
             logger.debug("   Paths: %s", paths)
             # Empty line removed - not needed for logging
         except Exception as e:
@@ -333,7 +341,7 @@ class AsyncDownloadOrchestrator:
         # Always use date-grouped selection for spatial consistency
         search_func = search_best_scenes_grouped
         logger.info("Using date-grouped scene selection for spatial consistency")
-        
+
         search_tasks: list[asyncio.Task[list[Any]]] = [
             asyncio.create_task(
                 search_func(
@@ -356,7 +364,9 @@ class AsyncDownloadOrchestrator:
                 logger.error("Exception details: %s", str(result))
                 # Check if it's an AttributeError about max_cloud_threshold
                 if isinstance(result, AttributeError) and "max_cloud_threshold" in str(result):
-                    logger.error("Config is missing max_cloud_threshold - this was removed in recent cleanup")
+                    logger.error(
+                        "Config is missing max_cloud_threshold - this was removed in recent cleanup"
+                    )
                 raise result
             logger.info(f"Search result for {target_date.date()}: {len(result)} scenes found")
             if not result:
@@ -436,6 +446,8 @@ class AsyncDownloadOrchestrator:
                 plan.bbox,
                 "all",  # network_type
                 custom_filter,
+                True,  # use_cache
+                plan.output_dir / "osm_cache",
             )
 
             # TODO: Save to file for caching
@@ -452,6 +464,7 @@ def download_all_data_sync(
     date: datetime,
     config: Any,
     earthdata_token: str | None = None,
+    data_dir: str | Path | None = None,
 ) -> DownloadResults:
     """
     Synchronous wrapper for async downloads.
@@ -468,7 +481,7 @@ def download_all_data_sync(
         DownloadResults with all downloaded data
     """
     # Create download plan from config
-    plan = DownloadPlan.from_pipeline_config(bbox, date, config)
+    plan = DownloadPlan.from_pipeline_config(bbox, date, config, data_dir=data_dir)
 
     # Create orchestrator
     orchestrator = AsyncDownloadOrchestrator(earthdata_token=earthdata_token, show_progress=True)

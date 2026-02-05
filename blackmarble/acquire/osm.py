@@ -68,32 +68,37 @@ def download_osm_roads(
         raise
 
 
-def clear_osm_cache() -> None:
+def clear_osm_cache(cache_dir: str | Path = "data/osm_cache") -> None:
     """Clear all cached OSM data."""
-    cache_dir = Path("data/osm_cache")
-    if cache_dir.exists():
+    cache_dir_path = Path(cache_dir)
+    if cache_dir_path.exists():
         import shutil
 
-        shutil.rmtree(cache_dir)
-        logger.info("Cleared OSM cache directory: %s", cache_dir)
+        shutil.rmtree(cache_dir_path)
+        logger.info("Cleared OSM cache directory: %s", cache_dir_path)
 
 
-def get_osm_cache_path(bbox: BBox, network_type: str, custom_filter: str | None) -> Path:
+def get_osm_cache_path(
+    bbox: BBox,
+    network_type: str,
+    custom_filter: str | None,
+    cache_dir: str | Path = "data/osm_cache",
+) -> Path:
     """Generate a cache file path for OSM data based on parameters."""
     # Create a unique hash for the parameters
     params_str = f"{bbox}_{network_type}_{custom_filter}"
     params_hash = hashlib.md5(params_str.encode()).hexdigest()[:12]
 
     # Create cache directory
-    cache_dir = Path("data/osm_cache")
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir_path = Path(cache_dir)
+    cache_dir_path.mkdir(parents=True, exist_ok=True)
 
     # Generate filename with bbox info for readability
     min_lon, min_lat, max_lon, max_lat = bbox
     # Use .gpkg extension for GeoPackage
     filename = f"osm_{min_lon:.2f}_{min_lat:.2f}_{max_lon:.2f}_{max_lat:.2f}_{params_hash}.gpkg"
 
-    return cache_dir / filename
+    return cache_dir_path / filename
 
 
 def fetch_road_network(
@@ -101,6 +106,7 @@ def fetch_road_network(
     network_type: str = "all",
     custom_filter: str | None = None,
     use_cache: bool = True,
+    cache_dir: str | Path = "data/osm_cache",
 ) -> Any:  # Returns networkx graph
     """Fetch road network from OpenStreetMap with caching support.
 
@@ -117,7 +123,7 @@ def fetch_road_network(
 
     # Check cache first
     if use_cache:
-        cache_path = get_osm_cache_path(bbox, network_type, custom_filter)
+        cache_path = get_osm_cache_path(bbox, network_type, custom_filter, cache_dir=cache_dir)
 
         if cache_path.exists():
             logger.info("Loading OSM data from cache: %s", cache_path.name)
@@ -170,7 +176,7 @@ def fetch_road_network(
 
     # Save to cache
     if use_cache and graph.number_of_edges() > 0:
-        cache_path = get_osm_cache_path(bbox, network_type, custom_filter)
+        cache_path = get_osm_cache_path(bbox, network_type, custom_filter, cache_dir=cache_dir)
         try:
             # Convert graph to GeoDataFrame
             # Note: ox.graph_to_gdfs returns just the edges_gdf when nodes=False

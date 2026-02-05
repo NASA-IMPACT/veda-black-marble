@@ -59,6 +59,11 @@ def run(
         "-o",
         help="Output path for the final COG file.",
     ),
+    data_dir: str = typer.Option(
+        "./data",
+        "--data-dir",
+        help="Base directory for data, cache, temp, and diagnostics outputs.",
+    ),
     config_preset: str = typer.Option(
         "default",
         "--config",
@@ -69,7 +74,7 @@ def run(
         False,
         "--save-diagnostics",
         "-d",
-        help="Save diagnostic intermediate outputs to data/diagnostics/",
+        help="Save diagnostic intermediate outputs to <data-dir>/diagnostics/",
     ),
     wgs84: bool = typer.Option(
         False,
@@ -163,9 +168,9 @@ def run(
     # Enable diagnostics if requested
     if save_diagnostics:
         config.save_diagnostics = True
-        typer.echo("📊 Diagnostic outputs will be saved to data/diagnostics/")
+        typer.echo(f"📊 Diagnostic outputs will be saved to {data_dir}/diagnostics/")
         # Create diagnostics directory
-        os.makedirs("data/diagnostics", exist_ok=True)
+        os.makedirs(f"{data_dir}/diagnostics", exist_ok=True)
 
     # Enable WGS84 export if requested
     if wgs84:
@@ -194,6 +199,7 @@ def run(
             bbox=bbox_parsed,
             date=date,
             output_path=str(output_path_obj),
+            data_dir=data_dir,
             config=config,
             earthdata_token=earthdata_token,
         )
