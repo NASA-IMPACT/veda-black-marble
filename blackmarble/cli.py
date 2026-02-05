@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import logging
 import os
+import re
 import traceback
+import typing
 from datetime import datetime
 from pathlib import Path
 
@@ -12,16 +14,37 @@ from .pipeline import black_marble_pipeline_sync
 
 app = typer.Typer(help="Command-line interface for the VEDA Black Marble processing pipeline.")
 
+def parse_bbox(value: str) -> tuple[float, float, float, float]:
+    """
+    Parses a string into 4 floats. Supports commas, spaces, or mixed separators.
+    Example: "min_x, min_y, max_x, max_y" or "min_x min_y max_x max_y"
+    """
+    try:
+        # Use regex to find all numbers (integers or floats, including negatives)
+        # This naturally handles any mix of spaces, commas, or semicolons
+        coords = [float(x) for x in re.findall(r"[-+]?\d*\.?\d+", value)]
+
+        if len(coords) != 4:
+            raise ValueError(f"Expected 4 coordinates, found {len(coords)}")
+
+        min_x, min_y, max_x, max_y = coords
+
+        if min_x >= max_x or min_y >= max_y:
+            raise ValueError("min values must be less than max values.")
+
+        return (min_x, min_y, max_x, max_y)
+    except Exception as e:
+        raise typer.BadParameter(f"Invalid bbox: {e}")
 
 @app.command()
 def run(
-    lat1: float = typer.Option(..., "--lat1", help="Latitude of the first corner (e.g., North)."),
-    lon1: float = typer.Option(..., "--lon1", help="Longitude of the first corner (e.g., West)."),
-    lat2: float = typer.Option(..., "--lat2", help="Latitude of the second corner (e.g., South)."),
-    lon2: float = typer.Option(..., "--lon2", help="Longitude of the second corner (e.g., East)."),
-    year: int = typer.Option(..., "--year", help="Target year for data."),
-    month: int = typer.Option(..., "--month", help="Target month for data."),
-    day: int = typer.Option(..., "--day", help="Target day for data."),
+    bbox: str = typer.Option(
+        ...,
+        "--bbox",
+        help="Bounding box as \"min_x,min_y,max_x,max_y\" or \"min_x min_y max_x max_y\"",
+        parser=parse_bbox,
+    ),
+    date: datetime = typer.Option(..., "--date", help="Target date for data in YYYY-MM-DD format."),
     earthdata_token: str | None = typer.Option(
         None,
         "--earthdata-token",
@@ -71,48 +94,35 @@ def run(
     - Urban index calculation (NDUI)
     - Cloud-optimized GeoTIFF output
     """
-    
+
     # Configure logging
     numeric_level = getattr(logging, log_level.upper(), None)
     if not isinstance(numeric_level, int):
         typer.echo(f"Error: Invalid log level '{log_level}'", err=True)
         raise typer.Exit(code=1)
-    
+
     logging.basicConfig(
         level=numeric_level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    
+
     # Suppress noisy INFO messages from AWS libraries
     logging.getLogger('aiobotocore').setLevel(logging.WARNING)
     logging.getLogger('botocore').setLevel(logging.WARNING)
     logging.getLogger('boto3').setLevel(logging.WARNING)
 
-    # Handle Earthdata token
-    if not earthdata_token:
-        typer.echo(
-            "Warning: No Earthdata token provided. VIIRS downloads will be skipped.\n"
-            "Provide token via --earthdata-token or set EARTHDATA_TOKEN environment variable.",
-            err=True,
-        )
+    bbox_parsed = typing.cast(tuple[float, float, float, float], bbox)
 
     # Set as environment variable for compatibility
     if earthdata_token:
         os.environ["EARTHDATA_TOKEN"] = earthdata_token
-
-    # Convert lat/lon corners to bbox (min_lon, min_lat, max_lon, max_lat)
-    min_lat = min(lat1, lat2)
-    max_lat = max(lat1, lat2)
-    min_lon = min(lon1, lon2)
-    max_lon = max(lon1, lon2)
-    bbox = (min_lon, min_lat, max_lon, max_lat)
-
-    # Create datetime
-    try:
-        date = datetime(year, month, day)
-    except ValueError as e:
-        typer.echo(f"Error: Invalid date {year}-{month:02d}-{day:02d}: {e}", err=True)
+    else:
+        typer.echo(
+            "Error: EARTHDATA_TOKEN env var not set "
+            "or --earthdata-token not provided.",
+            err=True,
+        )
         raise typer.Exit(code=1)
 
     # Ensure output directory exists (only for local paths)
@@ -124,31 +134,31 @@ def run(
         output_path_obj = output_path
 
     # Create configuration based on preset
-    config = None
-    if config_preset == "high_quality":
-        config = PipelineConfig.for_enhanced_quality(
-            bbox=bbox, date=date, output_path=str(output_path_obj)
-        )
-    elif config_preset == "fast":
-        # For fast processing, use basic mode with minimal enhancements
-        config = PipelineConfig.for_bm_parity(
-            bbox=bbox, date=date, output_path=str(output_path_obj)
-        )
-        # Disable optional outputs for speed
-        config.export.generate_urban_mask = False
-        config.export.generate_indices_file = False
-        config.export.validate_before_export = False
-    elif config_preset == "default":
-        config = PipelineConfig.for_bm_parity(
-            bbox=bbox, date=date, output_path=str(output_path_obj)
-        )
-    else:
-        typer.echo(
-            f"Error: Unknown config preset '{config_preset}'. "
-            f"Use 'default', 'high_quality', or 'fast'.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
+    match config_preset:
+        case "high_quality":
+            config = PipelineConfig.for_enhanced_quality(
+                bbox=bbox_parsed, date=date, output_path=str(output_path_obj)
+            )
+        case "fast":
+            # For fast processing, use basic mode with minimal enhancements
+            config = PipelineConfig.for_bm_parity(
+                bbox=bbox_parsed, date=date, output_path=str(output_path_obj)
+            )
+            # Disable optional outputs for speed
+            config.export.generate_urban_mask = False
+            config.export.generate_indices_file = False
+            config.export.validate_before_export = False
+        case "default":
+            config = PipelineConfig.for_bm_parity(
+                bbox=bbox_parsed, date=date, output_path=str(output_path_obj)
+            )
+        case _:
+            typer.echo(
+                f"Error: Unknown config preset '{config_preset}'. "
+                f"Use 'default', 'high_quality', or 'fast'.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
 
     # Enable diagnostics if requested
     if save_diagnostics:
@@ -170,18 +180,18 @@ def run(
 
     # Display processing info
     typer.echo("\nStarting Black Marble pipeline:")
-    typer.echo(f"  Bounding Box: {bbox}")
+    typer.echo(f"  Bounding Box: {bbox_parsed}")
     typer.echo(f"  Date: {date.strftime('%Y-%m-%d')}")
     typer.echo(f"  Config Preset: {config_preset}")
-    typer.echo(f"  Road Rasterization: Fractional (5x5)")
-    typer.echo(f"  NTL Enhancement: multiplicative")
+    typer.echo("  Road Rasterization: Fractional (5x5)")
+    typer.echo("  NTL Enhancement: multiplicative")
     typer.echo(f"  Output Path: {output_path_obj}")
 
     try:
         typer.echo("\nRunning pipeline...")
 
         result = black_marble_pipeline_sync(
-            bbox=bbox,
+            bbox=bbox_parsed,
             date=date,
             output_path=str(output_path_obj),
             config=config,
