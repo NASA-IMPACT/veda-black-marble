@@ -13,6 +13,7 @@ from rasterio.enums import Resampling
 from rasterio.io import MemoryFile
 from rasterio.shutil import copy
 
+
 logger = logging.getLogger(__name__)
 
 # Type aliases

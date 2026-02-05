@@ -315,7 +315,7 @@ class DownloadProgressTracker:
         self.description = description
         self.parent_task = parent_task
         self.last_log_percent = -1
-        
+
         # Log initial status
         logging.info("Starting %s: %d files", self.description, self.total)
 
@@ -336,13 +336,24 @@ class DownloadProgressTracker:
             current_percent = int((self.completed + self.failed) * 100 / self.total)
             if current_percent >= self.last_log_percent + 10:
                 self.last_log_percent = current_percent
-                logging.info("%s progress: %d%% (%d/%d completed, %d failed, %d in progress)",
-                             self.description, current_percent, self.completed, self.total, 
-                             self.failed, self.in_progress)
+                logging.info(
+                    "%s progress: %d%% (%d/%d completed, %d failed, %d in progress)",
+                    self.description,
+                    current_percent,
+                    self.completed,
+                    self.total,
+                    self.failed,
+                    self.in_progress,
+                )
 
     def finish(self):
         """Log final summary"""
         # Log summary
         status = "✅" if self.failed == 0 else "⚠️"
-        logging.info("%s %s complete: %d succeeded, %d failed",
-                     status, self.description, self.completed, self.failed)
+        logging.info(
+            "%s %s complete: %d succeeded, %d failed",
+            status,
+            self.description,
+            self.completed,
+            self.failed,
+        )

@@ -8,6 +8,7 @@ import rasterio
 
 from ..logging_utils import get_logger
 
+
 logger = get_logger(__name__)
 
 ArrayLike = npt.NDArray[Any]

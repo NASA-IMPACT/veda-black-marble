@@ -283,7 +283,7 @@ def print_qa_pixel_summary(qa_pixel: np.ndarray) -> None:
     if water_class is not None:
         vals, counts = np.unique(water_class, return_counts=True)
         water_names = {0: "land", 1: "water", 2: "maybe water", 3: "reserved"}
-        for v, c in zip(vals, counts):
+        for v, c in zip(vals, counts, strict=True):
             name = water_names.get(v, f"unknown({v})")
             print(f"  {name:<18} {c / total * 100:5.1f}%")
 
@@ -294,7 +294,7 @@ def print_qa_pixel_summary(qa_pixel: np.ndarray) -> None:
         if conf_field in decoded:
             vals, counts = np.unique(decoded[conf_field], return_counts=True)
             parts = []
-            for v, c in zip(vals, counts):
+            for v, c in zip(vals, counts, strict=True):
                 name = conf_names[v] if v < len(conf_names) else f"{v}"
                 parts.append(f"{name}: {c / total * 100:.1f}%")
             print(f"  {conf_field:<18} {', '.join(parts)}")
@@ -303,7 +303,7 @@ def print_qa_pixel_summary(qa_pixel: np.ndarray) -> None:
     if "cirrus_confidence" in decoded:
         vals, counts = np.unique(decoded["cirrus_confidence"], return_counts=True)
         parts = []
-        for v, c in zip(vals, counts):
+        for v, c in zip(vals, counts, strict=True):
             name = "low" if v == 0 else "high"
             parts.append(f"{name}: {c / total * 100:.1f}%")
         print(f"  cirrus_confidence  {', '.join(parts)}")

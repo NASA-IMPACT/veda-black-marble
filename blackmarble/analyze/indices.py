@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
+
 logger = logging.getLogger(__name__)
 
 # Type aliases
@@ -24,7 +25,9 @@ LANDSAT_EPSILON = 0.02  # 2% reflectance threshold for Landsat C2 SR data
 INDEX_EPSILON = 0.05  # 5% of signal magnitude
 
 
-def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSILON, mask_low_denom: bool = False) -> ArrayLike:
+def calculate_ndvi(
+    nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSILON, mask_low_denom: bool = False
+) -> ArrayLike:
     """Calculate Normalized Difference Vegetation Index (NDVI).
 
     The NDVI is a fundamental vegetation index that measures the health and density
@@ -72,7 +75,7 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSI
         suitable for masked data. Output is NOT clamped to [-1, 1] to
         preserve extreme values that may indicate processing issues.
 
-        For NDUI calculations in the Black Marble pipeline, negative NDVI 
+        For NDUI calculations in the Black Marble pipeline, negative NDVI
         values (water/bare soil/artificial surfaces) should be clamped to 0
         as they should not contribute to the vegetation signal.
     """
@@ -88,11 +91,7 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSI
     if mask_low_denom:
         # Return NaN for low denominators to preserve mathematical correctness
         # This is crucial for index-first temporal compositing
-        ndvi = np.where(
-            np.abs(denominator) < epsilon,
-            np.nan,
-            numerator / denominator
-        )
+        ndvi = np.where(np.abs(denominator) < epsilon, np.nan, numerator / denominator)
     else:
         # Calculate adaptive floor based on signal magnitude
         signal_magnitude = (np.abs(nir) + np.abs(red)) / 2
@@ -102,7 +101,7 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSI
         safe_denominator = np.where(
             np.abs(denominator) < adaptive_floor,
             np.copysign(adaptive_floor, denominator),
-            denominator
+            denominator,
         )
 
         # Calculate NDVI using the safe denominator
@@ -122,7 +121,9 @@ def calculate_ndvi(nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSI
     return ndvi
 
 
-def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = LANDSAT_EPSILON, mask_low_denom: bool = False) -> ArrayLike:
+def calculate_ndwi(
+    green: ArrayLike, nir: ArrayLike, epsilon: float = LANDSAT_EPSILON, mask_low_denom: bool = False
+) -> ArrayLike:
     """Calculate Normalized Difference Water Index (NDWI).
 
     The NDWI is designed to detect water features and measure water content
@@ -190,11 +191,7 @@ def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = LANDSAT_EP
     if mask_low_denom:
         # Return NaN for low denominators to preserve mathematical correctness
         # This is crucial for index-first temporal compositing
-        ndwi = np.where(
-            np.abs(denominator) < epsilon,
-            np.nan,
-            numerator / denominator
-        )
+        ndwi = np.where(np.abs(denominator) < epsilon, np.nan, numerator / denominator)
     else:
         # Calculate adaptive floor based on signal magnitude
         signal_magnitude = (np.abs(green) + np.abs(nir)) / 2
@@ -204,7 +201,7 @@ def calculate_ndwi(green: ArrayLike, nir: ArrayLike, epsilon: float = LANDSAT_EP
         safe_denominator = np.where(
             np.abs(denominator) < adaptive_floor,
             np.copysign(adaptive_floor, denominator),
-            denominator
+            denominator,
         )
 
         # Calculate NDWI using the safe denominator
@@ -308,7 +305,8 @@ def calculate_ndui(
 
     # DEBUG: Check clipping effect
     num_clipped = np.sum(ntl > ntl_ceiling)
-    logger.info(f"NDUI DEBUG: Pixels clipped at ceiling: {num_clipped} ({num_clipped/ntl.size*100:.1f}%)")
+    percent_clipped = num_clipped / ntl.size * 100
+    logger.info(f"NDUI DEBUG: Pixels clipped at ceiling: {num_clipped} ({percent_clipped:.1f}%)")
 
     # Normalize by dividing by ceiling (not range)
     # This ceiling-only normalization keeps the 0-1 scale invariant when ceiling

@@ -16,6 +16,7 @@ from .landsat_search import (
     with_s3_client,
 )
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -149,7 +150,8 @@ async def search_best_scenes(
             f"{min(group_dates)} to {max(group_dates)}" if len(group_dates) > 1 else str(base_date)
         )
         logger.info(
-            f"Selected group {date_desc} with {len(group_scenes)} scenes from {len(group_dates)} dates, avg cloud {avg_cloud:.1f}%"
+            f"Selected group {date_desc} with {len(group_scenes)} scenes from "
+            f"{len(group_dates)} dates, avg cloud {avg_cloud:.1f}%"
         )
 
         from .landsat_search import group_by_pathrow

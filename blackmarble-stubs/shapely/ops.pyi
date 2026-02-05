@@ -1,6 +1,7 @@
 """Type stubs for shapely.ops."""
 
-from typing import Sequence
+from collections.abc import Sequence
+
 from .geometry import BaseGeometry
 
 def unary_union(geoms: Sequence[BaseGeometry]) -> BaseGeometry:

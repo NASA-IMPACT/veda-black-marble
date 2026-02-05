@@ -5,6 +5,7 @@ from typing import Any, Literal
 import numpy as np
 import numpy.typing as npt
 
+
 ArrayLike = npt.NDArray[Any]
 
 

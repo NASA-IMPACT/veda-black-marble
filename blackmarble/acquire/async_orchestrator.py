@@ -9,10 +9,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from .landsat import AsyncLandsatDownloader
+
 # from .async_base import DownloadProgressTracker  # Currently unused
 from .landsat_search_grouped import search_best_scenes as search_best_scenes_grouped
-from .landsat import AsyncLandsatDownloader
 from .viirs import download_viirs
+
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +227,7 @@ class AsyncDownloadOrchestrator:
         )
 
         # Process results
-        for name, result in zip(task_names, task_results):
+        for name, result in zip(task_names, task_results, strict=False):
             if isinstance(result, Exception):
                 logger.error(f"{name} download failed: {result}")
                 # Include full traceback for debugging
@@ -330,7 +332,7 @@ class AsyncDownloadOrchestrator:
             logger.debug("📍 WRS tiles that should cover bbox %s:", plan.bbox)
             logger.debug("   Total tiles: %d", len(tiles))
             logger.debug("   Tiles: %s", sorted(tiles))
-            paths = sorted(set(t["path"] for t in tile_dicts))
+            paths = sorted({t["path"] for t in tile_dicts})
             logger.debug("   Paths: %s", paths)
             # Empty line removed - not needed for logging
         except Exception as e:
@@ -358,7 +360,7 @@ class AsyncDownloadOrchestrator:
 
         # Map target date → scenes
         date_to_scenes: dict[datetime, list[Any]] = {}
-        for target_date, result in zip(plan.landsat_dates, scene_lists):
+        for target_date, result in zip(plan.landsat_dates, scene_lists, strict=False):
             if isinstance(result, Exception):
                 logger.error("Scene search failed for %s: %s", target_date.date(), result)
                 logger.error("Exception details: %s", str(result))

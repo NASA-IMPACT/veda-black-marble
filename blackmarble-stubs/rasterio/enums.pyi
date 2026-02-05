@@ -34,25 +34,25 @@ class ColorInterp(Enum):
     black = 13
 
 class Compression(Enum):
-    none = 'NONE'
-    jpeg = 'JPEG'
-    lzw = 'LZW'
-    packbits = 'PACKBITS'
-    deflate = 'DEFLATE'
-    ccittrle = 'CCITTRLE'
-    ccittfax3 = 'CCITTFAX3'
-    ccittfax4 = 'CCITTFAX4'
-    lzma = 'LZMA'
-    zstd = 'ZSTD'
-    lerc = 'LERC'
-    lerc_deflate = 'LERC_DEFLATE'
-    lerc_zstd = 'LERC_ZSTD'
-    webp = 'WEBP'
+    none = "NONE"
+    jpeg = "JPEG"
+    lzw = "LZW"
+    packbits = "PACKBITS"
+    deflate = "DEFLATE"
+    ccittrle = "CCITTRLE"
+    ccittfax3 = "CCITTFAX3"
+    ccittfax4 = "CCITTFAX4"
+    lzma = "LZMA"
+    zstd = "ZSTD"
+    lerc = "LERC"
+    lerc_deflate = "LERC_DEFLATE"
+    lerc_zstd = "LERC_ZSTD"
+    webp = "WEBP"
 
 class Interleaving(Enum):
-    pixel = 'PIXEL'
-    line = 'LINE'  
-    band = 'BAND'
+    pixel = "PIXEL"
+    line = "LINE"
+    band = "BAND"
 
 class MaskFlags(Enum):
     all_valid = 1

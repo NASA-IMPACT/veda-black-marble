@@ -12,7 +12,9 @@ import typer
 from .config import PipelineConfig
 from .pipeline import black_marble_pipeline_sync
 
+
 app = typer.Typer(help="Command-line interface for the VEDA Black Marble processing pipeline.")
+
 
 def parse_bbox(value: str) -> tuple[float, float, float, float]:
     """
@@ -34,14 +36,15 @@ def parse_bbox(value: str) -> tuple[float, float, float, float]:
 
         return (min_x, min_y, max_x, max_y)
     except Exception as e:
-        raise typer.BadParameter(f"Invalid bbox: {e}")
+        raise typer.BadParameter("Invalid bbox") from e
+
 
 @app.command()
 def run(
     bbox: str = typer.Option(
         ...,
         "--bbox",
-        help="Bounding box as \"min_x,min_y,max_x,max_y\" or \"min_x min_y max_x max_y\"",
+        help='Bounding box as "min_x,min_y,max_x,max_y" or "min_x min_y max_x max_y"',
         parser=parse_bbox,
     ),
     date: datetime = typer.Option(..., "--date", help="Target date for data in YYYY-MM-DD format."),
@@ -108,14 +111,14 @@ def run(
 
     logging.basicConfig(
         level=numeric_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
 
     # Suppress noisy INFO messages from AWS libraries
-    logging.getLogger('aiobotocore').setLevel(logging.WARNING)
-    logging.getLogger('botocore').setLevel(logging.WARNING)
-    logging.getLogger('boto3').setLevel(logging.WARNING)
+    logging.getLogger("aiobotocore").setLevel(logging.WARNING)
+    logging.getLogger("botocore").setLevel(logging.WARNING)
+    logging.getLogger("boto3").setLevel(logging.WARNING)
 
     bbox_parsed = typing.cast(tuple[float, float, float, float], bbox)
 
@@ -124,8 +127,7 @@ def run(
         os.environ["EARTHDATA_TOKEN"] = earthdata_token
     else:
         typer.echo(
-            "Error: EARTHDATA_TOKEN env var not set "
-            "or --earthdata-token not provided.",
+            "Error: EARTHDATA_TOKEN env var not set or --earthdata-token not provided.",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -177,7 +179,6 @@ def run(
         config.export.generate_wgs84 = True
         typer.echo("🌍 WGS84 (EPSG:4326) export enabled")
 
-
     # Configure NTL enhancement - always use multiplicative mode
     config.analysis.ntl_enhancement_mode = "multiplicative"
     typer.echo("🌃 NTL enhancement: Urban field (multiplicative mode)")
@@ -224,7 +225,7 @@ def run(
     except Exception as e:
         typer.echo(f"\n❌ Pipeline failed: {str(e)}", err=True)
         typer.echo(f"Traceback:\n{traceback.format_exc()}", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 if __name__ == "__main__":

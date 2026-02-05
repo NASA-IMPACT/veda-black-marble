@@ -10,6 +10,7 @@ from typing import Any, Literal, Self
 
 import numpy.typing as npt
 
+
 # Type aliases
 BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
 ArrayLike = npt.NDArray[Any]
@@ -20,9 +21,7 @@ class LandsatAcquisitionConfig:
     """Configuration for time-window based Landsat acquisition."""
 
     # Time window settings
-    window_days: int = (
-        7  # Search ±7 days from each target date (balanced approach)
-    )
+    window_days: int = 7  # Search ±7 days from each target date (balanced approach)
 
     # Date-grouped selection settings
     # Design: With 12 dates × ±7 day windows throughout the year, we ensure catching
@@ -30,9 +29,7 @@ class LandsatAcquisitionConfig:
     # 1. Temporal consistency (tolerance_days=12) - all tiles from within 12 days
     # 2. Spatial completeness - prefer dates with more tile coverage
     # 3. Quality optimization - among available dates, pick the one with lowest cloud cover
-    tolerance_days: float = (
-        12.0  # Max days between scenes in same group (balanced grouping)
-    )
+    tolerance_days: float = 12.0  # Max days between scenes in same group (balanced grouping)
 
 
 @dataclass
@@ -41,7 +38,9 @@ class AcquisitionConfig:
 
     # Landsat settings
     cloud_cover_max: float = 50.0  # More permissive to accept T2 scenes
-    composite_months: int = 12  # Total number of months for temporal composite (including target date)
+    composite_months: int = (
+        12  # Total number of months for temporal composite (including target date)
+    )
 
     # Landsat time-window acquisition configuration
     landsat_acquisition: LandsatAcquisitionConfig = field(default_factory=LandsatAcquisitionConfig)

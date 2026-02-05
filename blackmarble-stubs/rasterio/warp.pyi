@@ -1,13 +1,16 @@
 """Type stubs for rasterio.warp."""
 
-from typing import Any, Sequence
 from enum import IntEnum
+from typing import Any
+
 import numpy.typing as npt
-from .transform import Affine
+
 from .crs import CRS
+from .transform import Affine
 
 class Resampling(IntEnum):
     """Available resampling methods."""
+
     nearest = 0
     bilinear = 1
     cubic = 2
@@ -41,9 +44,8 @@ def reproject(
     init_dest_nodata: bool = True,
     warp_mem_limit: int = 0,
     resampling: Resampling = Resampling.nearest,
-    **kwargs: Any
+    **kwargs: Any,
 ) -> tuple[npt.NDArray[Any], Affine]: ...
-
 def calculate_default_transform(
     src_crs: CRS | str | dict[str, Any],
     dst_crs: CRS | str | dict[str, Any],
@@ -58,9 +60,8 @@ def calculate_default_transform(
     resolution: float | tuple[float, float] | None = None,
     dst_width: int | None = None,
     dst_height: int | None = None,
-    **kwargs: Any
+    **kwargs: Any,
 ) -> tuple[Affine, int, int]: ...
-
 def transform_bounds(
     src_crs: CRS | str | dict[str, Any],
     dst_crs: CRS | str | dict[str, Any],
@@ -68,16 +69,15 @@ def transform_bounds(
     bottom: float,
     right: float,
     top: float,
-    densify_pts: int = 21
+    densify_pts: int = 21,
 ) -> tuple[float, float, float, float]: ...
-
 def transform_geom(
     src_crs: CRS | str | dict[str, Any],
     dst_crs: CRS | str | dict[str, Any],
     geom: dict[str, Any],
     antimeridian_cutting: bool = False,
     antimeridian_offset: float = 10.0,
-    precision: float = -1
+    precision: float = -1,
 ) -> dict[str, Any]: ...
 
 __all__ = [

@@ -8,9 +8,10 @@ This module provides analytical functions for:
 """
 
 from .indices import calculate_ndui, calculate_ndvi, calculate_ndwi
+from .streaming import streaming_percentile_85
 from .temporal import create_index_temporal_composite
 from .urban_fields import compute_urban_fields, enhance_ntl_with_urban_field
-from .streaming import streaming_percentile_85
+
 
 __all__ = [
     "calculate_ndui",

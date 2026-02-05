@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
+
 # Generic array type for pixel data
 ArrayLike = npt.NDArray[Any]
 

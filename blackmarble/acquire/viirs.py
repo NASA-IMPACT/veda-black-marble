@@ -14,12 +14,14 @@ import aiofiles
 import aiohttp
 from osgeo import gdal
 
+
 logger = logging.getLogger(__name__)
 
 
 LAADS_ENDPOINT = "https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details/allData"
 BM_SHORT_NAME = "VNP46A2"
 BM_ARCHIVE_SET = "5200"
+
 
 async def download_viirs_h5(
     session: aiohttp.ClientSession,
@@ -86,7 +88,7 @@ async def download_viirs_h5(
 
     except aiohttp.ClientError as e:
         logger.error(f"Failed to query NASA LAADS API: {e}")
-        raise RuntimeError(f"Failed to query NASA LAADS API: {e}")
+        raise RuntimeError("Failed to query NASA LAADS API") from e
 
     # Find the file for our tile
     items = api_data.get("content", [])
@@ -127,7 +129,7 @@ async def download_viirs_h5(
                 logger.error("Received HTML error page instead of HDF5 file")
                 logger.debug(f"HTML content: {html_content[:500]}")
                 raise RuntimeError(
-                    "Received HTML error page instead of HDF5 file. " "Check your Earthdata token."
+                    "Received HTML error page instead of HDF5 file. Check your Earthdata token."
                 )
 
             # Download in chunks
@@ -149,7 +151,7 @@ async def download_viirs_h5(
 
     except aiohttp.ClientError as e:
         logger.error(f"Download failed for {matching_filename}: {e}")
-        raise RuntimeError(f"Download failed for {matching_filename}: {e}")
+        raise RuntimeError(f"Download failed for {matching_filename}") from e
 
 
 async def download_viirs_tiles_async(
@@ -250,7 +252,7 @@ async def download_viirs_tiles_async(
                     logger.error("FOUND UNPACKING ERROR AT LINE 238!")
                 logger.error(f"Error unpacking tile {tile}: {e}")
                 logger.error(f"Tile type: {type(tile)}, content: {tile}")
-                raise ValueError(f"Cannot unpack tile: {tile}. Expected (v, h) tuple. Error: {e}")
+                raise ValueError(f"Cannot unpack tile: {tile}. Expected (v, h) tuple.") from e
             hdf_filename = f"VNP46A2_h{h:02d}v{v:02d}_{year}{month:02d}{day:02d}.h5"
             hdf_path = os.path.join(effective_output_dir, hdf_filename)
 
@@ -289,7 +291,7 @@ async def download_viirs_tiles_async(
         if download_tasks:
             logger.info(f"Downloading {len(download_tasks)} VIIRS tiles...")
             logger.debug(f"download_tasks length: {len(download_tasks)}")
-            
+
             download_completed = 0
             download_failed = 0
 
@@ -299,7 +301,7 @@ async def download_viirs_tiles_async(
             except ValueError as e:
                 logger.error(f"Error unpacking download_tasks: {e}")
                 logger.error(f"download_tasks: {download_tasks}")
-                raise ValueError(f"Failed to unpack download_tasks: {e}")
+                raise ValueError("Failed to unpack download_tasks") from e
             download_results = await asyncio.gather(*task_futures, return_exceptions=True)
 
             # Process results
@@ -309,13 +311,10 @@ async def download_viirs_tiles_async(
                 except ValueError as e:
                     logger.error(f"Error unpacking download_tasks[{i}]: {e}")
                     logger.error(f"download_tasks[{i}] = {download_tasks[i]}")
-                    has_len = hasattr(download_tasks[i], '__len__')
-                    length = len(download_tasks[i]) if has_len else 'N/A'
-                    logger.error(
-                        f"Type: {type(download_tasks[i])}, "
-                        f"Length: {length}"
-                    )
-                    raise ValueError(f"Failed to unpack download_tasks[{i}]: {e}")
+                    has_len = hasattr(download_tasks[i], "__len__")
+                    length = len(download_tasks[i]) if has_len else "N/A"
+                    logger.error(f"Type: {type(download_tasks[i])}, Length: {length}")
+                    raise ValueError("Failed to unpack download_tasks[{i}]") from e
 
                 if isinstance(result_or_error, Exception):
                     logger.error(f"Failed to download tile h{h:02d}v{v:02d}: {result_or_error}")
@@ -334,7 +333,9 @@ async def download_viirs_tiles_async(
                     download_failed += 1
 
             # Log download summary
-            logger.info(f"Download complete: {download_completed} succeeded, {download_failed} failed")
+            logger.info(
+                f"Download complete: {download_completed} succeeded, {download_failed} failed"
+            )
         else:
             logger.info("No VIIRS tiles to download (all cached)")
 
@@ -481,7 +482,7 @@ def convert_viirs_hdf_to_tiff(hdf_file: str, output_file: str, layer: int = 0) -
     )
 
     result = gdal.Translate(output_file, layer_dataset, options=translate_options)
-    
+
     # Guard rail: Verify the output has correct orientation
     if result:
         result_ds = gdal.Open(output_file, gdal.GA_ReadOnly)
@@ -511,5 +512,4 @@ def extract_viirs_layers(hdf_file: str, output_dir: str = ".") -> dict[str, str]
         logger.info(f"Extracted gap_filled_ntl: {output_path}")
         return {"gap_filled_ntl": output_path}
     except Exception as e:
-        raise RuntimeError(f"Could not extract gap-filled NTL layer: {e}")
-
+        raise RuntimeError("Could not extract gap-filled NTL layer") from e

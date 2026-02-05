@@ -6,6 +6,7 @@ and averaging to get the fraction of sub-pixels covered.
 """
 
 import logging
+import os
 from typing import Any
 
 import networkx as nx
@@ -18,11 +19,11 @@ from rasterio.crs import CRS
 from rasterio.transform import Affine
 from shapely.geometry import mapping
 
+
 # Create logger for spatial debugging
 log = logging.getLogger("bm.spatial")
 
 # Enable debug logging if environment variable is set
-import os
 
 if os.environ.get("BM_SPATIAL_DEBUG", "").lower() in ("1", "true", "yes"):
     log.setLevel(logging.DEBUG)
@@ -82,7 +83,7 @@ def buffer_and_rasterize_roads_fractional(
         transform: Target transform for 30m output
         crs: Target CRS
         shape: Target shape (height, width) at 30m
-        buffer_meters: Buffer distance in meters (float) or dict mapping road types to buffer distances
+        buffer_meters: Buffer distance in meters or dict mapping road types to buffer distances
         sub_pixels: Sub-pixels per dimension (5 = 5x5 = 25 total)
         hierarchical: If True, raises NotImplementedError
 
@@ -102,11 +103,11 @@ def buffer_and_rasterize_roads_fractional(
 
     # Get edges from graph
     try:
-        log.debug(f"Converting graph to GeoDataFrame...")
+        log.debug("Converting graph to GeoDataFrame...")
 
         # Check if graph has CRS info
         if not hasattr(graph, "graph") or "crs" not in graph.graph:
-            log.warning(f"Graph missing CRS attribute, assuming EPSG:4326")
+            log.warning("Graph missing CRS attribute, assuming EPSG:4326")
             # Add CRS to graph for osmnx compatibility
             if not hasattr(graph, "graph"):
                 graph.graph = {}
@@ -121,11 +122,11 @@ def buffer_and_rasterize_roads_fractional(
         return np.zeros(shape, dtype=np.float32)
 
     if len(edges_gdf) == 0:
-        log.error(f"No edges in GeoDataFrame")
+        log.error("No edges in GeoDataFrame")
         return np.zeros(shape, dtype=np.float32)
 
     # Log initial state
-    log.debug(f"STEP 1: edges_gdf created from graph")
+    log.debug("STEP 1: edges_gdf created from graph")
     log.debug(f"  - CRS: {edges_gdf.crs}")
     log.debug(f"  - Bounds: {edges_gdf.total_bounds}")
     log.debug(f"  - Num edges: {len(edges_gdf)}")
@@ -170,15 +171,12 @@ def buffer_and_rasterize_roads_fractional(
 
     # Convert to target CRS for rasterization
     # Ensure CRS is properly formatted
-    if isinstance(crs, str):
-        target_crs = CRS.from_string(crs)
-    else:
-        target_crs = crs
+    target_crs = CRS.from_string(crs) if isinstance(crs, str) else crs
 
     log.debug(f"Target CRS for rasterization: {target_crs}")
 
     edges_buffered = edges_utm.to_crs(target_crs)
-    log.debug(f"After projection to target CRS:")
+    log.debug("After projection to target CRS:")
     log.debug(f"  Bounds: {edges_buffered.total_bounds}")
     target_centroid = edges_buffered.unary_union.centroid
     log.debug(f"  Centroid: ({target_centroid.x:.1f}, {target_centroid.y:.1f})")
@@ -186,8 +184,8 @@ def buffer_and_rasterize_roads_fractional(
     # Check the transform bounds and overlap
     raster_bounds = rasterio.transform.array_bounds(shape[0], shape[1], transform)
 
-    log.debug(f"STEP 5: Checking overlap between roads and raster grid")
-    log.debug(f"  - Raster grid info:")
+    log.debug("STEP 5: Checking overlap between roads and raster grid")
+    log.debug("  - Raster grid info:")
     log.debug(f"    - Shape: {shape}")
     log.debug(f"    - Transform: {transform}")
     log.debug(f"    - Bounds: {raster_bounds}")
@@ -203,7 +201,7 @@ def buffer_and_rasterize_roads_fractional(
         distance = np.sqrt(
             (target_centroid.x - raster_center_x) ** 2 + (target_centroid.y - raster_center_y) ** 2
         )
-        log.debug(f"  - Distance between centroids: {distance:.1f}m ({distance/1000:.1f}km)")
+        log.debug(f"  - Distance between centroids: {distance:.1f}m ({distance / 1000:.1f}km)")
 
     # Sanity check: ensure bounds overlap
     edges_minx, edges_miny, edges_maxx, edges_maxy = edges_buffered.total_bounds
@@ -213,23 +211,23 @@ def buffer_and_rasterize_roads_fractional(
     x_overlap = not (edges_maxx < raster_minx or edges_minx > raster_maxx)
     y_overlap = not (edges_maxy < raster_miny or edges_miny > raster_maxy)
 
-    log.debug(f"  - Overlap check:")
+    log.debug("  - Overlap check:")
     log.debug(f"    - X-axis overlap: {x_overlap}")
     log.debug(f"      Roads X: [{edges_minx:.1f}, {edges_maxx:.1f}]")
     log.debug(f"      Raster X: [{raster_minx:.1f}, {raster_maxx:.1f}]")
-    log.debug(
-        f"      Gap: {max(0, raster_minx - edges_maxx):.1f}m (left), {max(0, edges_minx - raster_maxx):.1f}m (right)"
-    )
+    left_gap = max(0, raster_minx - edges_maxx)
+    right_gap = max(0, edges_minx - raster_maxx)
+    log.debug(f"      Gap: {left_gap:.1f}m (left), {right_gap:.1f}m (right)")
     log.debug(f"    - Y-axis overlap: {y_overlap}")
     log.debug(f"      Roads Y: [{edges_miny:.1f}, {edges_maxy:.1f}]")
     log.debug(f"      Raster Y: [{raster_miny:.1f}, {raster_maxy:.1f}]")
-    log.debug(
-        f"      Gap: {max(0, raster_miny - edges_maxy):.1f}m (bottom), {max(0, edges_miny - raster_maxy):.1f}m (top)"
-    )
+    bottom_gap = max(0, raster_miny - edges_maxy)
+    top_gap = max(0, edges_miny - raster_maxy)
+    log.debug(f"      Gap: {bottom_gap:.1f}m (bottom), {top_gap:.1f}m (top)")
 
     if not (x_overlap and y_overlap):
-        log.warning(f"⚠️  WARNING: No overlap between roads and raster!")
-        log.warning(f"  This will result in zero roads being rasterized")
+        log.warning("⚠️  WARNING: No overlap between roads and raster!")
+        log.warning("  This will result in zero roads being rasterized")
 
         # This will result in zero roads being rasterized
 

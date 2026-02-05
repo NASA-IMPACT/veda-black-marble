@@ -1,63 +1,48 @@
 """Type stubs for rasterio.io."""
 
 from typing import Any
+
 import numpy.typing as npt
+
 from .windows import Window
 
 class MemoryFile:
     """A file-like object backed by an in-memory buffer."""
-    
+
     def __init__(self, file_or_bytes: bytes | None = None) -> None: ...
-    
     def __enter__(self) -> MemoryFile: ...
-    
     def __exit__(self, *args: Any) -> None: ...
-    
     def open(self, **kwargs: Any) -> DatasetReader | DatasetWriter: ...
-    
     def close(self) -> None: ...
-    
     def getbuffer(self) -> memoryview: ...
-    
     @property
     def closed(self) -> bool: ...
 
 class DatasetBase:
     """Base class for dataset readers and writers."""
-    
+
     @property
     def count(self) -> int: ...
-    
     @property
     def width(self) -> int: ...
-    
     @property
     def height(self) -> int: ...
-    
     @property
     def shape(self) -> tuple[int, int]: ...
-    
     @property
     def bounds(self) -> tuple[float, float, float, float]: ...
-    
     @property
     def transform(self) -> Any: ...
-    
     @property
     def crs(self) -> Any: ...
-    
     @property
     def meta(self) -> dict[str, Any]: ...
-    
     @property
     def profile(self) -> dict[str, Any]: ...
-    
     @property
     def dtypes(self) -> list[str]: ...
-    
     @property
     def nodata(self) -> float | None: ...
-    
     def read(
         self,
         indexes: int | list[int] | None = None,
@@ -67,54 +52,44 @@ class DatasetBase:
         out_shape: tuple[int, ...] | None = None,
         resampling: Any = None,
         fill_value: float | None = None,
-        out_dtype: Any | None = None
+        out_dtype: Any | None = None,
     ) -> npt.NDArray[Any]: ...
-    
     def read_masks(
         self,
         indexes: int | list[int] | None = None,
         out: npt.NDArray[Any] | None = None,
         out_shape: tuple[int, ...] | None = None,
         window: Window | None = None,
-        resampling: Any = None
+        resampling: Any = None,
     ) -> npt.NDArray[Any]: ...
 
 class DatasetReader(DatasetBase):
     """A dataset opened in read mode."""
+
     pass
 
 class DatasetWriter(DatasetBase):
     """A dataset opened in write or update mode."""
-    
+
     def write(
         self,
         arr: npt.NDArray[Any],
         indexes: int | list[int] | None = None,
-        window: Window | None = None
+        window: Window | None = None,
     ) -> None: ...
-    
     def write_band(
-        self,
-        band: int,
-        src: npt.NDArray[Any],
-        window: Window | None = None
+        self, band: int, src: npt.NDArray[Any], window: Window | None = None
     ) -> None: ...
-    
     def update_tags(self, bidx: int = 0, **kwargs: Any) -> None: ...
-    
     def set_band_description(self, bidx: int, value: str) -> None: ...
-    
     def set_band_unit(self, bidx: int, value: str) -> None: ...
-    
     def build_overviews(
-        self,
-        factors: list[int],
-        resampling: Any = None,
-        **kwargs: Any
+        self, factors: list[int], resampling: Any = None, **kwargs: Any
     ) -> None: ...
 
 class BufferedDatasetWriter(DatasetWriter):
     """A dataset writer with internal buffer."""
+
     pass
 
 __all__ = ["MemoryFile", "DatasetBase", "DatasetReader", "DatasetWriter", "BufferedDatasetWriter"]

@@ -13,6 +13,7 @@ import numpy as np
 from pyproj import CRS, Transformer
 from rasterio.transform import from_bounds
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -158,9 +159,9 @@ def create_processing_grid(
 
     # Log grid details
     logger.info("Created processing grid:")
-    logger.info(
-        f"  CRS: Local Albers centered at {(bbox[0]+bbox[2])/2:.3f}°, {(bbox[1]+bbox[3])/2:.3f}°"
-    )
+    center_lon = (bbox[0] + bbox[2]) / 2
+    center_lat = (bbox[1] + bbox[3]) / 2
+    logger.info(f"  CRS: Local Albers centered at {center_lon:.3f}°, {center_lat:.3f}°")
     logger.info(f"  Resolution: {resolution}m")
     logger.info(f"  Dimensions: {width} x {height} pixels")
     logger.info(f"  Bounds (Albers): ({min_x:.1f}, {min_y:.1f}, {max_x:.1f}, {max_y:.1f})")

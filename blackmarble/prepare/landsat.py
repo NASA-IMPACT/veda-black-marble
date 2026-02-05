@@ -16,11 +16,11 @@ from rasterio.warp import Resampling, reproject, transform_bounds
 
 from ..crs import create_processing_grid
 from ..logging_utils import get_logger
-
-logger = get_logger(__name__)
-
 from .landsat_qa import create_landsat_cloud_mask, print_qa_pixel_summary
 from .window_utils import calculate_window_offsets, round_window_offsets_correctly
+
+
+logger = get_logger(__name__)
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -83,7 +83,7 @@ def process_landsat_date(
     cloud_strategy: Literal["conservative", "moderate", "permissive"] = "moderate",
     save_diagnostics: bool = False,
     date_str: str | None = None,
-    diagnostics_dir: str | None = None,``
+    diagnostics_dir: str | None = None,
 ) -> dict[str, tuple[ArrayLike, dict[str, Any]]]:
     """Process all Landsat bands for a single date with QA masking.
 
@@ -201,7 +201,8 @@ def process_landsat_date(
                             *dst_bounds, transform=qa_profile["transform"]
                         )
 
-                        # Round the window to integer pixels using correct rounding for north-up rasters
+                        # Round the window to integer pixels using correct rounding
+                        # for north-up rasters
                         dst_window_int = round_window_offsets_correctly(
                             dst_window, qa_profile["transform"]
                         )
@@ -562,7 +563,7 @@ def process_landsat_date(
             # Read and reproject the single file
             if qa_files and apply_qa_mask:
                 # Apply cloud masking
-                with rasterio.open(band_files[0]) as src_band, rasterio.open(qa_files[0]) as src_qa:
+                with rasterio.open(band_files[0]) as src_band, rasterio.open(qa_files[0]):
                     # Read entire file (no bbox window) and mask immediately
                     full_window = rasterio.windows.Window(0, 0, src_band.width, src_band.height)
                     tile_data, window_transform = _load_and_mask_tile(
@@ -628,7 +629,7 @@ def process_landsat_date(
 
     # Log summary of processed data
     logger.info("Processing summary:")
-    for band_name, (data, profile) in result.items():
+    for band_name, (data, _profile) in result.items():
         if data is not None:
             valid_pixels = ~np.isnan(data) if np.issubdtype(data.dtype, np.floating) else data != 0
             coverage = np.sum(valid_pixels) / data.size * 100 if data.size > 0 else 0

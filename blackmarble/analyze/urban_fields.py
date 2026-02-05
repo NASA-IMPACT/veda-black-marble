@@ -12,6 +12,7 @@ from scipy.ndimage import gaussian_filter
 
 from ..logging_utils import get_logger
 
+
 logger = get_logger(__name__)
 
 # Type aliases
@@ -20,8 +21,8 @@ ArrayLike = npt.NDArray[Any]
 
 def compute_urban_fields(
     road_fraction: ArrayLike,
-    sigmas: list[float] = [2.0, 5.0, 10.0],
-    weights: list[float] = [0.2, 0.3, 0.3, 0.2],
+    sigmas: list[float] | None = None,
+    weights: list[float] | None = None,
 ) -> ArrayLike:
     """Compute anisotropic urban density fields.
 
@@ -48,10 +49,14 @@ def compute_urban_fields(
         >>> # Center column (roads) will have highest values
         >>> assert np.all(field[:, 1] > field[:, 0])
     """
+    if sigmas is None:
+        sigmas = [2.0, 5.0, 10.0]
+    if weights is None:
+        weights = [0.2, 0.3, 0.3, 0.2]
     # Validate inputs
-    assert (
-        len(weights) == len(sigmas) + 1
-    ), f"Need {len(sigmas) + 1} weights for {len(sigmas)} sigmas, got {len(weights)}"
+    assert len(weights) == len(sigmas) + 1, (
+        f"Need {len(sigmas) + 1} weights for {len(sigmas)} sigmas, got {len(weights)}"
+    )
     assert abs(sum(weights) - 1.0) < 1e-6, f"Weights must sum to 1.0, got {sum(weights)}"
 
     # Direct coverage (unblurred)
@@ -65,7 +70,7 @@ def compute_urban_fields(
 
     # Weighted combination
     urban_field = np.zeros_like(road_fraction, dtype=np.float32)
-    for field, weight in zip(fields, weights):
+    for field, weight in zip(fields, weights, strict=True):
         urban_field += weight * field
 
     # Ensure output is in valid range
@@ -111,25 +116,24 @@ def enhance_ntl_with_urban_field(
         raise ValueError(
             f"Only 'multiplicative' enhancement mode is supported, got: {enhancement_mode}"
         )
-    
+
     # Multiplicative enhancement with dynamic range preservation
     enhancement_factor = 1.0 + multiplicative_factor * urban_field
     enhanced = ntl * enhancement_factor
-    
+
     # Rescale to preserve dynamic range
     # This prevents the whole image from getting brighter
     max_factor = enhancement_factor.max()
     result = enhanced / max_factor
-    
+
     # Log enhancement statistics
     enhanced_pixels = np.sum(enhancement_factor > 1.001)
     if enhanced_pixels > 0:
         logger.debug(
-            "Urban field enhancement: %d pixels enhanced (%.1f%%), "
-            "max factor: %.3f",
+            "Urban field enhancement: %d pixels enhanced (%.1f%%), max factor: %.3f",
             enhanced_pixels,
             enhanced_pixels / enhancement_factor.size * 100,
-            max_factor
+            max_factor,
         )
-    
+
     return result

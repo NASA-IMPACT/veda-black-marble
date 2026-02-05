@@ -1,6 +1,7 @@
 """Type stubs for osgeo.gdal."""
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 # Constants
 GA_ReadOnly: int
@@ -21,17 +22,15 @@ def BuildVRT(
     src_ds_or_filenames: Sequence[str] | Sequence[Dataset],
     options: Sequence[str] | None = None,
     callback: Any | None = None,
-    callback_data: Any | None = None
+    callback_data: Any | None = None,
 ) -> Dataset | None: ...
-
 def Warp(
     destNameOrDestDS: str | Dataset,
     srcDSOrSrcDSTab: Dataset | Sequence[Dataset] | str | Sequence[str],
     options: WarpOptions | None = None,
     callback: Any | None = None,
-    callback_data: Any | None = None
+    callback_data: Any | None = None,
 ) -> Dataset | None: ...
-
 def WarpOptions(
     options: Sequence[str] | None = None,
     format: str | None = None,
@@ -71,14 +70,14 @@ def WarpOptions(
     metadataConflictValue: str | None = None,
     setColorInterpretation: bool = False,
     callback: Any | None = None,
-    callback_data: Any | None = None
+    callback_data: Any | None = None,
 ) -> WarpOptions: ...
 
 class Dataset:
     RasterXSize: int
     RasterYSize: int
     RasterCount: int
-    
+
     def GetRasterBand(self, band: int) -> Band: ...
     def GetProjection(self) -> str: ...
     def GetGeoTransform(self) -> tuple[float, float, float, float, float, float]: ...
@@ -93,14 +92,14 @@ class Dataset:
         resampling: str = "NEAREST",
         overviewlist: Sequence[int] | None = None,
         callback: Any | None = None,
-        callback_data: Any | None = None
+        callback_data: Any | None = None,
     ) -> int: ...
 
 class Band:
     XSize: int
     YSize: int
     DataType: int
-    
+
     def ReadAsArray(
         self,
         xoff: int = 0,
@@ -112,7 +111,7 @@ class Band:
         buf_type: int | None = None,
         resample_alg: int = 0,
         callback: Any | None = None,
-        callback_data: Any | None = None
+        callback_data: Any | None = None,
     ) -> Any: ...
     def WriteArray(
         self,
@@ -121,7 +120,7 @@ class Band:
         yoff: int = 0,
         resample_alg: int = 0,
         callback: Any | None = None,
-        callback_data: Any | None = None
+        callback_data: Any | None = None,
     ) -> int: ...
     def GetNoDataValue(self) -> float | None: ...
     def SetNoDataValue(self, value: float) -> int: ...
@@ -135,7 +134,7 @@ class Band:
         include_out_of_range: int = 0,
         approx_ok: int = 1,
         callback: Any | None = None,
-        callback_data: Any | None = None
+        callback_data: Any | None = None,
     ) -> list[int]: ...
 
 class Driver:
@@ -146,7 +145,7 @@ class Driver:
         ysize: int,
         bands: int = 1,
         datatype: int = GDT_Byte,
-        options: Sequence[str] | None = None
+        options: Sequence[str] | None = None,
     ) -> Dataset: ...
     def CreateCopy(
         self,
@@ -155,15 +154,12 @@ class Driver:
         strict: int = 1,
         options: Sequence[str] | None = None,
         callback: Any | None = None,
-        callback_data: Any | None = None
+        callback_data: Any | None = None,
     ) -> Dataset: ...
-
-class WarpOptions:
-    pass
 
 __all__ = [
     "UseExceptions",
-    "AllRegister", 
+    "AllRegister",
     "Open",
     "BuildVRT",
     "Warp",

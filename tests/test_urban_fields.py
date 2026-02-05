@@ -183,17 +183,21 @@ class TestNTLEnhancement:
         """Test that unsupported enhancement modes raise an error."""
         ntl = np.array([[0.5, 0.5]], dtype=np.float32)
         urban_field = np.array([[0.0, 1.0]], dtype=np.float32)
-        
+
         # Test that additive mode raises error
         with pytest.raises(ValueError, match="Only 'multiplicative' enhancement mode is supported"):
             enhance_ntl_with_urban_field(
-                ntl=ntl, urban_field=urban_field, enhancement_mode="additive"  # type: ignore
+                ntl=ntl,
+                urban_field=urban_field,
+                enhancement_mode="additive",  # type: ignore
             )
-        
+
         # Test that hybrid mode raises error
         with pytest.raises(ValueError, match="Only 'multiplicative' enhancement mode is supported"):
             enhance_ntl_with_urban_field(
-                ntl=ntl, urban_field=urban_field, enhancement_mode="hybrid"  # type: ignore
+                ntl=ntl,
+                urban_field=urban_field,
+                enhancement_mode="hybrid",  # type: ignore
             )
 
     def test_enhancement_preserves_zeros(self):
@@ -204,7 +208,7 @@ class TestNTLEnhancement:
         enhanced = enhance_ntl_with_urban_field(
             ntl=ntl, urban_field=urban_field, enhancement_mode="multiplicative"
         )
-        
+
         # With zero urban field, enhancement factor is 1.0 everywhere
         # But due to rescaling by max factor (1.0), result should equal input
         assert_array_almost_equal(enhanced, ntl)
@@ -243,12 +247,12 @@ class TestIntegration:
 
         # With multiplicative enhancement and rescaling, verify the pattern
         # The enhancement preserves relative differences
-        
+
         # Areas with higher urban field get proportionally more enhancement
         # even though absolute values are rescaled
         assert enhanced[5, 5] < enhanced[0, 0]  # Intersection was darker, stays darker
         assert enhanced[5, 3] < enhanced[0, 3]  # Road pixels stay darker than non-road
-        
+
         # Verify range is preserved
         assert enhanced.min() >= 0
         assert enhanced.max() <= ntl.max()

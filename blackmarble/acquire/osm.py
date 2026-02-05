@@ -24,6 +24,7 @@ from shapely.ops import transform
 
 from ..logging_utils import get_logger
 
+
 logger = get_logger(__name__)
 
 # Import default buffer sizes from fractional module
@@ -135,7 +136,7 @@ def fetch_road_network(
                 graph = nx.MultiDiGraph()
 
                 # Add edges from geodataframe
-                for idx, row in edges_gdf.iterrows():
+                for _idx, row in edges_gdf.iterrows():
                     # Extract nodes from geometry
                     coords = list(row.geometry.coords)
                     if len(coords) >= 2:
@@ -231,12 +232,8 @@ def rasterize_road_shapes_with_crs(
     if isinstance(dst_crs, str):
         dst_crs = CRS.from_string(dst_crs)
 
-    if src_crs == dst_crs:
-        return rasterize_shapes(
-            shapes, shape[0], shape[1], reference_transform, all_touched=all_touched
-        )
-
-    reprojected_shapes = []
+    should_transform = src_crs != dst_crs
+    rasterize_shapes = []
     for shape_dict in shapes:
         if isinstance(shape_dict, dict) and "geometry" in shape_dict:
             geom = shape_dict["geometry"]
@@ -245,17 +242,17 @@ def rasterize_road_shapes_with_crs(
             geom = shape_dict
             value = 1
 
-        geom_transformed = transform_geom(src_crs, dst_crs, geom)
-        reprojected_shapes.append({"geometry": geom_transformed, "value": value})
+        if should_transform:
+            geom = transform_geom(src_crs, dst_crs, geom)
+
+        rasterize_shapes.append((geom, value))
 
     height, width = shape
     return rasterio.features.rasterize(
-        [(s["geometry"], s["value"]) for s in reprojected_shapes],
+        rasterize_shapes,
         out_shape=(height, width),
         transform=reference_transform,
         fill=0,
         all_touched=all_touched,
         dtype=np.uint8,
     )
-
-

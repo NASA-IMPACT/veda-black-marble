@@ -1,20 +1,20 @@
 """Type stubs for shapely."""
 
 from .geometry import (
-    Point, 
-    LineString,
-    Polygon,
-    MultiPoint,
-    MultiLineString,
-    MultiPolygon,
     GeometryCollection,
-    box
+    LineString,
+    MultiLineString,
+    MultiPoint,
+    MultiPolygon,
+    Point,
+    Polygon,
+    box,
 )
-from .ops import unary_union, cascaded_union
+from .ops import cascaded_union, unary_union
 
 __all__ = [
     "Point",
-    "LineString", 
+    "LineString",
     "Polygon",
     "MultiPoint",
     "MultiLineString",
@@ -22,5 +22,5 @@ __all__ = [
     "GeometryCollection",
     "box",
     "unary_union",
-    "cascaded_union"
+    "cascaded_union",
 ]

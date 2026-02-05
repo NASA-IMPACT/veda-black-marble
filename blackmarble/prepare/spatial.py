@@ -12,6 +12,7 @@ from rasterio.warp import Resampling, calculate_default_transform, reproject
 
 from ..typing import ArrayLike, BBox
 
+
 # Local type aliases for rasterio types
 Transform = Any  # rasterio.transform.Affine
 CRS = Any  # rasterio.crs.CRS
@@ -151,9 +152,8 @@ def resample_image(
     # Normalize resolutions to tuples
     source_resolution = (abs(src_transform.a), abs(src_transform.e))
 
-    if target_resolution is not None:
-        if isinstance(target_resolution, (int, float)):
-            target_resolution = (target_resolution, target_resolution)
+    if target_resolution is not None and isinstance(target_resolution, int | float):
+        target_resolution = (target_resolution, target_resolution)
 
     # Map resampling methods
     resample_map = {
@@ -225,15 +225,14 @@ def resample_image(
         "nodata": nodata,
     }
 
-    with MemoryFile() as memfile:
-        with memfile.open(**profile) as src:
-            # Write all bands
-            for i in range(bands):
-                src.write(data_3d[i], i + 1)
+    with MemoryFile() as memfile, memfile.open(**profile) as src:
+        # Write all bands
+        for i in range(bands):
+            src.write(data_3d[i], i + 1)
 
-            # Read resampled data
-            out_shape = (bands, new_height, new_width)
-            resampled = src.read(out_shape=out_shape, resampling=resample_alg)
+        # Read resampled data
+        out_shape = (bands, new_height, new_width)
+        resampled = src.read(out_shape=out_shape, resampling=resample_alg)
 
     # Return 2D array if input was 2D
     if data.ndim == 2:
@@ -325,7 +324,7 @@ def crop_to_bounds(
 
     except ImportError:
         # Fallback if rasterio not available
-        raise ImportError("Rasterio is required for crop_to_bounds")
+        raise ImportError("Rasterio is required for crop_to_bounds") from None
 
 
 def align_rasters(
@@ -380,7 +379,7 @@ def align_rasters(
 
     # Align each raster
     results = []
-    for i, (raster, transform) in enumerate(zip(rasters, transforms)):
+    for i, (raster, transform) in enumerate(zip(rasters, transforms, strict=True)):
         if i == reference_idx:
             # Reference raster stays unchanged
             results.append((raster, transform))

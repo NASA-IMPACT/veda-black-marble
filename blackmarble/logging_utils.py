@@ -9,10 +9,10 @@ import logging
 
 def get_logger(name: str) -> logging.Logger:
     """Get a logger for the given module name.
-    
+
     Args:
         name: Module name (typically __name__)
-        
+
     Returns:
         Logger instance with NullHandler attached
     """

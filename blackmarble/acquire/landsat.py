@@ -2,9 +2,9 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
-from collections.abc import Callable
 from typing import Any
 
 import aioboto3
@@ -18,6 +18,7 @@ from .async_base import (
     DownloadStatus,
     RateLimiter,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
         # Create session with explicit credentials if available
         session = create_s3_session()
-        
+
         # For USGS Landsat data, we need signed requests with RequestPayer='requester'
         # So ignore the aws_unsigned flag and always use signed requests
         async with session.client("s3", config=self.s3_config) as s3:  # type: ignore
@@ -133,7 +134,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         try:
             # Create session with explicit credentials if available
             session = create_s3_session()
-            
+
             async with session.client("s3", config=self.s3_config) as s3:  # type: ignore[attr-defined]
                 # Download MTL file content
                 response = await s3.get_object(  # type: ignore[attr-defined]
@@ -142,30 +143,25 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                     RequestPayer="requester",
                 )
 
-                content = await response['Body'].read()  # type: ignore[index]
-                text = content.decode('utf-8')
+                content = await response["Body"].read()  # type: ignore[index]
+                text = content.decode("utf-8")
 
                 # Parse cloud cover from MTL content
-                lines = text.split('\n')
+                lines = text.split("\n")
                 for line in lines:
                     line = line.strip()
                     # Look for CLOUD_COVER_LAND first (more specific), then CLOUD_COVER
-                    if line.startswith('CLOUD_COVER_LAND ='):
+                    if line.startswith("CLOUD_COVER_LAND =") or line.startswith("CLOUD_COVER ="):
                         try:
-                            return float(line.split('=')[1].strip())
-                        except (ValueError, IndexError):
-                            continue
-                    elif line.startswith('CLOUD_COVER ='):
-                        try:
-                            return float(line.split('=')[1].strip())
+                            return float(line.split("=")[1].strip())
                         except (ValueError, IndexError):
                             continue
 
                 # If no cloud cover found in MTL, use tier-based estimate
                 logger.debug(f"No cloud cover found in MTL for {scene_id}")
-                if '_T1' in scene_id:
+                if "_T1" in scene_id:
                     return 15.0  # Tier 1 scenes are generally good quality
-                elif '_T2' in scene_id:
+                elif "_T2" in scene_id:
                     return 35.0  # Tier 2 scenes have more variability
                 else:
                     return 25.0  # Middle ground
@@ -178,7 +174,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                 logger.warning(f"Failed to get cloud cover from MTL for {scene_id}: {e}")
 
             # Return conservative estimate based on scene tier
-            if '_T1' in scene_id:
+            if "_T1" in scene_id:
                 return 20.0  # Tier 1 scenes are generally good quality
             else:
                 return 40.0  # Conservative fallback
@@ -215,32 +211,32 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         tiles = [f"{t['path']:03d}{t['row']:03d}" for t in tile_dicts]
         tiles_by_path: dict[int, list[str]] = {}
         for t in tile_dicts:
-            path = t['path']
+            path = t["path"]
             if path not in tiles_by_path:
                 tiles_by_path[path] = []
             tiles_by_path[path].append(f"{path:03d}{t['row']:03d}")
 
-        logger.info(f"Searching {len(tiles)} tiles across {len(tiles_by_path)} paths for year {year}")
+        logger.info(
+            f"Searching {len(tiles)} tiles across {len(tiles_by_path)} paths for year {year}"
+        )
 
         # Prepare for parallel operations
         scenes: list[dict[str, Any]] = []
         scenes_lock = asyncio.Lock()
         tiles_with_scenes: set[str] = set()  # Track which tiles have scenes
         tiles_lock = asyncio.Lock()
-        stats = {
-            'scenes_checked': 0,
-            'scenes_filtered_by_cloud': 0,
-            'scenes_filtered_by_date': 0
-        }
+        stats = {"scenes_checked": 0, "scenes_filtered_by_cloud": 0, "scenes_filtered_by_date": 0}
         stats_lock = asyncio.Lock()
 
         sensor_prefix = f"{self.COLLECTION}/{self.LEVEL}/standard/oli-tirs/{year}/"
-        
+
         # Log date range info
         date_desc = f"{year}"
         if date_range:
-            date_desc = f"{date_range[0].strftime('%Y-%m-%d')} to {date_range[1].strftime('%Y-%m-%d')}"
-        
+            date_desc = (
+                f"{date_range[0].strftime('%Y-%m-%d')} to {date_range[1].strftime('%Y-%m-%d')}"
+            )
+
         logger.info(f"Discovering Landsat scenes for {date_desc}")
 
         async def process_path(path_num: int, path_tiles: list[str]):
@@ -290,19 +286,20 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                     continue
 
                 # Apply date filter based on acquisition date
-                if date_range:
-                    if scene_date < date_range[0] or scene_date > date_range[1]:
-                        async with stats_lock:
-                            stats['scenes_filtered_by_date'] += 1
-                        continue
+                if date_range and (scene_date < date_range[0] or scene_date > date_range[1]):
+                    async with stats_lock:
+                        stats["scenes_filtered_by_date"] += 1
+                    continue
 
-                scenes_to_check.append({
-                    'scene_id': scene_id,
-                    'scene_prefix': scene_prefix,
-                    'scene_date': scene_date,
-                    'path': path_num,
-                    'row': row_num
-                })
+                scenes_to_check.append(
+                    {
+                        "scene_id": scene_id,
+                        "scene_prefix": scene_prefix,
+                        "scene_date": scene_date,
+                        "path": path_num,
+                        "row": row_num,
+                    }
+                )
 
             # Process scenes in batches for MTL download
             if scenes_to_check:
@@ -320,36 +317,42 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
             # Process results
             valid_scenes = []
-            for scene_info, cloud_cover in zip(scene_batch, results):
+            for scene_info, cloud_cover in zip(scene_batch, results, strict=False):
                 if isinstance(cloud_cover, Exception):
-                    logger.debug(f"Failed to get cloud cover for {scene_info['scene_id']}: {cloud_cover}")
+                    logger.debug(
+                        f"Failed to get cloud cover for {scene_info['scene_id']}: {cloud_cover}"
+                    )
                     cloud_cover = 100.0  # Conservative fallback
 
                 async with stats_lock:
-                    stats['scenes_checked'] += 1
+                    stats["scenes_checked"] += 1
                     # Log progress every 100 scenes
-                    if stats['scenes_checked'] % 100 == 0:
-                        logger.info(f"Checked {stats['scenes_checked']} scenes, found {len(scenes)} matching")
+                    if stats["scenes_checked"] % 100 == 0:
+                        logger.info(
+                            f"Checked {stats['scenes_checked']} scenes; {len(scenes)} matching"
+                        )
 
                 if cloud_cover <= cloud_cover_max:
-                    scene_info['cloud_cover'] = cloud_cover
+                    scene_info["cloud_cover"] = cloud_cover
                     valid_scenes.append(scene_info)
                 else:
                     async with stats_lock:
-                        stats['scenes_filtered_by_cloud'] += 1
+                        stats["scenes_filtered_by_cloud"] += 1
 
             # Add valid scenes to results
             if valid_scenes:
                 async with scenes_lock:
                     for scene in valid_scenes:
-                        scenes.append({
-                            "scene_id": scene['scene_id'],
-                            "path": scene['path'],
-                            "row": scene['row'],
-                            "date": scene['scene_date'],
-                            "s3_prefix": scene['scene_prefix'],
-                            "cloud_cover": scene['cloud_cover'],
-                        })
+                        scenes.append(
+                            {
+                                "scene_id": scene["scene_id"],
+                                "path": scene["path"],
+                                "row": scene["row"],
+                                "date": scene["scene_date"],
+                                "s3_prefix": scene["scene_prefix"],
+                                "cloud_cover": scene["cloud_cover"],
+                            }
+                        )
                         # Track which tiles have scenes
                         tile_id = f"{scene['path']:03d}{scene['row']:03d}"
                         async with tiles_lock:
@@ -358,8 +361,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         async def check_scene_cloud_cover(scene_info: dict[str, Any]) -> float:
             """Get cloud cover from MTL metadata file."""
             return await self.get_scene_cloud_cover(
-                scene_info['scene_prefix'], 
-                scene_info['scene_id']
+                scene_info["scene_prefix"], scene_info["scene_id"]
             )
 
         # First, list all paths in parallel to check which exist
@@ -383,7 +385,9 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         missing_tiles = set(tiles) - tiles_with_scenes
         if missing_tiles:
             if date_range:
-                date_str = f"between {date_range[0].strftime('%Y-%m-%d')} and {date_range[1].strftime('%Y-%m-%d')}"
+                start_date = date_range[0].strftime("%Y-%m-%d")
+                end_date = date_range[1].strftime("%Y-%m-%d")
+                date_str = f"between {start_date} and {end_date}"
             else:
                 date_str = f"in {year}"
             logger.warning("⚠️  WARNING: %d tiles have NO scenes %s!", len(missing_tiles), date_str)
@@ -392,7 +396,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                 path = int(tile[:3])
                 row = int(tile[3:])
                 logger.warning("   - Path %d, Row %d", path, row)
-        
+
         # Log summary
         logger.info(
             f"Found {len(scenes)} Landsat scenes matching criteria "
@@ -462,7 +466,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
             async with self._semaphore:
                 # Create session with explicit credentials if available
                 session = create_s3_session()
-                
+
                 async with session.client("s3", config=self.s3_config) as s3:  # type: ignore
                     # Use temporary file
                     temp_path = output_path.with_suffix(".tmp")
@@ -483,10 +487,12 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
                         result.status = DownloadStatus.COMPLETED
                         result.size_bytes = output_path.stat().st_size
                         result.duration_seconds = asyncio.get_event_loop().time() - start_time
-                        
+
                         # DEBUG: Verify file exists
                         if output_path.exists():
-                            logger.info(f"✅ Landsat file downloaded: {output_path} ({result.size_bytes} bytes)")
+                            logger.info(
+                                f"✅ Landsat file downloaded: {output_path} ({result.size_bytes} bytes)"
+                            )
                         else:
                             logger.error(f"❌ File disappeared after download: {output_path}")
 
@@ -545,7 +551,7 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
         # Map results to band names
         band_paths = {}
-        for item, result in zip(items, results):
+        for item, result in zip(items, results, strict=False):
             if result.status == DownloadStatus.COMPLETED:
                 band_paths[item["band"]] = result.local_path
                 # DEBUG: Verify the path exists
@@ -556,12 +562,12 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
             else:
                 logger.warning(f"Failed to download {item['band']}: {result.error}")
                 band_paths[item["band"]] = None
-        
+
         # Ensure all required bands have keys (even if None)
         REQUIRED_BANDS = ["B3", "B4", "B5", "QA_PIXEL"]
         for band in REQUIRED_BANDS:
             band_paths.setdefault(band, None)
-        
+
         # DEBUG: Summary of downloaded bands
         logger.info(f"Scene {scene['scene_id']} band summary: {list(band_paths.keys())}")
         logger.info(f"  Successful: {[b for b, p in band_paths.items() if p is not None]}")
@@ -692,24 +698,25 @@ async def download_landsat(
         # Execute all downloads in batches for better concurrency
         results: dict[datetime, dict[str, list[Path]]] = {}
         tiles_downloaded_by_date: dict[datetime, set[str]] = {}
-        
+
         # Process downloads in batches of 50 scenes
         batch_size = 50
         for i in range(0, len(download_tasks), batch_size):
-            batch = download_tasks[i:i + batch_size]
-            
+            batch = download_tasks[i : i + batch_size]
+
             # Gather all tasks in this batch
             batch_results = await asyncio.gather(
-                *[task for _, _, task in batch],
-                return_exceptions=True
+                *[task for _, _, task in batch], return_exceptions=True
             )
-            
+
             # Process results
-            for (date, tile_id, _), band_paths in zip(batch, batch_results):
+            for (date, tile_id, _), band_paths in zip(batch, batch_results, strict=False):
                 if isinstance(band_paths, Exception):
-                    logger.error(f"Failed to download scene for {date}, tile {tile_id}: {band_paths}")
+                    logger.error(
+                        f"Failed to download scene for {date}, tile {tile_id}: {band_paths}"
+                    )
                     continue
-                    
+
                 if date not in results:
                     results[date] = {}
                     tiles_downloaded_by_date[date] = set()
@@ -737,7 +744,7 @@ async def download_landsat(
 
         if progress:
             progress.finish()
-    
+
     # DEBUG: Final verification of downloaded files
     logger.info("\nFinal file verification:")
     for date, bands in results.items():
@@ -751,7 +758,7 @@ async def download_landsat(
                     logger.error(f"    Missing: {missing}")
             else:
                 logger.info(f"  {band}: No paths (empty list)")
-    
+
     # DEBUG: Show exact structure being returned
     logger.info("\nReturning results structure:")
     for date in sorted(results.keys()):
@@ -759,4 +766,3 @@ async def download_landsat(
         logger.info(f"  {date.strftime('%Y-%m-%d')}: {band_summary}")
 
     return results
-

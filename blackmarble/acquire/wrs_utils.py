@@ -5,6 +5,7 @@ from pathlib import Path
 import geopandas as gpd
 from shapely.geometry import box
 
+
 # Type alias
 BBox = tuple[float, float, float, float]
 
@@ -52,7 +53,7 @@ def get_wrs_tiles_for_bbox_tuple(
 
     if not tiles:
         raise ValueError(
-            f"No WRS-2 tiles found for bbox {bbox}. " "Please check your bounding box coordinates."
+            f"No WRS-2 tiles found for bbox {bbox}. Please check your bounding box coordinates."
         )
 
     return tiles
