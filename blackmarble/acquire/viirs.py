@@ -16,6 +16,20 @@ from osgeo import gdal
 
 logger = logging.getLogger(__name__)
 
+# Prevent HDF5 from attempting to load incompatible external plugins (common on some conda stacks)
+# This avoids errors like: undefined symbol: H5Pset_coll_metadata_write
+os.environ["HDF5_PLUGIN_PATH"] = ""
+
+# HDF5 file signature for quick integrity checks
+_HDF5_SIG = b"\x89HDF\r\n\x1a\n"
+
+def _looks_like_hdf5(path: str) -> bool:
+    try:
+        with open(path, "rb") as f:
+            return f.read(8) == _HDF5_SIG
+    except Exception:
+        return False
+
 
 async def download_viirs_h5(
     session: aiohttp.ClientSession,
@@ -113,36 +127,65 @@ async def download_viirs_h5(
     headers = {"Authorization": f"Bearer {earthdata_token}"}
 
     try:
-        async with session.get(download_link, headers=headers) as download_response:
-            download_response.raise_for_status()
+        # Retry a few times in case of transient network truncation
+        last_err = None
+        for attempt in range(1, 4):
+            try:
+                async with session.get(download_link, headers=headers) as download_response:
+                    download_response.raise_for_status()
 
-            # Check for HTML error page
-            content_type = download_response.headers.get("Content-Type", "").lower()
-            if "text/html" in content_type:
-                html_content = await download_response.text()
-                logger.error("Received HTML error page instead of HDF5 file")
-                logger.debug(f"HTML content: {html_content[:500]}")
-                raise RuntimeError(
-                    "Received HTML error page instead of HDF5 file. " "Check your Earthdata token."
-                )
+                    # Check for HTML error page
+                    content_type = download_response.headers.get("Content-Type", "").lower()
+                    if "text/html" in content_type:
+                        html_content = await download_response.text()
+                        logger.error("Received HTML error page instead of HDF5 file")
+                        logger.debug(f"HTML content: {html_content[:500]}")
+                        raise RuntimeError(
+                            "Received HTML error page instead of HDF5 file. Check your Earthdata token."
+                        )
 
-            # Download in chunks
-            total_size = int(download_response.headers.get("content-length", 0))
-            logger.debug(f"File size: {total_size:,} bytes")
+                    # Download in chunks
+                    total_size = int(download_response.headers.get("content-length", 0))
+                    logger.debug(f"File size: {total_size:,} bytes")
 
-            async with aiofiles.open(output_path, "wb") as f:
-                downloaded = 0
-                async for chunk in download_response.content.iter_chunked(8192):
-                    await f.write(chunk)
-                    downloaded += len(chunk)
+                    tmp_path = output_path + ".part"
+                    downloaded = 0
+                    async with aiofiles.open(tmp_path, "wb") as f:
+                        async for chunk in download_response.content.iter_chunked(8192):
+                            if not chunk:
+                                continue
+                            await f.write(chunk)
+                            downloaded += len(chunk)
 
-                    # Log progress every 10MB
-                    if downloaded % (10 * 1024 * 1024) < 8192:
-                        logger.debug(f"Downloaded {downloaded:,} / {total_size:,} bytes")
+                            # Log progress every 10MB
+                            if downloaded % (10 * 1024 * 1024) < 8192:
+                                logger.debug(f"Downloaded {downloaded:,} / {total_size:,} bytes")
 
-            logger.info(f"Successfully downloaded {output_path} ({total_size:,} bytes)")
-            return output_path
+                # Integrity checks: size + signature
+                if total_size and downloaded != total_size:
+                    raise RuntimeError(
+                        f"Download appears truncated: wrote {downloaded:,} bytes, expected {total_size:,} bytes"
+                    )
+                if not _looks_like_hdf5(tmp_path):
+                    raise RuntimeError("Downloaded file does not look like HDF5 (bad signature)")
 
+                os.replace(tmp_path, output_path)
+                logger.info(f"Successfully downloaded {output_path} ({downloaded:,} bytes)")
+                return output_path
+
+            except Exception as e:
+                last_err = e
+                logger.warning(f"Download attempt {attempt}/3 failed for {matching_filename}: {e}")
+                # Clean up partial file
+                try:
+                    if os.path.exists(output_path + ".part"):
+                        os.remove(output_path + ".part")
+                except Exception:
+                    pass
+                await asyncio.sleep(2 * attempt)
+                continue
+
+        raise RuntimeError(f"Download failed for {matching_filename}: {last_err}") from last_err
     except aiohttp.ClientError as e:
         logger.error(f"Download failed for {matching_filename}: {e}")
         raise RuntimeError(f"Download failed for {matching_filename}: {e}")
@@ -557,4 +600,3 @@ def extract_viirs_layers(hdf_file: str, output_dir: str = ".") -> dict[str, str]
         return {"gap_filled_ntl": output_path}
     except Exception as e:
         raise RuntimeError(f"Could not extract gap-filled NTL layer: {e}")
-
