@@ -7,14 +7,14 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from ..config import LandsatAcquisitionConfig
 from .landsat_search import (
-    SceneMeta, 
+    S3Client,
+    SceneMeta,
     SearchParams,
     get_all_scenes_in_window,
     with_s3_client,
-    S3Client,
 )
-from ..config import LandsatAcquisitionConfig
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Callable, Protocol
 
 from ..config import LandsatAcquisitionConfig
@@ -78,7 +78,7 @@ def normalize_target_date(target_date: datetime) -> datetime:
     """Convert timezone-aware date to UTC naive (pure function)."""
     if target_date.tzinfo is not None:
         # Convert to UTC, preserving the actual time instant
-        target_date_utc = target_date.astimezone(timezone.utc)
+        target_date_utc = target_date.astimezone(UTC)
         # Remove timezone info for datetime arithmetic
         return target_date_utc.replace(tzinfo=None)
     return target_date

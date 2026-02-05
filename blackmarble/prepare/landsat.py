@@ -23,6 +23,8 @@ from .landsat_qa import create_landsat_cloud_mask, print_qa_pixel_summary
 ArrayLike = npt.NDArray[Any]
 BBox = tuple[float, float, float, float]
 
+MARGIN_PIXELS = 120  # ~3.6km at 30m resolution
+
 
 def _read_windowed(file_path: str, bbox: BBox | None, transform_bbox: bool = True) -> tuple[ArrayLike, dict[str, Any]]:
     """Read only the window that intersects bbox from a raster file.
@@ -110,7 +112,6 @@ def _calculate_optimal_dimensions(files: list[str], bbox: tuple[float, float, fl
     Returns:
         (width, height) dimensions for output grid
     """
-    from pyproj import Transformer
     import math
     
     # Center of the bounding box
@@ -200,8 +201,6 @@ def _load_and_mask_tile(
     The caller is responsible for re-projecting the masked output to the
     common mosaic grid.
     """
-    import rasterio
-    import numpy as np
 
     # --- open QA and band files in parallel ---
     with rasterio.open(qa_path) as qsrc, rasterio.open(band_path) as bsrc:
@@ -317,7 +316,6 @@ def process_landsat_date(
                     with rasterio.open(qa_file) as src:
                         # Transform bbox to source CRS
                         if src.crs and src.crs.to_epsg() != 4326:
-                            from pyproj import Transformer
                             transformer = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
                             minx, miny = transformer.transform(bbox[0], bbox[1])
                             maxx, maxy = transformer.transform(bbox[2], bbox[3])
@@ -332,12 +330,11 @@ def process_landsat_date(
                         )
                         
                         # Expand window by margin to avoid gaps at UTM zone boundaries
-                        margin_pixels = 120  # ~3.6km at 30m resolution
                         window_expanded = rasterio.windows.Window(
-                            col_off=window.col_off - margin_pixels,
-                            row_off=window.row_off - margin_pixels,
-                            width=window.width + 2 * margin_pixels,
-                            height=window.height + 2 * margin_pixels
+                            col_off=window.col_off - MARGIN_PIXELS,
+                            row_off=window.row_off - MARGIN_PIXELS,
+                            width=window.width + 2 * MARGIN_PIXELS,
+                            height=window.height + 2 * MARGIN_PIXELS
                         )
                         
                         # Read expanded window
@@ -582,12 +579,11 @@ def process_landsat_date(
                         bbox_src[0], bbox_src[1], bbox_src[2], bbox_src[3],
                         transform=src.transform
                     )
-                    margin_pixels = 120
                     window_expanded = rasterio.windows.Window(
-                        col_off=window.col_off - margin_pixels,
-                        row_off=window.row_off - margin_pixels,
-                        width=window.width + 2 * margin_pixels,
-                        height=window.height + 2 * margin_pixels
+                        col_off=window.col_off - MARGIN_PIXELS,
+                        row_off=window.row_off - MARGIN_PIXELS,
+                        width=window.width + 2 * MARGIN_PIXELS,
+                        height=window.height + 2 * MARGIN_PIXELS
                     )
 
                 # --- NEW: load + mask this tile BEFORE any reprojection ---

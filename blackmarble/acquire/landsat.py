@@ -233,7 +233,6 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
             'scenes_filtered_by_date': 0
         }
         stats_lock = asyncio.Lock()
-        last_log_scenes = 0
 
         sensor_prefix = f"{self.COLLECTION}/{self.LEVEL}/standard/oli-tirs/{year}/"
         

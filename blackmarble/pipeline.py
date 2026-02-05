@@ -4,14 +4,14 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-import psutil
 from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+import psutil
 import rasterio
-from rasterio.transform import array_bounds
 from osgeo import gdal
+from rasterio.transform import array_bounds
 
 from . import acquire, analyze, enhance, export, prepare  # type: ignore[attr-defined]
 from .config import PipelineConfig
@@ -30,8 +30,6 @@ if os.environ.get("BM_SPATIAL_DEBUG", "").lower() in ("1", "true", "yes"):
 ArrayLike = npt.NDArray[Any]
 BBox = tuple[float, float, float, float]
 
-# (Duplicate logger assignment removed; we already create `logger`
-#  via get_logger(__name__) above.)
 
 
 def quick_stats(data: ArrayLike | None, label: str) -> None:
@@ -75,10 +73,11 @@ async def black_marble_pipeline(
     if earthdata_token is None:
         earthdata_token = os.environ.get("EARTHDATA_TOKEN")
         if not earthdata_token:
-            logger.warning(
+            logger.error(
                 "No Earthdata token provided. Set EARTHDATA_TOKEN environment variable "
                 "or pass earthdata_token parameter. VIIRS downloads will be skipped."
             )
+            raise RuntimeError()
 
     composite_months = config.acquisition.composite_months if config else 12
     data_dir = "./data"
@@ -159,7 +158,6 @@ async def black_marble_pipeline(
             logger.debug("  %s: %d files", key, len(files))
 
         viirs_ntl_files = viirs_files.get("gap_filled_ntl", [])
-        # viirs_quality_files = viirs_files.get("quality", [])  # Not currently used
 
         if not viirs_ntl_files:
             logger.warning("⚠️  No VIIRS NTL files found - skipping VIIRS processing")
@@ -168,7 +166,7 @@ async def black_marble_pipeline(
                 logger.info("Creating VRT mosaic for %d VIIRS tiles", len(viirs_ntl_files))
                 viirs_ntl_vrt = f"{data_dir}/temp/viirs_gap_filled_ntl_mosaic.vrt"
                 os.makedirs(f"{data_dir}/temp", exist_ok=True)
-                # VIIRS uses fill_value of 65530 based on config
+                # VIIRS uses fill_value of -999.9 based on config
                 vrt_options = gdal.BuildVRTOptions(  # type: ignore[attr-defined]
                     separate=False,  # Mosaic tiles together
                     resolution='highest'  # Use highest resolution from input files
@@ -288,7 +286,6 @@ async def black_marble_pipeline(
     )
 
     band_stacks = {"B3": [], "B4": [], "B5": []}
-    # band_dates = {"B3": [], "B4": [], "B5": []}  # Not currently used
 
     index_stacks = {"ndvi": [], "ndwi": []}
     index_dates = []
@@ -1210,16 +1207,6 @@ async def black_marble_pipeline(
                 "Final NDUI before colormap",
                 crs=processing_crs,
             )
-
-    # Create false color composite if requested
-    if "B5" in landsat_reprojected and "B4" in landsat_reprojected and "B3" in landsat_reprojected:
-        _ = enhance.create_false_color_composite(
-            red_channel=landsat_reprojected["B5"],  # NIR in red
-            green_channel=landsat_reprojected["B4"],  # Red in green
-            blue_channel=landsat_reprojected["B3"],  # Green in blue
-            contrast_enhance=True,
-            gamma=None,  # Use default gamma
-        )
 
     logger.info("💾 Exporting results...")
 

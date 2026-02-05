@@ -5,7 +5,7 @@ that minimize distortion for each area of interest.
 """
 
 from functools import lru_cache
-from typing import Any, Tuple
+from typing import Any
 
 from pyproj import CRS
 
@@ -78,7 +78,7 @@ def make_local_albers(west: float, south: float, east: float, north: float) -> C
     })
 
 
-def get_processing_crs(bbox: Tuple[float, float, float, float]) -> CRS:
+def get_processing_crs(bbox: tuple[float, float, float, float]) -> CRS:
     """Get the processing CRS for a given bounding box.
     
     This is the main entry point for getting the CRS to use for processing.
@@ -107,8 +107,8 @@ def get_crs_hash(crs: CRS) -> str:
     return hashlib.md5(wkt.encode()).hexdigest()[:8]
 
 
-def create_processing_grid(bbox: Tuple[float, float, float, float], 
-                         resolution: float = 30.0) -> Tuple[CRS, Any, Tuple[int, int]]:
+def create_processing_grid(bbox: tuple[float, float, float, float], 
+                         resolution: float = 30.0) -> tuple[CRS, Any, tuple[int, int]]:
     """Create the standard processing grid for a bounding box.
     
     This creates:
@@ -159,7 +159,7 @@ def create_processing_grid(bbox: Tuple[float, float, float, float],
     # Log grid details
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"Created processing grid:")
+    logger.info("Created processing grid:")
     logger.info(f"  CRS: Local Albers centered at {(bbox[0]+bbox[2])/2:.3f}°, {(bbox[1]+bbox[3])/2:.3f}°")
     logger.info(f"  Resolution: {resolution}m")
     logger.info(f"  Dimensions: {width} x {height} pixels")

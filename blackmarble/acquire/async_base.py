@@ -6,14 +6,14 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from aiohttp import ClientSession, ClientTimeout
 
 
-class DownloadStatus(str, Enum):
+class DownloadStatus(StrEnum):
     """Status of a download operation"""
 
     PENDING = "pending"

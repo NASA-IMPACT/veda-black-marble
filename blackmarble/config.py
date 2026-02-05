@@ -6,7 +6,7 @@ Black Marble pipeline, with clear separation of concerns across phases.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import numpy.typing as npt
 
@@ -180,7 +180,7 @@ class PipelineConfig:
     save_diagnostics: bool = False
 
     @classmethod
-    def for_bm_parity(cls, bbox: BBox, date: datetime, output_path: str) -> "PipelineConfig":
+    def for_bm_parity(cls, bbox: BBox, date: datetime, output_path: str) -> Self:
         """Create configuration that exactly matches legacy bm.py behavior.
 
         This uses the parameters that ensure parity with the legacy docker/bm.py implementation.
@@ -206,7 +206,7 @@ class PipelineConfig:
         )
 
     @classmethod
-    def for_enhanced_quality(cls, bbox: BBox, date: datetime, output_path: str) -> "PipelineConfig":
+    def for_enhanced_quality(cls, bbox: BBox, date: datetime, output_path: str) -> Self:
         """Create configuration for enhanced quality output.
 
         This enables advanced features that improve output quality beyond
