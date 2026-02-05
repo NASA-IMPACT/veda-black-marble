@@ -6,6 +6,7 @@ This module provides async download functions for VIIRS data acquisition.
 import asyncio
 import logging
 import os
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -412,16 +413,49 @@ async def download_viirs(
 
 
 def coordinates_to_viirs_tile(lat: float, lon: float) -> tuple[int, int]:
-    """Convert lat/lon to VIIRS tile indices."""
-    vertical_tile = max(0, min(17, int((90 - lat) / 10)))
-    horizontal_tile = max(0, min(35, int((lon + 180) / 10)))
-    return vertical_tile, horizontal_tile
+    """Convert lat/lon to VIIRS (MODIS-style) sinusoidal tile indices.
 
+    NOTE:
+      VNP46A2 uses the global sinusoidal h/v tiling system (same as MODIS),
+      not simple 10° x 10° lat/lon bins. The previous implementation
+      (based on 10-degree WGS84 bins) can select the wrong tile, leading
+      to empty/invalid outputs for a given AOI.
+
+    Returns:
+      (vertical, horizontal) = (v, h)
+    """
+    # MODIS/VIIRS sinusoidal sphere radius (meters)
+    R = 6371007.181
+
+    # Global sinusoidal extent + tile size (meters)
+    TILE_SIZE_M = 1111950.5196666666
+    XMIN = -20015109.354
+    YMAX = 10007554.677
+
+    # Convert lon/lat degrees -> sinusoidal meters
+    lat_rad = math.radians(lat)
+    lon_rad = math.radians(lon)
+    x = R * lon_rad * math.cos(lat_rad)
+    y = R * lat_rad
+
+    h = int(math.floor((x - XMIN) / TILE_SIZE_M))
+    v = int(math.floor((YMAX - y) / TILE_SIZE_M))
+
+    # Clamp to valid global range
+    v = max(0, min(17, v))
+    h = max(0, min(35, h))
+    return v, h
 
 def get_tiles_for_bbox(
     bbox: tuple[float, float, float, float], overlap: float = 0.0
 ) -> list[tuple[int, int]]:
-    """Get VIIRS tiles covering a bounding box."""
+    """Get VIIRS (v, h) tiles covering a WGS84 bounding box.
+
+    bbox = (min_lon, min_lat, max_lon, max_lat)
+
+    Uses the MODIS/VIIRS sinusoidal tiling system. Handles dateline-crossing
+    bboxes (where max_lon < min_lon) by splitting into two ranges.
+    """
     min_lon, min_lat, max_lon, max_lat = bbox
 
     # Expand bounds if overlap requested
@@ -431,23 +465,41 @@ def get_tiles_for_bbox(
         max_lon += overlap
         max_lat += overlap
 
-    # Get corner tiles
-    v_min, h_min = coordinates_to_viirs_tile(max_lat, min_lon)
-    v_max, h_max = coordinates_to_viirs_tile(min_lat, max_lon)
+    # Handle dateline crossing
+    if max_lon < min_lon:
+        tiles = set(get_tiles_for_bbox((min_lon, min_lat, 180.0, max_lat), overlap=0.0))
+        tiles |= set(get_tiles_for_bbox((-180.0, min_lat, max_lon, max_lat), overlap=0.0))
+        return sorted(tiles)
 
-    # Generate all tiles in range
-    tiles = []
+    # Get corner tiles (v, h)
+    corners = [
+        (min_lon, min_lat),
+        (min_lon, max_lat),
+        (max_lon, min_lat),
+        (max_lon, max_lat),
+    ]
+    vhs = [coordinates_to_viirs_tile(lat=lat, lon=lon) for lon, lat in corners]
+    vs = [v for v, h in vhs]
+    hs = [h for v, h in vhs]
+
+    v_min, v_max = min(vs), max(vs)
+    h_min, h_max = min(hs), max(hs)
+
+    tiles: list[tuple[int, int]] = []
     for v in range(v_min, v_max + 1):
         for h in range(h_min, h_max + 1):
             if 0 <= v <= 17 and 0 <= h <= 35:
                 tiles.append((v, h))
-
     return tiles
 
-
 def convert_viirs_hdf_to_tiff(hdf_file: str, output_file: str, layer: int = 0) -> str:
-    """Convert VIIRS HDF5 layer to GeoTIFF."""
-    # Open HDF
+    """Convert a VIIRS HDF5 subdataset to GeoTIFF.
+
+    IMPORTANT FIX:
+      VNP46A2 is stored on a sinusoidal grid. Do NOT assign 10° WGS84 bounds
+      based on h/v indices. Instead, let GDAL warp/reproject properly.
+    """
+    # Open container dataset
     hdf_dataset = gdal.Open(hdf_file, gdal.GA_ReadOnly)
     if not hdf_dataset:
         raise ValueError(f"Could not open HDF5 file: {hdf_file}")
@@ -457,48 +509,39 @@ def convert_viirs_hdf_to_tiff(hdf_file: str, output_file: str, layer: int = 0) -
     if layer >= len(subdatasets):
         raise ValueError(f"Layer {layer} not found. File has {len(subdatasets)} layers")
 
-    # Open subdataset
+    # Open requested subdataset
     subdataset_name = subdatasets[layer][0]
     layer_dataset = gdal.Open(subdataset_name, gdal.GA_ReadOnly)
+    if not layer_dataset:
+        raise ValueError(f"Could not open subdataset: {subdataset_name}")
 
-    # Get tile metadata
-    metadata = layer_dataset.GetMetadata_Dict()
-    horizontal_tile = int(metadata.get("HorizontalTileNumber", 0))
-    vertical_tile = int(metadata.get("VerticalTileNumber", 0))
-
-    # Calculate bounds (10x10 degree tiles)
-    west = (10 * horizontal_tile) - 180
-    north = 90 - (10 * vertical_tile)
-    east = west + 10
-    south = north - 10
-
-    logger.debug(f"Converting tile h{horizontal_tile:02d}v{vertical_tile:02d}")
-
-    # Create output with proper georeferencing
-    translate_options = gdal.TranslateOptions(
+    # Reproject to EPSG:4326 using GDAL warp (robust for sinusoidal tiles)
+    warp_options = gdal.WarpOptions(
         format="GTiff",
-        outputSRS="EPSG:4326",
-        outputBounds=[west, north, east, south],  # Fixed: [ulx, uly, lrx, lry]
+        dstSRS="EPSG:4326",
+        resampleAlg="bilinear",
+        multithread=True,
         creationOptions=["COMPRESS=DEFLATE", "PREDICTOR=2", "TILED=YES"],
     )
 
-    result = gdal.Translate(output_file, layer_dataset, options=translate_options)
-    
+    result = gdal.Warp(output_file, layer_dataset, options=warp_options)
+    if not result:
+        raise RuntimeError("gdal.Warp failed to create GeoTIFF output")
+
     # Guard rail: Verify the output has correct orientation
-    if result:
-        result_ds = gdal.Open(output_file, gdal.GA_ReadOnly)
-        if result_ds:
-            geotransform = result_ds.GetGeoTransform()
-            if geotransform[5] > 0:  # Y pixel size should be negative
-                os.remove(output_file)
-                raise RuntimeError(
-                    f"Generated south-up raster with positive Y pixel size ({geotransform[5]}). "
-                    f"Refusing to write defective raster."
-                )
+    result_ds = gdal.Open(output_file, gdal.GA_ReadOnly)
+    if result_ds:
+        geotransform = result_ds.GetGeoTransform()
+        if geotransform and geotransform[5] > 0:  # Y pixel size should be negative
             result_ds = None
+            os.remove(output_file)
+            raise RuntimeError(
+                f"Generated south-up raster with positive Y pixel size ({geotransform[5]}). "
+                f"Refusing to write defective raster."
+            )
+        result_ds = None
 
     return output_file
-
 
 def extract_viirs_layers(hdf_file: str, output_dir: str = ".") -> dict[str, str]:
     """Extract gap-filled NTL layer from VIIRS HDF5."""
