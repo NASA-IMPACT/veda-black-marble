@@ -80,7 +80,10 @@ async def black_marble_pipeline(
                 "No Earthdata token provided. Set EARTHDATA_TOKEN environment variable "
                 "or pass earthdata_token parameter. VIIRS downloads will be skipped."
             )
-            raise RuntimeError()
+            raise RuntimeError(
+                "EARTHDATA_TOKEN is required for VIIRS data downloads. "
+                "Set the environment variable or pass earthdata_token parameter."
+            )
 
     composite_months = config.acquisition.composite_months if config else 12
     temp_dir = f"{data_dir}/temp"

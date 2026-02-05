@@ -124,91 +124,95 @@ def create_cog_local(
 
 def parse_s3_url(s3_url: str) -> tuple[str, str]:
     """Parse S3 URL into bucket and key.
-    
+
     Args:
         s3_url: S3 URL in format s3://bucket/path/to/file
-        
+
     Returns:
         Tuple of (bucket, key)
-        
+
     Raises:
         ValueError: If URL is not a valid S3 URL
     """
     if not s3_url.startswith("s3://"):
         raise ValueError(f"Invalid S3 URL: {s3_url}")
-    
+
     path = s3_url[5:]  # Remove 's3://'
-    parts = path.split('/', 1)
-    
+    parts = path.split("/", 1)
+
     if len(parts) != 2:
         raise ValueError(f"Invalid S3 URL format: {s3_url}")
-    
+
     return parts[0], parts[1]
 
 
 def upload_to_s3(local_path: str, bucket: str, key: str) -> None:
     """Upload file to S3 with progress reporting for large files.
-    
+
     Args:
         local_path: Path to local file to upload
         bucket: S3 bucket name
         key: S3 key (path within bucket)
-        
+
     Raises:
         Exception: If upload fails (with helpful error messages)
     """
     try:
-        s3_client = boto3.client('s3')
-        
+        s3_client = boto3.client("s3")
+
         # Get file size for progress reporting
         file_size = os.path.getsize(local_path)
         file_size_mb = file_size / (1024 * 1024)
-        
+
         logger.info(f"Uploading {file_size_mb:.1f} MB to s3://{bucket}/{key}")
-        
+
         # Use multipart upload for large files (>100MB)
         if file_size > 100 * 1024 * 1024:  # 100MB
             logger.info("Using multipart upload for large file")
             # Configure multipart upload
             from boto3.s3.transfer import TransferConfig
+
             config = TransferConfig(
                 multipart_threshold=1024 * 25,  # 25MB
                 max_concurrency=10,
                 multipart_chunksize=1024 * 25,
-                use_threads=True
+                use_threads=True,
             )
             s3_client.upload_file(local_path, bucket, key, Config=config)
         else:
             s3_client.upload_file(local_path, bucket, key)
-        
+
         logger.info(f"Successfully uploaded to s3://{bucket}/{key}")
-        
+
     except Exception as e:
         error_msg = f"Failed to upload {local_path} to {bucket}/{key}: {str(e)}"
         logger.error(error_msg)
-        
+
         # Add helpful hints for common errors
         if "NoCredentialsError" in str(type(e)) or "AccessDenied" in str(e):
-            error_msg += (
-                "\n\nHint: Configure AWS credentials via one of these methods:\n"
+            logger.error(
+                "Hint: Configure AWS credentials via one of these methods:\n"
                 "  - Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables\n"
                 "  - Run 'aws configure' to create ~/.aws/credentials\n"
                 "  - Use IAM role (on EC2 instances)\n"
                 "  - Set AWS_PROFILE environment variable"
             )
         elif "NoSuchBucket" in str(e):
-            error_msg += f"\n\nHint: The bucket '{bucket}' does not exist or you don't have access to it."
-        
-        raise Exception(error_msg) from e
+            logger.error(
+                f"Hint: The bucket '{bucket}' does not exist or you don't have access to it."
+            )
+
+        # Re-raise original exception to preserve type and traceback
+        raise
 
 
 def create_cog_s3(local_path: str, s3_url: str) -> str:
     """Upload an existing COG file to S3.
-    
+
     Args:
         local_path: Path to the COG file to upload
         s3_url: S3 URL where the file should be uploaded
-        
+
     Returns:
         The S3 URL where the file was uploaded
     """
@@ -230,10 +234,10 @@ def create_cog(
     nodata: float | None = None,
 ) -> str:
     """Create a Cloud-Optimized GeoTIFF, supporting both local and S3 paths.
-    
+
     This is the main entry point that dispatches to either local or S3 creation
     based on the output path format.
-    
+
     Args:
         data: Array data or path to existing raster
         output_path: Where to save the COG (local path or s3:// URL)
@@ -245,15 +249,15 @@ def create_cog(
         blocksize: Size of tiles
         overviews: Overview levels to build
         nodata: NoData value
-        
+
     Returns:
         Path where the COG was saved
     """
     if output_path.startswith("s3://"):
         # Create locally first, then upload to S3
-        with tempfile.NamedTemporaryFile(suffix='.tif', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
             temp_path = tmp.name
-        
+
         try:
             # Create COG locally
             create_cog_local(
@@ -268,7 +272,7 @@ def create_cog(
                 overviews=overviews,
                 nodata=nodata,
             )
-            
+
             # Upload to S3
             return create_cog_s3(temp_path, output_path)
         finally:
@@ -289,8 +293,3 @@ def create_cog(
             overviews=overviews,
             nodata=nodata,
         )
-
-
-
-
-
