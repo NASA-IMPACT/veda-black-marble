@@ -6,6 +6,7 @@ This module provides async download functions for VIIRS data acquisition.
 import asyncio
 import logging
 import os
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -202,7 +203,6 @@ async def download_viirs_tiles_async(
         logger.debug(f"Tiles needed: {tiles}")
     except Exception as e:
         logger.error(f"Error in get_tiles_for_bbox: {e}")
-        import traceback
         logger.error(f"Traceback:\n{traceback.format_exc()}")
         raise
 
@@ -389,14 +389,10 @@ async def download_viirs(
         if "too many values to unpack" in str(e):
             logger.error("FOUND THE UNPACKING ERROR!")
             logger.error(f"Error details: {e}")
-            import traceback
-
             logger.error(f"Full traceback:\n{traceback.format_exc()}")
         raise
     except Exception as e:
         logger.error(f"Error in download_viirs_tiles_async: {e}")
-        import traceback
-
         logger.error(f"Full traceback:\n{traceback.format_exc()}")
         raise
 

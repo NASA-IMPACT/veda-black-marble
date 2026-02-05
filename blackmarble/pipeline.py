@@ -2,6 +2,7 @@
 
 import logging
 import os
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -179,8 +180,6 @@ async def black_marble_pipeline(
                 # Save VRT to diagnostics if requested
                 if config and getattr(config, "save_diagnostics", False):
                     os.makedirs(f"{diagnostics_dir}/vrts", exist_ok=True)
-                    import shutil
-
                     shutil.copy(
                         viirs_ntl_vrt,
                         f"{diagnostics_dir}/vrts/viirs_gap_filled_ntl_mosaic.vrt",

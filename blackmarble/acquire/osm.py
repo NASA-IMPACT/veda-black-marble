@@ -5,6 +5,7 @@ and converting it to raster format for integration with satellite imagery.
 """
 
 import hashlib
+import shutil
 from pathlib import Path
 from typing import Any, Literal
 
@@ -72,8 +73,6 @@ def clear_osm_cache(cache_dir: str | Path = "data/osm_cache") -> None:
     """Clear all cached OSM data."""
     cache_dir_path = Path(cache_dir)
     if cache_dir_path.exists():
-        import shutil
-
         shutil.rmtree(cache_dir_path)
         logger.info("Cleared OSM cache directory: %s", cache_dir_path)
 
