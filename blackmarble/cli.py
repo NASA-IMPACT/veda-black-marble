@@ -6,6 +6,7 @@ import traceback
 import typing
 from datetime import datetime
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
@@ -41,56 +42,75 @@ def parse_bbox(value: str) -> tuple[float, float, float, float]:
 
 @app.command()
 def run(
-    bbox: str = typer.Option(
-        ...,
-        "--bbox",
-        help='Bounding box as "min_x,min_y,max_x,max_y" or "min_x min_y max_x max_y"',
-        parser=parse_bbox,
-    ),
-    date: datetime = typer.Option(..., "--date", help="Target date for data in YYYY-MM-DD format."),
-    earthdata_token: str | None = typer.Option(
-        None,
-        "--earthdata-token",
-        "-t",
-        help="NASA Earthdata token for VIIRS downloads. "
-        "If not provided, reads from EARTHDATA_TOKEN environment variable.",
-        envvar="EARTHDATA_TOKEN",
-    ),
-    output_path: str = typer.Option(
-        "black_marble_output.tif",
-        "--output-path",
-        "-o",
-        help="Output path for the final COG file.",
-    ),
-    data_dir: str = typer.Option(
-        "./data",
-        "--data-dir",
-        help="Base directory for data, cache, temp, and diagnostics outputs.",
-    ),
-    config_preset: str = typer.Option(
-        "default",
-        "--config",
-        "-c",
-        help="Configuration preset: 'default', 'high_quality', or 'fast'.",
-    ),
-    save_diagnostics: bool = typer.Option(
-        False,
-        "--save-diagnostics",
-        "-d",
-        help="Save diagnostic intermediate outputs to <data-dir>/diagnostics/",
-    ),
-    wgs84: bool = typer.Option(
-        False,
-        "--wgs84",
-        "-w",
-        help="Also export output in EPSG:4326 (WGS84) projection",
-    ),
-    log_level: str = typer.Option(
-        "INFO",
-        "--log-level",
-        "-l",
-        help="Logging level: DEBUG, INFO, WARNING, ERROR",
-    ),
+    bbox: Annotated[
+        str,
+        typer.Option(
+            "--bbox",
+            help='Bounding box as "min_x,min_y,max_x,max_y" or "min_x min_y max_x max_y"',
+            parser=parse_bbox,
+        ),
+    ],
+    date: Annotated[
+        datetime,
+        typer.Option("--date", help="Target date for data in YYYY-MM-DD format."),
+    ],
+    earthdata_token: Annotated[
+        str | None,
+        typer.Option(
+            "--earthdata-token",
+            "-t",
+            help="NASA Earthdata token for VIIRS downloads. "
+            "If not provided, reads from EARTHDATA_TOKEN environment variable.",
+            envvar="EARTHDATA_TOKEN",
+        ),
+    ] = None,
+    output_path: Annotated[
+        str,
+        typer.Option(
+            "--output-path",
+            "-o",
+            help="Output path for the final COG file.",
+        ),
+    ] = "black_marble_output.tif",
+    data_dir: Annotated[
+        str,
+        typer.Option(
+            "--data-dir",
+            help="Base directory for data, cache, temp, and diagnostics outputs.",
+        ),
+    ] = "./data",
+    config_preset: Annotated[
+        str,
+        typer.Option(
+            "--config",
+            "-c",
+            help="Configuration preset: 'default', 'high_quality', or 'fast'.",
+        ),
+    ] = "default",
+    save_diagnostics: Annotated[
+        bool,
+        typer.Option(
+            "--save-diagnostics",
+            "-d",
+            help="Save diagnostic intermediate outputs to <data-dir>/diagnostics/",
+        ),
+    ] = False,
+    wgs84: Annotated[
+        bool,
+        typer.Option(
+            "--wgs84",
+            "-w",
+            help="Also export output in EPSG:4326 (WGS84) projection",
+        ),
+    ] = False,
+    log_level: Annotated[
+        str,
+        typer.Option(
+            "--log-level",
+            "-l",
+            help="Logging level: DEBUG, INFO, WARNING, ERROR",
+        ),
+    ] = "INFO",
 ):
     """
     Runs the Black Marble processing pipeline for a given area and date.
