@@ -25,7 +25,7 @@ def get_wrs_tiles_for_bbox_tuple(
         List of dictionaries with 'path' and 'row' keys for intersecting tiles
     """
     # Load WRS-2 shapefile from data directory
-    wrs_path = Path(__file__).parent.parent / "data" / "WRS2_descending_0" / "WRS2_descending.shp"
+    wrs_path = Path(__file__).parent.parent / "data" / "WRS2_descending" / "WRS2_descending.shp"
 
     if not wrs_path.exists():
         raise FileNotFoundError(

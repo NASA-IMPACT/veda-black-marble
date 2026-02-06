@@ -191,8 +191,6 @@ cache/
 
 # transient data files
 data/
-!tests/data/reference/
-blackmarble/data/*
-!blackmarble/data/WRS2_descending_0/
+!data/WRS2_descending/
 *.bak
 *_wgs84.tif
