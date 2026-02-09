@@ -25,9 +25,8 @@ export EARTHDATA_TOKEN="your-token-here"
 
 # Process nighttime lights for San Francisco
 blackmarble \
-  --lat1 37.81 --lon1 -122.55 \
-  --lat2 37.69 --lon2 -122.32 \
-  --year 2023 --month 6 --day 15 \
+  --bbox 37.81,-122.55,37.69,-122.32 \
+  --date 2023-06-15 \
   --output-path san_francisco_lights.tif
 ```
 
@@ -35,14 +34,14 @@ blackmarble \
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--lat1`, `--lon1` | required | First corner coordinates |
-| `--lat2`, `--lon2` | required | Second corner coordinates |
-| `--year`, `--month`, `--day` | required | Target date for processing |
+| `--bbox` | required | Bounding box for processing (WGS84) |
+| `--date` | required | Target date for processing |
 | `--output-path`, `-o` | `black_marble_output.tif` | Output COG file path |
+| `--data-dir` | `./data` | Directory to store/cache data |
 | `--config`, `-c` | `default` | Preset: `default`, `high_quality`, or `fast` |
-| `--save-diagnostics`, `-d` | off | Save intermediate outputs to `data/diagnostics/` |
-| `--wgs84`, `-w` | off | Also export EPSG:4326 version |
-| `--earthdata-token`, `-t` | env var | NASA Earthdata token (or use EARTHDATA_TOKEN) |
+| `--save-diagnostics`, `-d` | False | Save intermediate outputs to `{data-dir}/diagnostics/` |
+| `--wgs84`, `-w` | False | Also export EPSG:4326 version |
+| `--earthdata-token`, `-t` | ENV_VAR | NASA Earthdata token (or use EARTHDATA_TOKEN) |
 | `--log-level`, `-l` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
 Run `blackmarble --help` for complete options.
@@ -53,9 +52,8 @@ Run `blackmarble --help` for complete options.
 ```bash
 # Paris with high quality settings and WGS84 export
 blackmarble \
-  --lat1 48.92 --lon1 2.08 \
-  --lat2 48.80 --lon2 2.42 \
-  --year 2023 --month 8 --day 1 \
+  --bbox 48.92,2.08,48.80,2.42 \
+  -dater 2023-08-01 \
   --config high_quality \
   --wgs84 \
   --output-path paris_lights_hq.tif
@@ -65,9 +63,8 @@ blackmarble \
 ```bash
 # Kansas City with diagnostics for QA
 blackmarble \
-  --lat1 39.20 --lon1 -94.74 \
-  --lat2 38.97 --lon2 -94.42 \
-  --year 2023 --month 5 --day 15 \
+  --bbox "39.20 -94.74 38.97 -94.42" \
+  --date 2023-05-15 \
   --config fast \
   --save-diagnostics \
   --output-path kansas_test.tif
