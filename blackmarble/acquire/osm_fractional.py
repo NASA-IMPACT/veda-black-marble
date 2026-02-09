@@ -131,7 +131,7 @@ def buffer_and_rasterize_roads_fractional(
     log.debug(f"  - Bounds: {edges_gdf.total_bounds}")
     log.debug(f"  - Num edges: {len(edges_gdf)}")
     if len(edges_gdf) > 0:
-        centroid = edges_gdf.unary_union.centroid
+        centroid = edges_gdf.union_all().centroid
         log.debug(f"  - Centroid: ({centroid.x:.6f}, {centroid.y:.6f})")
 
     # Buffer roads in meters (project to UTM for accuracy)
@@ -178,7 +178,7 @@ def buffer_and_rasterize_roads_fractional(
     edges_buffered = edges_utm.to_crs(target_crs)
     log.debug("After projection to target CRS:")
     log.debug(f"  Bounds: {edges_buffered.total_bounds}")
-    target_centroid = edges_buffered.unary_union.centroid
+    target_centroid = edges_buffered.union_all().centroid
     log.debug(f"  Centroid: ({target_centroid.x:.1f}, {target_centroid.y:.1f})")
 
     # Check the transform bounds and overlap

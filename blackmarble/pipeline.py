@@ -145,7 +145,7 @@ async def black_marble_pipeline(
             if len(edges_gdf) > 0:
                 bounds = edges_gdf.total_bounds
                 log.debug(f"  - Bounds (from edges): {bounds}")
-                centroid = edges_gdf.unary_union.centroid
+                centroid = edges_gdf.union_all().centroid
                 log.debug(f"  - Centroid: ({centroid.x:.6f}, {centroid.y:.6f})")
         except Exception as e:
             log.debug(f"  - Could not extract bounds: {e}")
