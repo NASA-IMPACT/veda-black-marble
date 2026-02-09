@@ -490,9 +490,12 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
 
                         # DEBUG: Verify file exists
                         if output_path.exists():
-                            logger.info(
-                                f"✅ Landsat file downloaded: {output_path} ({result.size_bytes} bytes)"
+                            msg = (
+                                f"✅ Landsat file downloaded: "
+                                f"{output_path} "
+                                f"({result.size_bytes} bytes)"
                             )
+                            logger.info(msg)
                         else:
                             logger.error(f"❌ File disappeared after download: {output_path}")
 

@@ -441,8 +441,6 @@ def process_landsat_date(
                     qa_path=qa_file,
                     band_path=band_file,
                     window_expanded=window_expanded,
-                    bbox_src=bbox_src,
-                    src_crs=src.crs,
                     dilate_pixels=dilate_pixels,
                     cloud_strategy=cloud_strategy,
                 )
@@ -570,8 +568,6 @@ def process_landsat_date(
                         qa_path=qa_files[0],
                         band_path=band_files[0],
                         window_expanded=full_window,
-                        bbox_src=None,
-                        src_crs=src_band.crs,
                         dilate_pixels=dilate_pixels,
                         cloud_strategy=cloud_strategy,
                     )
