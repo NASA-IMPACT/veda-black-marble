@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -14,6 +15,7 @@ from .landsat import AsyncLandsatDownloader
 # from .async_base import DownloadProgressTracker  # Currently unused
 from .landsat_search_grouped import search_best_scenes as search_best_scenes_grouped
 from .viirs import download_viirs
+from .wrs_utils import get_wrs_tiles_for_bbox_tuple
 
 
 logger = logging.getLogger(__name__)
@@ -231,32 +233,30 @@ class AsyncDownloadOrchestrator:
             if isinstance(result, Exception):
                 logger.error(f"{name} download failed: {result}")
                 # Include full traceback for debugging
-                import traceback
 
                 tb_str = "".join(
                     traceback.format_exception(type(result), result, result.__traceback__)
                 )
                 logger.error(f"{name} traceback:\n{tb_str}")
                 results.failed_downloads.append(f"{name}: {str(result)}")
-            else:
-                if name == "VIIRS":
-                    # Only set VIIRS data if we actually got results
-                    if result and isinstance(result, dict):
-                        # Type narrow result to dict[str, list[Path]]
-                        has_files = False
-                        for files in result.values():
-                            if isinstance(files, list) and len(files) > 0:
-                                has_files = True
-                                break
-                        if has_files:
-                            results.viirs_data = result
-                    else:
-                        logger.warning("VIIRS download returned empty results")
-                elif name == "Landsat":
-                    if isinstance(result, dict):
-                        results.landsat_data = result
-                elif name == "OSM":
-                    results.osm_data = result
+            elif name == "VIIRS":
+                # Only set VIIRS data if we actually got results
+                if result and isinstance(result, dict):
+                    # Type narrow result to dict[str, list[Path]]
+                    has_files = False
+                    for files in result.values():
+                        if isinstance(files, list) and len(files) > 0:
+                            has_files = True
+                            break
+                    if has_files:
+                        results.viirs_data = result
+                else:
+                    logger.warning("VIIRS download returned empty results")
+            elif name == "Landsat":
+                if isinstance(result, dict):
+                    results.landsat_data = result
+            elif name == "OSM":
+                results.osm_data = result
 
         # Calculate final statistics
         results.download_time = time.time() - start_time
@@ -294,7 +294,6 @@ class AsyncDownloadOrchestrator:
             return result
         except Exception as e:
             logger.error(f"Error in _download_viirs: {e}")
-            import traceback
 
             logger.error(f"Full traceback:\n{traceback.format_exc()}")
             raise
@@ -324,7 +323,6 @@ class AsyncDownloadOrchestrator:
         logger.info(f"Search bbox: {plan.bbox}")
 
         # Print WRS tile info once
-        from .wrs_utils import get_wrs_tiles_for_bbox_tuple
 
         try:
             tile_dicts = get_wrs_tiles_for_bbox_tuple(plan.bbox)
@@ -429,8 +427,6 @@ class AsyncDownloadOrchestrator:
         loop = asyncio.get_event_loop()
 
         try:
-            from ..acquire import fetch_road_network
-
             # Prepare custom filter for road types
             custom_filter = None
             if plan.osm_road_types:
@@ -442,6 +438,8 @@ class AsyncDownloadOrchestrator:
                 custom_filter = f'["highway"~"{road_filter}"]'
 
             # Run in thread pool
+            from ..acquire import fetch_road_network
+
             road_network = await loop.run_in_executor(
                 None,
                 fetch_road_network,

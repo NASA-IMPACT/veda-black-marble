@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Integration test for the synchronous pipeline wrapper and WGS84 export."""
 
+import asyncio
 import os
 from datetime import datetime
 
+import nest_asyncio
 import pytest
+import rasterio
+from rasterio.env import Env
 
 from blackmarble.config import PipelineConfig
 from blackmarble.pipeline import black_marble_pipeline_sync
@@ -38,9 +42,6 @@ def test_sync_pipeline_with_wgs84_export():
     assert os.path.exists(wgs84_path), "WGS84 output file should be created"
 
     # Verify both are valid COGs
-    import rasterio
-    from rasterio.env import Env
-
     with Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR"):
         # Check main output
         with rasterio.open(output_path) as src:
@@ -70,9 +71,6 @@ def test_sync_pipeline_with_wgs84_export():
 @pytest.mark.skip(reason="Integration test - run manually with pytest -m integration")
 def test_sync_pipeline_in_notebook_context():
     """Test the sync pipeline wrapper simulating a notebook context with existing event loop."""
-    import asyncio
-
-    import nest_asyncio
 
     # Apply nest_asyncio to allow nested event loops
     nest_asyncio.apply()  # type: ignore[no-untyped-call]

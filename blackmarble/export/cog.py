@@ -9,6 +9,7 @@ import boto3
 import numpy as np
 import numpy.typing as npt
 import rasterio
+from boto3.s3.transfer import TransferConfig
 from rasterio.enums import Resampling
 from rasterio.io import MemoryFile
 from rasterio.shutil import copy
@@ -171,7 +172,6 @@ def upload_to_s3(local_path: str, bucket: str, key: str) -> None:
         if file_size > 100 * 1024 * 1024:  # 100MB
             logger.info("Using multipart upload for large file")
             # Configure multipart upload
-            from boto3.s3.transfer import TransferConfig
 
             config = TransferConfig(
                 multipart_threshold=1024 * 25,  # 25MB

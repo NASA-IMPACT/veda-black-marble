@@ -1,21 +1,29 @@
 """Pipeline for Black Marble processing."""
 
+import asyncio
+import gc
 import logging
 import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+import nest_asyncio
 import numpy as np
 import numpy.typing as npt
+import osmnx as ox
 import psutil
 import rasterio
 from osgeo import gdal
 from rasterio.transform import array_bounds
 
 from . import acquire, analyze, enhance, export, prepare  # type: ignore[attr-defined]
+from .acquire.async_orchestrator import AsyncDownloadOrchestrator, DownloadPlan
+from .acquire.osm_fractional import DEFAULT_BUFFER_BY_TYPE
+from .acquire.wrs_utils import get_wrs_tiles_for_bbox_tuple
 from .config import PipelineConfig
+from .crs import create_processing_grid, get_processing_crs
 from .logging_utils import get_logger
 
 
@@ -93,8 +101,6 @@ async def black_marble_pipeline(
     logger.info("   Target date: %s", date.strftime("%Y-%m-%d"))
     logger.info("   Bounding box: %s", bbox)
 
-    from .acquire.async_orchestrator import AsyncDownloadOrchestrator, DownloadPlan
-
     plan = DownloadPlan.from_pipeline_config(bbox, date, config, data_dir=data_dir)
     orchestrator = AsyncDownloadOrchestrator(earthdata_token=earthdata_token, show_progress=True)
 
@@ -138,8 +144,6 @@ async def black_marble_pipeline(
 
         # Try to get bounds from the graph
         try:
-            import osmnx as ox
-
             # Use edges instead of nodes to avoid MultiIndex issues with tuple node IDs
             edges_gdf = ox.graph_to_gdfs(road_network, nodes=False)
             if len(edges_gdf) > 0:
@@ -246,8 +250,6 @@ async def black_marble_pipeline(
     if viirs_corrected is None:
         logger.warning("⚠️  No VIIRS data - using Landsat as reference")
 
-    from .crs import get_processing_crs
-
     processing_crs = get_processing_crs(bbox)
     target_resolution_landsat = 30.0  # 30 meters for all projections
 
@@ -261,7 +263,6 @@ async def black_marble_pipeline(
     log.debug(f"  - CRS WKT: {processing_crs.to_wkt()}")
 
     logger.info("📐 Computing target grid for spatial alignment...")
-    from .crs import create_processing_grid
 
     processing_crs, reference_transform, reference_shape = create_processing_grid(
         bbox, target_resolution_landsat
@@ -322,7 +323,7 @@ async def black_marble_pipeline(
 
     logger.debug("📊 Analyzing tile coverage across dates:")
     all_tiles_by_date = {}
-    for date, date_files in landsat_files_by_date.items():
+    for d, date_files in landsat_files_by_date.items():
         date_tiles = set()
         for _band, paths in date_files.items():
             for path in paths:
@@ -332,16 +333,16 @@ async def black_marble_pipeline(
                     pathrow = parts[2]
                     if len(pathrow) == 6 and pathrow.isdigit():
                         date_tiles.add(pathrow)
-        all_tiles_by_date[date] = date_tiles
+        all_tiles_by_date[d] = date_tiles
     all_possible_tiles = set()
     for tiles in all_tiles_by_date.values():
         all_possible_tiles.update(tiles)
 
     logger.debug("  Total unique tiles across all dates: %s", sorted(all_possible_tiles))
-    for date, tiles in sorted(all_tiles_by_date.items()):
+    for d, tiles in sorted(all_tiles_by_date.items()):
         missing = all_possible_tiles - tiles
         if missing:
-            logger.debug("  %s: Missing tiles %s", date.strftime("%Y-%m-%d"), sorted(missing))
+            logger.debug("  %s: Missing tiles %s", d.strftime("%Y-%m-%d"), sorted(missing))
 
     # Process each date's Landsat data
     for idx, target_date in enumerate(sorted(landsat_files_by_date.keys())):
@@ -512,7 +513,6 @@ async def black_marble_pipeline(
             # Optional: Delete bands to save memory
             if config and config.memory.delete_bands_after_indices:
                 del b3_data, b4_data, b5_data
-                import gc
 
                 gc.collect()
 
@@ -536,8 +536,6 @@ async def black_marble_pipeline(
 
     # Check which tiles we got vs expected
     if tiles_with_data:
-        from .acquire.wrs_utils import get_wrs_tiles_for_bbox_tuple
-
         expected_tiles = get_wrs_tiles_for_bbox_tuple(bbox)
         expected_pathrows = {f"{t['path']:03d}{t['row']:03d}" for t in expected_tiles}
 
@@ -809,22 +807,19 @@ async def black_marble_pipeline(
                     f"VIIRS alignment failed - only {nonzero_pct:.1f}% non-zero pixels. "
                     "Check tile selection and spatial footprints."
                 )
-        else:
-            # No reprojected Landsat bands to align to
-            # This is expected in indices-first mode where we calculate NDVI/NDWI
-            # before reprojection
-            if not landsat_reprojected:
-                logger.debug(
-                    "No reprojected Landsat bands for VIIRS alignment "
-                    "(expected in indices-first mode)"
-                )
+        # No reprojected Landsat bands to align to
+        # This is expected in indices-first mode where we calculate NDVI/NDWI
+        # before reprojection
+        elif not landsat_reprojected:
+            logger.debug(
+                "No reprojected Landsat bands for VIIRS alignment (expected in indices-first mode)"
+            )
 
     # Rasterize roads to match grid (fractional only)
     roads_fractional = None
     if road_network is not None and reference_shape is not None and reference_transform is not None:
         # Use the new CRS-aware road rasterization (like sync pipeline)
         # Use buffer sizes from config or default variable sizes
-        from .acquire.osm_fractional import DEFAULT_BUFFER_BY_TYPE
 
         if config and config.acquisition.osm_buffer_meters is not None:
             buffer_meters = config.acquisition.osm_buffer_meters
@@ -1152,8 +1147,6 @@ async def black_marble_pipeline(
     ntl_enhanced = None
     if ntl_composite is not None:
         # Map config contrast method to valid options
-        from typing import Literal
-
         method_mapping: dict[str, Literal["percentile", "minmax"]] = {
             "linear": "minmax",
             "percentile": "percentile",
@@ -1452,14 +1445,11 @@ def black_marble_pipeline_sync(
         This function automatically handles environments with existing event loops
         (like Jupyter notebooks) by using nest_asyncio when needed.
     """
-    import asyncio
 
     # Check if there's already a running event loop
     try:
         asyncio.get_running_loop()
         # There's already a loop running - use nest_asyncio
-        import nest_asyncio
-
         nest_asyncio.apply()
     except RuntimeError:
         # No event loop running - asyncio.run will work fine

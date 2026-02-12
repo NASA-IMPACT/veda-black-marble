@@ -7,8 +7,11 @@ of raster data to prepare it for analysis.
 from typing import Any, Literal
 
 import numpy as np
+import rasterio  # noqa: F401
+from rasterio import MemoryFile
 from rasterio.transform import Affine
 from rasterio.warp import Resampling, calculate_default_transform, reproject
+from rasterio.windows import from_bounds
 
 from ..typing import ArrayLike, BBox
 
@@ -89,10 +92,9 @@ def reproject_image(
                 dst_shape = (int(dst_height), int(dst_width))
             else:
                 raise ValueError("Could not calculate destination shape")
-    else:
-        # Ensure dst_shape is set if it was None but dst_transform was provided
-        if dst_shape is None:
-            raise ValueError("dst_shape must be provided when dst_transform is provided")
+    # Ensure dst_shape is set if it was None but dst_transform was provided
+    elif dst_shape is None:
+        raise ValueError("dst_shape must be provided when dst_transform is provided")
 
     # Create output array
     assert dst_shape is not None  # Type checker hint
@@ -213,8 +215,6 @@ def resample_image(
     resampled = np.empty((bands, new_height, new_width), dtype=data.dtype)
 
     # Use MemoryFile for in-memory resampling
-    from rasterio import MemoryFile
-
     profile = {
         "driver": "GTiff",
         "width": width,
@@ -261,10 +261,6 @@ def crop_to_bounds(
         Tuple of (cropped_data, new_transform, actual_bounds)
     """
     try:
-        # Use rasterio for exact cropping
-        import rasterio  # noqa: F401
-        from rasterio.windows import from_bounds
-
         # Apply buffer to bounds
         min_x, min_y, max_x, max_y = bounds
         if buffer_distance is not None and buffer_distance > 0:

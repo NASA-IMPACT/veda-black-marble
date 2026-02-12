@@ -3,12 +3,17 @@
 This module provides the median composite function used in the pipeline.
 """
 
+import logging
 import warnings
 from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
 
+from .streaming import streaming_percentile_85
+
+
+logger = logging.getLogger(__name__)
 
 # Type aliases
 ArrayLike = npt.NDArray[Any]
@@ -55,8 +60,6 @@ def create_index_temporal_composite(
 
     # Use streaming algorithm for 85th percentile
     if method == "percentile" and percentile is not None and 84.5 <= percentile <= 85.5:
-        from .streaming import streaming_percentile_85
-
         composite, valid_count = streaming_percentile_85(index_stack, min_valid_observations)
         return composite
 
@@ -64,9 +67,6 @@ def create_index_temporal_composite(
     max_height = max(s[0] for s in shapes)
     max_width = max(s[1] for s in shapes)
 
-    import logging
-
-    logger = logging.getLogger(__name__)
     logger.info(
         f"Index stack shapes: min=({min(s[0] for s in shapes)}, {min(s[1] for s in shapes)}), "
         f"max=({max_height}, {max_width})"

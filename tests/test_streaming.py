@@ -1,9 +1,12 @@
 """Test streaming algorithms for memory-efficient processing."""
 
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 
 from blackmarble.analyze.streaming import streaming_percentile_85
+from blackmarble.analyze.temporal import create_index_temporal_composite
 
 
 class TestStreamingPercentile85:
@@ -181,9 +184,6 @@ class TestStreamingPercentile85:
 
     def test_integration_routing(self):
         """Test that create_index_temporal_composite routes to streaming."""
-        from unittest.mock import patch
-
-        from blackmarble.analyze.temporal import create_index_temporal_composite
 
         # Create test data
         arrays = [np.ones((10, 10), dtype=np.float32) for _ in range(5)]

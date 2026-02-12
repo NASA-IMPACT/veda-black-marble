@@ -3,8 +3,10 @@
 import os
 from typing import Any
 
+import numpy as np
 import numpy.typing as npt
 import rasterio
+from rasterio.transform import Affine
 
 from ..logging_utils import get_logger
 
@@ -30,7 +32,6 @@ def save_diagnostic(
         description: Description of what this data represents
         crs: Optional CRS to use (if profile is just a transform)
     """
-    import numpy as np
 
     # Ensure data is a numpy array
     data = np.asarray(data)
@@ -78,8 +79,6 @@ def save_diagnostic(
 
         # Ensure transform is set (use identity if missing)
         if "transform" not in profile or profile["transform"] is None:
-            from rasterio.transform import Affine
-
             profile["transform"] = Affine.identity()
 
     # Validate required fields

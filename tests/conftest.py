@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import tempfile
 from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import numpy as np
 import numpy.typing as npt
 import pytest
+
+from blackmarble.config import PipelineConfig
 
 
 @pytest.fixture
@@ -84,7 +88,6 @@ def pipeline_config(
     temp_dir: Path,
 ):
     """Default pipeline configuration for testing."""
-    from blackmarble.config import PipelineConfig
 
     output_path = str(temp_dir / "test_output.tif")
     return PipelineConfig.for_bm_parity(manhattan_bbox, test_date, output_path)
@@ -97,8 +100,6 @@ def enhanced_pipeline_config(
     temp_dir: Path,
 ):
     """Enhanced pipeline configuration for testing."""
-    from blackmarble.config import PipelineConfig
-
     output_path = str(temp_dir / "test_enhanced.tif")
     return PipelineConfig.for_enhanced_quality(manhattan_bbox, test_date, output_path)
 
@@ -106,8 +107,6 @@ def enhanced_pipeline_config(
 @pytest.fixture
 def mock_cog_generator() -> Mock:
     """Mock COG generator for testing."""
-    from unittest.mock import MagicMock
-
     # Create a mock COGProfile
     COGProfile = Mock()
     COGProfile.profile_name = "deflate"
@@ -139,8 +138,6 @@ def reference_data_paths() -> dict[str, Path]:
     This fixture runs once per test session and ensures all reference
     data is present and valid before tests run.
     """
-    import subprocess
-    import sys
 
     # Get reference data directory
     test_dir = Path(__file__).parent

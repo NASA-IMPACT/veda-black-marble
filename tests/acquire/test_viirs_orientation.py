@@ -1,5 +1,7 @@
 """Test VIIRS georeferencing orientation to prevent south-up rasters."""
 
+from pathlib import Path
+
 import pytest
 from osgeo import gdal
 
@@ -36,7 +38,6 @@ class TestVIIRSOrientation:
 
     def test_viirs_tiles_have_negative_y_pixel_size(self):
         """Integration test: verify actual VIIRS TIF files have negative Y pixel size."""
-        from pathlib import Path
 
         viirs_dir = Path("data/viirs/2023/01/24")
         if not viirs_dir.exists():

@@ -7,7 +7,7 @@ import asyncio
 import logging
 import os
 import traceback
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import aiofiles
@@ -57,7 +57,6 @@ async def download_viirs_h5(
     tile_id = f"h{horizontal:02d}v{vertical:02d}"
 
     # Convert date to day-of-year format
-    from datetime import date
 
     target_date = date(year, month, day)
     day_of_year = target_date.timetuple().tm_yday
@@ -160,6 +159,7 @@ async def download_viirs_tiles_async(
     earthdata_token: str,
     output_dir: str = "./data/viirs",
     max_concurrent: int = 3,
+    use_cache: bool = True,
 ) -> dict[str, list[str]]:
     """Download all VIIRS tiles for a date and bounding box using async I/O.
 
@@ -171,6 +171,7 @@ async def download_viirs_tiles_async(
         earthdata_token: NASA Earthdata token
         output_dir: Directory to save downloaded files
         max_concurrent: Maximum concurrent downloads (NASA rate limits)
+        use_cache: Whether to use cached files (skip downloading if file exists)
 
     Returns:
         Dictionary with keys:
@@ -182,6 +183,7 @@ async def download_viirs_tiles_async(
     logger.info(
         f"    earthdata_token: {'***' + earthdata_token[-4:] if earthdata_token else 'None'}"
     )
+    logger.debug(f"    use_cache: {use_cache}")
 
     try:
         # Validate bbox unpacking
@@ -256,8 +258,8 @@ async def download_viirs_tiles_async(
             hdf_filename = f"VNP46A2_h{h:02d}v{v:02d}_{year}{month:02d}{day:02d}.h5"
             hdf_path = os.path.join(effective_output_dir, hdf_filename)
 
-            # Skip if file already exists
-            if os.path.exists(hdf_path) and os.path.getsize(hdf_path) > 1000:
+            # Skip if file already exists (respecting use_cache setting)
+            if use_cache and os.path.exists(hdf_path) and os.path.getsize(hdf_path) > 1000:
                 logger.info(f"Using cached HDF5 file: {hdf_path}")
                 # Extract layers from existing file
                 try:
@@ -359,6 +361,7 @@ async def download_viirs(
     earthdata_token: str,
     output_dir: str = "./data/viirs",
     show_progress: bool = True,
+    use_cache: bool = True,
 ) -> dict[str, list[Path]]:
     """Download VIIRS data for the async pipeline.
 
@@ -371,17 +374,23 @@ async def download_viirs(
         earthdata_token: NASA Earthdata token
         output_dir: Output directory
         show_progress: Show progress (for compatibility)
+        use_cache: Whether to use cached files (skip downloading if file exists)
 
     Returns:
         Dictionary mapping layer names to lists of Path objects
     """
     logger.info(f"Starting VIIRS download for {date.strftime('%Y-%m-%d')}")
     logger.info(f">>> FUNCTIONAL API CALLED - bbox: {bbox}")
+    logger.debug(f"Cache downloads: {use_cache}")
 
     try:
         # Download tiles
         file_dict = await download_viirs_tiles_async(
-            date=date, bbox=bbox, earthdata_token=earthdata_token, output_dir=output_dir
+            date=date,
+            bbox=bbox,
+            earthdata_token=earthdata_token,
+            output_dir=output_dir,
+            use_cache=use_cache,
         )
         logger.info(f"download_viirs_tiles_async returned keys: {list(file_dict.keys())}")
         for key, files in file_dict.items():

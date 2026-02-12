@@ -18,6 +18,7 @@ from .async_base import (
     DownloadStatus,
     RateLimiter,
 )
+from .wrs_utils import get_wrs_tiles_for_bbox_tuple
 
 
 logger = logging.getLogger(__name__)
@@ -204,7 +205,6 @@ class AsyncLandsatDownloader(AsyncDownloaderBase):
         Returns:
             List of scene metadata
         """
-        from .wrs_utils import get_wrs_tiles_for_bbox_tuple
 
         # Get WRS tiles and organize by path for efficient processing
         tile_dicts = get_wrs_tiles_for_bbox_tuple(bbox)

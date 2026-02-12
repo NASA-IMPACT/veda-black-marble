@@ -9,6 +9,7 @@ from enum import Enum
 from typing import Literal
 
 import numpy as np
+from scipy.ndimage import binary_dilation
 
 
 class QALevel(Enum):
@@ -68,8 +69,6 @@ def create_landsat_cloud_mask(
 
     # Apply dilation if requested
     if dilate_pixels > 0:
-        from scipy.ndimage import binary_dilation
-
         structure = np.ones((2 * dilate_pixels + 1, 2 * dilate_pixels + 1))
         # Invert for dilation (dilate the bad pixels), then invert back
         mask = ~binary_dilation(~mask, structure=structure)

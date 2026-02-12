@@ -8,13 +8,16 @@ from datetime import date, datetime
 from typing import Any
 
 from ..config import LandsatAcquisitionConfig
+from .landsat import AsyncLandsatDownloader
 from .landsat_search import (
     S3Client,
     SceneMeta,
     SearchParams,
     get_all_scenes_in_window,
+    group_by_pathrow,
     with_s3_client,
 )
+from .wrs_utils import get_wrs_tiles_for_bbox_tuple
 
 
 logger = logging.getLogger(__name__)
@@ -36,8 +39,6 @@ async def search_best_scenes(
         config = LandsatAcquisitionConfig()
 
     # Get required tiles
-    from .wrs_utils import get_wrs_tiles_for_bbox_tuple
-
     tile_dicts = get_wrs_tiles_for_bbox_tuple(bbox)
     required_tiles = {(t["path"], t["row"]) for t in tile_dicts}
 
@@ -54,8 +55,6 @@ async def search_best_scenes(
 
     # Get the find_scenes function
     if find_scenes_func is None:
-        from .landsat import AsyncLandsatDownloader
-
         downloader = AsyncLandsatDownloader(aws_unsigned=False)
         find_scenes_func = downloader.find_landsat_scenes
 
@@ -98,9 +97,9 @@ async def search_best_scenes(
             group_scenes = []
             group_dates = []
 
-            for d in scenes_by_date:
+            for d, scenes in scenes_by_date.items():
                 if abs((d - base_date).days) <= tolerance_days:
-                    group_scenes.extend(scenes_by_date[d])
+                    group_scenes.extend(scenes)
                     group_dates.append(d)
                     processed_dates.add(d)
             tiles = {(s.path, s.row) for s in group_scenes}
@@ -126,13 +125,12 @@ async def search_best_scenes(
             best_coverage = 0
             for base_date in sorted(scenes_by_date.keys()):
                 group_scenes = []
-                for d in scenes_by_date:
+                for d, scenes in scenes_by_date.items():
                     if abs((d - base_date).days) <= tolerance_days:
-                        group_scenes.extend(scenes_by_date[d])
+                        group_scenes.extend(scenes)
                 tiles = {(s.path, s.row) for s in group_scenes}
                 coverage = len(tiles)
-                if coverage > best_coverage:
-                    best_coverage = coverage
+                best_coverage = max(best_coverage, coverage)
 
             logger.warning(
                 f"Best coverage found: {best_coverage} tiles out of {len(required_tiles)} required"
@@ -153,8 +151,6 @@ async def search_best_scenes(
             f"Selected group {date_desc} with {len(group_scenes)} scenes from "
             f"{len(group_dates)} dates, avg cloud {avg_cloud:.1f}%"
         )
-
-        from .landsat_search import group_by_pathrow
 
         tiles = group_by_pathrow(group_scenes)
         result = []
