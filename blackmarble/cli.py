@@ -138,6 +138,9 @@ def run(
     logging.getLogger("aiobotocore").setLevel(logging.WARNING)
     logging.getLogger("botocore").setLevel(logging.WARNING)
     logging.getLogger("boto3").setLevel(logging.WARNING)
+    # supress logs from earthaccess, rasterio, and rasterio
+    logging.getLogger("earthaccess").setLevel(logging.WARNING)
+    logging.getLogger("rasterio").setLevel(logging.ERROR)
 
     bbox_parsed = typing.cast(tuple[float, float, float, float], bbox)
 

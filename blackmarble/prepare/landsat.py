@@ -124,14 +124,14 @@ def process_landsat_date(
 
             # For multiple tiles, always use windowed mosaic approach
             if len(qa_files) > 1:
-                logger.info("Creating windowed mosaic from %d QA tiles...", len(qa_files))
+                logger.debug("Creating windowed mosaic from %d QA tiles...", len(qa_files))
 
                 # Use the standard processing grid
                 # Create the standard processing grid
                 output_crs, transform, (height, width) = create_processing_grid(bbox)
 
-                logger.info("Using locally-optimized Albers Equal Area projection")
-                logger.info("Grid dimensions: %d x %d at 30m resolution", width, height)
+                logger.debug("Using locally-optimized Albers Equal Area projection")
+                logger.debug("Grid dimensions: %d x %d at 30m resolution", width, height)
 
                 qa_data = np.zeros((height, width), dtype=np.uint16)
                 qa_profile = {
@@ -147,7 +147,7 @@ def process_landsat_date(
 
                 # Process each file with windowed read and reproject
                 for i, qa_file in enumerate(qa_files):
-                    logger.info(
+                    logger.debug(
                         "Processing QA tile %d/%d: %s",
                         i + 1,
                         len(qa_files),
@@ -282,7 +282,7 @@ def process_landsat_date(
                             )
             else:
                 # Single file case - still need to reproject to processing grid for consistency
-                logger.info("Processing single QA_PIXEL tile...")
+                logger.debug("Processing single QA_PIXEL tile...")
 
                 # Use the standard processing grid
                 # Create the standard processing grid
@@ -318,7 +318,7 @@ def process_landsat_date(
                         resampling=Resampling.nearest,
                     )
 
-                    logger.info("Reprojected from %s to %s", src.crs, qa_profile["crs"])
+                    logger.debug("Reprojected from %s to %s", src.crs, qa_profile["crs"])
 
             # Debug: check data shape
             logger.debug("QA data shape: %s", qa_data.shape)
@@ -347,7 +347,7 @@ def process_landsat_date(
                 mask_total = cloud_mask.size
 
                 if mask_total > 0:
-                    logger.info("Cloud mask coverage: %.1f%% clear", mask_clear / mask_total * 100)
+                    logger.debug("Cloud mask coverage: %.1f%% clear", mask_clear / mask_total * 100)
                 else:
                     logger.warning("Cloud mask is empty!")
 
@@ -372,7 +372,7 @@ def process_landsat_date(
 
         # For multiple tiles, always use windowed mosaic approach
         if len(band_files) > 1:
-            logger.info("Creating windowed mosaic from %d tiles...", len(band_files))
+            logger.debug("Creating windowed mosaic from %d tiles...", len(band_files))
 
             # Use the same grid as QA_PIXEL if available
             if qa_profile is not None:
@@ -402,7 +402,7 @@ def process_landsat_date(
 
             # Process each file with windowed read and reproject
             for i, band_file in enumerate(band_files):
-                logger.info(
+                logger.debug(
                     "Processing %s tile %d/%d: %s",
                     band_name,
                     i + 1,
@@ -528,11 +528,11 @@ def process_landsat_date(
                         tile_data_cropped.shape,
                     )
 
-            logger.info(f"    Final mosaic has {(band_data > 0).sum()} valid pixels")
-            logger.info(f"    Final mosaic shape: {band_data.shape}")
+            logger.debug(f"    Final mosaic has {(band_data > 0).sum()} valid pixels")
+            logger.debug(f"    Final mosaic shape: {band_data.shape}")
         else:
             # Single file case - still need to reproject to processing grid for consistency
-            logger.info("Processing single %s tile...", band_name)
+            logger.debug("Processing single %s tile...", band_name)
 
             # Use the same grid as QA_PIXEL if available
             if qa_profile is not None:
@@ -586,7 +586,7 @@ def process_landsat_date(
                     dst_nodata=0,
                 )
 
-                logger.info("Reprojected from %s to %s", src_band.crs, band_profile["crs"])
+                logger.debug("Reprojected from %s to %s", src_band.crs, band_profile["crs"])
             else:
                 # No cloud masking - read directly
                 with rasterio.open(band_files[0]) as src:
@@ -609,7 +609,7 @@ def process_landsat_date(
                         dst_nodata=0,
                     )
 
-                    logger.info("Reprojected from %s to %s", src.crs, band_profile["crs"])
+                    logger.debug("Reprojected from %s to %s", src.crs, band_profile["crs"])
 
         # Data is already cropped by windowed read, no need for additional cropping
 
@@ -624,18 +624,18 @@ def process_landsat_date(
         result[band_name] = (masked_data, band_profile)
 
     # Log summary of processed data
-    logger.info("Processing summary:")
+    logger.debug("Processing summary:")
     for band_name, (data, _profile) in result.items():
         if data is not None:
             valid_pixels = ~np.isnan(data) if np.issubdtype(data.dtype, np.floating) else data != 0
             coverage = np.sum(valid_pixels) / data.size * 100 if data.size > 0 else 0
-            logger.info(
+            logger.debug(
                 f"  {band_name}: shape={data.shape}, dtype={data.dtype}, coverage={coverage:.1f}%"
             )
             if coverage > 0:
                 valid_data = data[valid_pixels]
-                logger.info(f"    Range: [{np.min(valid_data):.3f}, {np.max(valid_data):.3f}]")
+                logger.debug(f"    Range: [{np.min(valid_data):.3f}, {np.max(valid_data):.3f}]")
         else:
-            logger.info(f"  {band_name}: None")
+            logger.debug(f"  {band_name}: None")
 
     return result

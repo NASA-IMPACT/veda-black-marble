@@ -228,7 +228,7 @@ async def stream_download(
     last_error: BaseException | None = None
     for attempt in range(1, DOWNLOAD_RETRIES + 1):
         try:
-            logger.info("Downloading %s (attempt %d/%d)", remote, attempt, DOWNLOAD_RETRIES)
+            logger.debug("Downloading %s (attempt %d/%d)", remote, attempt, DOWNLOAD_RETRIES)
             async with semaphore:
                 resp = await obs.get_async(store, remote)
                 chunk_size = 5 * 1024 * 1024  # 5MB
