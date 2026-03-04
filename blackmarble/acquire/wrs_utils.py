@@ -8,9 +8,6 @@ from shapely.geometry import box
 from blackmarble.typing import BBox
 
 
-# Type alias
-
-
 def get_wrs_tiles_for_bbox_tuple(
     bbox: BBox,
 ) -> list[dict[str, int]]:
