@@ -87,81 +87,21 @@ The function:
 - Handles multiple tiles with windowed reads and mosaicking
 - Outputs masked data ready for index calculation
 
-## Key Decisions
+## Quick Tuning
 
-### Strategy Selection
-
-**Factors to Consider**:
-1. **Scene cloud cover**: High cloud cover → use conservative
-2. **Analysis requirements**: Change detection → use permissive
-3. **Region characteristics**: 
-   - Tropical (frequent clouds) → conservative
-   - Arid (few clouds) → permissive
-
-**Recommendation**: Start with moderate, adjust based on results
-
-### Dilation Size
-
-**Trade-offs**:
-- Larger dilation (5-10): Better edge removal, more data loss
-- Smaller dilation (1-2): More data retained, risk of edge artifacts
-- Default (3): Good balance for 30m Landsat pixels
-
-## Test Coverage
-
-**Unit Tests**: Located in `blackmarble/prepare/landsat_qa.py`
-- `qa_mask()`: Tests all three strategies with bit manipulation
-- `create_landsat_cloud_mask()`: Tests with dilation
-- `decode_qa_pixel()`: Validates bit field extraction
-
-**Integration**: Full pipeline tests verify end-to-end masking
-
-## Common Issues
-
-1. **Over-masking in Snowy Regions**
-   - Solution: Use conservative strategy (keeps snow pixels)
-   - Note: Moderate strategy masks snow by default
-   
-2. **Under-masking Cloud Edges**
-   - Solution: Increase dilation to 5-7 pixels
-   - Trade-off: More data loss vs better edge removal
-
-3. **Water Bodies Masked**
-   - Solution: Moderate strategy excludes definite water (code 01)
-   - For water analysis: Use custom strategy without water bit
-
-4. **Multi-tile Boundaries**
-   - Solution: Pipeline uses 120-pixel margin for seamless mosaics
-   - Prevents gaps at UTM zone boundaries
+- Use `moderate` first (default).
+- Switch to `conservative` when scenes are consistently cloudy.
+- Increase `dilate_pixels` if cloud edges leak into output.
 
 ## Configuration
 
 ```python
-# In PipelineConfig
-config.preparation.qa_cloud_strategy = "moderate"  # or "conservative", "permissive"
-config.preparation.qa_dilation_radius = 3          # pixels to dilate
-
-# Per-composite settings (optional)
-config.preparation.qa_composite_strategy = "conservative"  # Less aggressive for compositing
-config.preparation.qa_composite_dilation = 1              # Less dilation for compositing
+config.preparation.qa_cloud_strategy = "moderate"  # conservative | moderate | permissive
+config.preparation.qa_dilation_radius = 3
 ```
 
-## Performance Notes
+## Notes
 
-- Bit operations are very fast (~0.1s for 5000×5000 pixels)
-- Dilation is the slowest part (~1s for same size)
-- Strategy choice has minimal performance impact
-- Multi-tile mosaicking uses windowed reads to minimize memory
-
-## Diagnostic Outputs
-
-When `save_diagnostics=True`:
-- Cloud masks saved as: `data/diagnostics/cloud_masks/cloud_mask_YYYY-MM-DD.tif`
-- QA pixel summary printed to console
-- Shows percentage of clear pixels per date
-
-## Related Steps
-
-- Previous: [Landsat Search](./landsat-search.md) - Scene selection
-- Next: [Spectral Indices](./spectral-indices.md) - Calculate NDVI/NDWI
-- Affects: All Landsat-based analysis (indices, temporal composites)
+- QA masking runs before index calculation and temporal compositing.
+- When diagnostics are enabled, mask outputs are written under `data/diagnostics/`.
+- Related docs: [Landsat Search](./landsat-search.md), [Spectral Indices](./spectral-indices.md)

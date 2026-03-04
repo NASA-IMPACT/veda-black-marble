@@ -61,65 +61,14 @@ if viirs_reprojected is not None and reference_band is not None:
         raise RuntimeError(f"VIIRS alignment failed - only {nonzero_pct:.1f}% non-zero pixels")
 ```
 
-## Test Coverage
+## Practical Notes
 
-**Unit Tests**: `tests/prepare/test_spatial.py`
-- Multi-raster alignment scenarios
-- Different resampling methods
-- CRS transformation handling
-- Edge cases: single raster, mismatched sizes
-
-**Integration**: Pipeline tests verify end-to-end alignment
-
-## Configuration
-
-```python
-# No direct configuration - alignment parameters are hardcoded:
-# - 30m resolution (set during grid creation)
-# - Bilinear resampling for continuous data
-# - Landsat as reference grid
-```
-
-## Common Issues
-
-1. **VIIRS Coverage Warnings**
-   - Cause: VIIRS tile doesn't fully cover the bounding box
-   - Impact: Missing data at edges
-   - Solution: Pipeline continues with available data
-
-2. **Low Non-Zero Pixel Count**
-   - Cause: Misalignment or incorrect tile selection
-   - Error: "VIIRS alignment failed - only X% non-zero pixels"
-   - Solution: Check VIIRS tile selection and bounds
-
-3. **Shape Mismatches**
-   - Cause: Arrays not properly aligned to reference
-   - Solution: Ensure all data goes through alignment step
-   - Note: Pipeline validates shapes before NDUI calculation
-
-4. **Memory Usage**
-   - Large areas may require significant memory
-   - Solution: Process smaller regions or use windowed operations
-
-## Performance Notes
-
-- Alignment is relatively fast (< 1s for typical areas)
-- Bilinear resampling adds minimal overhead
-- Most time spent in reprojection calculations
-- Band-by-band processing reduces peak memory usage
-
-## Diagnostic Outputs
-
-When alignment issues occur, the pipeline logs:
-- Input and output shapes
-- Non-zero pixel percentages
-- Coverage warnings
-- Transform parameters
+- Resolution and grid are fixed by the pipeline (30m processing grid).
+- Continuous rasters use bilinear resampling.
+- Alignment warnings usually indicate sparse/partial VIIRS coverage near edges.
 
 ## Related Steps
 
-- Previous: [VIIRS Preprocessing](./viirs-preprocessing.md) - Reprojected VIIRS
-- Previous: [Temporal Compositing](./temporal-compositing.md) - Composite indices
-- Next: [NDUI Calculation](./ndui-calculation.md) - Uses aligned data
-- Uses: Reprojected VIIRS and Landsat composite data
-- Outputs: Pixel-aligned arrays for analysis
+- [VIIRS Preprocessing](./viirs-preprocessing.md)
+- [Temporal Compositing](./temporal-compositing.md)
+- [NDUI Calculation](./ndui-calculation.md)

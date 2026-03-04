@@ -117,89 +117,10 @@ if config and roads_fractional is not None:
     ntl_composite = ntl_enhanced
 ```
 
-## Standalone Usage
-
-```python
-from blackmarble.analyze.urban_fields import (
-    compute_urban_fields, 
-    enhance_ntl_with_urban_field
-)
-
-# Create urban field from fractional roads
-urban_field = compute_urban_fields(
-    road_fraction=roads_fractional,
-    sigmas=[2.0, 5.0, 10.0],
-    weights=[0.2, 0.3, 0.3, 0.2]
-)
-
-# Enhance NTL
-ntl_enhanced = enhance_ntl_with_urban_field(
-    ntl=viirs_data,
-    urban_field=urban_field,
-    enhancement_mode="multiplicative",
-    multiplicative_factor=0.3
-)
-```
-
 ## Test Coverage
 
 - Unit coverage exists in `tests/analyze/`.
 - Pipeline-level behavior is validated in repository integration tests.
-
-## Key Decisions
-
-### 1. Scale Selection
-
-**Considerations**:
-- Pixel size: 30m Landsat → different sigmas than 12m data
-- Urban morphology: Dense cities need smaller scales
-- Regional patterns: Sprawl needs larger scales
-
-**Recommendations**:
-- Dense urban: [1, 3, 5] pixels
-- Suburban: [2, 5, 10] pixels  
-- Rural roads: [5, 10, 20] pixels
-
-### 2. Weight Distribution
-
-**Strategies**:
-1. **Sharp**: [0.7, 0.2, 0.1] - Emphasize actual roads
-2. **Balanced**: [0.4, 0.3, 0.2, 0.1] - Even influence
-3. **Smooth**: [0.1, 0.3, 0.4, 0.2] - Emphasize fields
-
-**Validation**: Compare with ground truth urban extent
-
-### 3. Enhancement Strength
-
-**Default**: 0.3 (up to 30% enhancement)
-
-**Tuning Guidelines**:
-- Lower values (0.1-0.2): Subtle enhancement for already bright areas
-- Default (0.3): Good balance for most regions
-- Higher values (0.4-0.5): Stronger enhancement for dim rural areas
-
-**Note**: Values above 0.5 may create artifacts
-
-## Common Issues
-
-1. **Over-enhancement in Dense Urban Areas**
-   - Cause: Enhancement factor too high
-   - Fix: Reduce multiplicative_factor (try 0.2)
-
-2. **Roads Not Visible in Output**
-   - Cause: Weights favor blurred scales too much
-   - Fix: Increase weight on original road fraction (index 0)
-
-3. **Blocky Artifacts Around Roads**
-   - Cause: Sharp transitions in urban field
-   - Fix: Adjust sigma values (try 2.5, 5.5, 10.5)
-
-## Performance Notes
-
-- Gaussian filtering is the slowest operation
-- Urban field computation is done once and reused
-- Enhancement calculation is fast (element-wise multiplication)
-- Memory usage: ~3x the input array size during processing
 
 ## Configuration
 
@@ -210,28 +131,8 @@ config.analysis.urban_field_weights = [0.2, 0.3, 0.3, 0.2]
 config.analysis.enhancement_multiplicative_factor = 0.3
 ```
 
-## Diagnostic Outputs
-
-When `config.save_diagnostics = True`:
-- `data/diagnostics/urban_field.tif`: Multi-scale urban density field
-- `data/diagnostics/ntl_enhancement.tif`: Enhancement delta (enhanced - original)
-- Logger outputs urban field statistics and enhancement coverage
-
-## Visual Impact
-
-Before enhancement:
-- Dark suburban roads
-- Isolated bright spots
-- Poor urban continuity
-
-After enhancement:
-- Visible road networks
-- Connected urban areas
-- Smooth brightness gradients
-
 ## Related Steps
 
 - Previous: [VIIRS Preprocessing](./viirs-preprocessing.md) - Provides NTL data
-- Previous: [Road Rasterization](./road-rasterization.md) - Provides fractional roads
 - Next: [NDUI Calculation](./ndui-calculation.md) - Uses enhanced NTL
 - Outputs: Enhanced NTL array for NDUI calculation
