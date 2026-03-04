@@ -120,7 +120,7 @@ def process_landsat_date(
         qa_files, _, _, _ = bands_data["QA_PIXEL"]
 
         if qa_files:
-            logger.info("Processing QA_PIXEL from %d tiles", len(qa_files))
+            logger.debug("Processing QA_PIXEL from %d tiles", len(qa_files))
 
             # For multiple tiles, always use windowed mosaic approach
             if len(qa_files) > 1:
@@ -361,14 +361,14 @@ def process_landsat_date(
                     mask_path = f"{diag_dir}/cloud_mask_{date_str}.tif"
                     with rasterio.open(mask_path, "w", **qa_profile) as dst:
                         dst.write(cloud_mask.astype(np.uint8), 1)
-                    logger.info("Saved cloud mask to: %s", mask_path)
+                    logger.debug("Saved cloud mask to: %s", mask_path)
 
     # Process each spectral band
     for band_name, (band_files, _, _, _) in bands_data.items():
         if band_name == "QA_PIXEL" or not band_files:
             continue
 
-        logger.info("Processing %s from %d tiles", band_name, len(band_files))
+        logger.debug("Processing %s from %d tiles", band_name, len(band_files))
 
         # For multiple tiles, always use windowed mosaic approach
         if len(band_files) > 1:

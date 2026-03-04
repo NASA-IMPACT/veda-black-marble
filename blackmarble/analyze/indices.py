@@ -292,7 +292,7 @@ def calculate_ndui(
         raise ValueError(f"NDWI shape {ndwi.shape} must match NTL shape {ntl.shape}")
 
     # Step 1: Scale NTL (no longer needed in BM v2)
-    logger.info(f"NDUI DEBUG: ntl_ceiling = {ntl_ceiling}, ntl_floor = {ntl_floor}")
+    logger.debug(f"NDUI DEBUG: ntl_ceiling = {ntl_ceiling}, ntl_floor = {ntl_floor}")
 
     # Step 2: Apply floor/ceiling and normalize by ceiling (like bm.py)
     # First clip to ceiling
@@ -303,7 +303,7 @@ def calculate_ndui(
     # DEBUG: Check clipping effect
     num_clipped = np.sum(ntl > ntl_ceiling)
     percent_clipped = num_clipped / ntl.size * 100
-    logger.info(f"NDUI DEBUG: Pixels clipped at ceiling: {num_clipped} ({percent_clipped:.1f}%)")
+    logger.debug(f"NDUI DEBUG: Pixels clipped at ceiling: {num_clipped} ({percent_clipped:.1f}%)")
 
     # Normalize by dividing by ceiling (not range)
     # This ceiling-only normalization keeps the 0-1 scale invariant when ceiling
