@@ -198,6 +198,9 @@ def process_landsat_composite(
     landsat_data: dict[datetime, list[str]],
     bbox: BBox,
     temp_dir: str | Path,
+    processing_crs: Any,
+    reference_transform: Affine,
+    reference_shape: tuple[int, int],
 ) -> tuple[ArrayLike, ArrayLike, dict[str, Any]]:
     diagnostics_dir = Path(temp_dir) / "diagnostics"
     diagnostics_dir.mkdir(parents=True, exist_ok=True)
@@ -217,6 +220,9 @@ def process_landsat_composite(
         processed_data = prepare.process_landsat_date(
             bands_data=bands_data,
             bbox=bbox,
+            processing_crs=processing_crs,
+            reference_transform=reference_transform,
+            reference_shape=reference_shape,
             apply_qa_mask=True,
             dilate_pixels=3,
             cloud_strategy="moderate",
@@ -288,6 +294,9 @@ def process_landsat(
         landsat_data,
         bbox,
         temp_dir,
+        processing_crs,
+        reference_transform,
+        reference_shape,
     )
 
     ndvi, _, _ = prepare.reproject_image(

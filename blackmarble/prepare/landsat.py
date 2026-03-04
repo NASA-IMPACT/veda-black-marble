@@ -16,7 +16,6 @@ from rasterio.warp import Resampling, reproject, transform_bounds
 
 from blackmarble.typing import ArrayLike, BBox
 
-from ..crs import create_processing_grid
 from ..logging_utils import get_logger
 from .landsat_qa import create_landsat_cloud_mask, print_qa_pixel_summary
 from .window_utils import calculate_window_offsets, round_window_offsets_correctly
@@ -76,7 +75,10 @@ def _load_and_mask_tile(
 
 def process_landsat_date(
     bands_data: dict[str, tuple[list[str], list[str], list[str], list[str]]],
-    bbox: BBox | None = None,
+    bbox: BBox,
+    processing_crs: Any,
+    reference_transform: Any,
+    reference_shape: tuple[int, int],
     apply_qa_mask: bool = True,
     dilate_pixels: int = 3,
     cloud_strategy: Literal["conservative", "moderate", "permissive"] = "moderate",
@@ -93,7 +95,10 @@ def process_landsat_date(
     Args:
         bands_data: Dictionary from download_all_bands_for_date containing
                    band data for a single date
-        bbox: Optional bounding box for cropping (min_lon, min_lat, max_lon, max_lat)
+        bbox: Bounding box for cropping (min_lon, min_lat, max_lon, max_lat)
+        processing_crs: Precomputed processing CRS to reuse
+        reference_transform: Precomputed processing transform to reuse
+        reference_shape: Precomputed processing shape (height, width) to reuse
         apply_qa_mask: Whether to apply QA-based cloud masking
         dilate_pixels: Number of pixels to dilate cloud mask
         cloud_strategy: Cloud masking strategy ("conservative", "moderate", or "permissive")
@@ -106,10 +111,20 @@ def process_landsat_date(
 
     Example:
         >>> bands_data = download_all_bands_for_date(2023, 9, 15, bbox)
-        >>> processed = process_landsat_date(bands_data, bbox)
+        >>> processed = process_landsat_date(
+        ...     bands_data,
+        ...     bbox,
+        ...     processing_crs,
+        ...     reference_transform,
+        ...     reference_shape,
+        ... )
         >>> b2_masked = processed['B2'][0]  # Masked Band 2 data
     """
     result = {}
+
+    output_crs = processing_crs
+    transform = reference_transform
+    height, width = reference_shape
 
     # First, process QA_PIXEL if available and masking is requested
     cloud_mask = None
@@ -126,9 +141,7 @@ def process_landsat_date(
             if len(qa_files) > 1:
                 logger.debug("Creating windowed mosaic from %d QA tiles...", len(qa_files))
 
-                # Use the standard processing grid
-                # Create the standard processing grid
-                output_crs, transform, (height, width) = create_processing_grid(bbox)
+                # Use precomputed processing grid
 
                 logger.debug("Using locally-optimized Albers Equal Area projection")
                 logger.debug("Grid dimensions: %d x %d at 30m resolution", width, height)
@@ -284,9 +297,7 @@ def process_landsat_date(
                 # Single file case - still need to reproject to processing grid for consistency
                 logger.debug("Processing single QA_PIXEL tile...")
 
-                # Use the standard processing grid
-                # Create the standard processing grid
-                output_crs, transform, (height, width) = create_processing_grid(bbox)
+                # Use precomputed processing grid
 
                 qa_profile = {
                     "driver": "GTiff",
@@ -384,8 +395,6 @@ def process_landsat_date(
                 height = band_profile["height"]
             else:
                 # Define common output grid (same logic as QA)
-                # Create the standard processing grid
-                output_crs, transform, (height, width) = create_processing_grid(bbox)
 
                 band_profile = {
                     "driver": "GTiff",
@@ -544,8 +553,6 @@ def process_landsat_date(
                 height = band_profile["height"]
             else:
                 # Define common output grid
-                # Create the standard processing grid
-                output_crs, transform, (height, width) = create_processing_grid(bbox)
 
                 band_profile = {
                     "driver": "GTiff",
