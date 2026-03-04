@@ -47,7 +47,11 @@ def download_viirs(
     dt: datetime, bbox: tuple[float, float, float, float], output_dir: str | Path
 ) -> dict[str, list[Path]]:
     """Search and download VIIRS VNP46A2 files for a given date and bounding box."""
-    # earthaccess.login()
+
+    logger.info("Logging in to Earthdata...")
+    earthaccess.login()
+
+    logger.info("Searching for VIIRS data...")
     results = earthaccess.search_data(
         short_name=BM_SHORT_NAME,
         version=BM_VERSION,
@@ -55,6 +59,7 @@ def download_viirs(
         bounding_box=bbox,
     )
 
+    logger.info("Downloading VIIRS data...")
     filelist = earthaccess.download(results, local_path=output_dir, show_progress=False)
 
     tiff_filelist = [convert_to_tiff(f, f.with_suffix(".tif")) for f in filelist]

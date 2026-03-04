@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-import earthaccess
 import typer
 
 from .config import PipelineConfig
@@ -154,7 +153,6 @@ def run(
             err=True,
         )
         raise typer.Exit(code=1)
-    earthaccess.login()
 
     # Ensure output directory exists (only for local paths)
     if not output_path.startswith("s3://"):

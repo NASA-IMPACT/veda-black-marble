@@ -9,28 +9,36 @@ description = "Black Marble NDUI processing"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "boto3<1.38",
+    "boto3>1.38",
     "earthaccess>=0.16.0",
     "geopandas>=1.1.1",
     "matplotlib>=3.10.3",
-    "numpy<2",
+    "numpy>=2",
     "obstore>=0.9.1",
-    "osmnx>=2.0.2,<3.0",
+    "osmnx>=2.0.2",
     "pystac-client>=0.9.0",
-    "rasterio>=1.4.3,<2.0",
+    "rasterio>=1.4.3",
     "scipy>=1.15.3",
-    "shapely>=2.1.0,<3.0",
+    "shapely>=2.1.0",
     "tqdm>=4.67.1",
-    "typer>=0.15.3,<1.0",
+    "typer>=0.15.3",
 ]
 
 [project.scripts]
 blackmarble = "blackmarble.cli:app"
 
+[tool.hatch.build]
+artifacts = [
+  "blackmarble/data/WRS2_descending/*",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["blackmarble"]
+only-packages = false
+
+[tool.hatch.build.targets.sdist]
 include = [
-  "blackmarble/data/WRS2_descending/*",
+  "blackmarble/**",
 ]
 
 # ───────────────────────────────────────────────────────────────
