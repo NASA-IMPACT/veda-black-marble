@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import rasterio
@@ -76,6 +76,7 @@ def download_data(
     logger.info("Starting data download for date %s and bbox %s", date.date(), bbox)
     data_path = Path(data_dir)
     # Download all data
+
     # Download VIIRS data
     logger.info("Downloading VIIRS data")
     viirs_data_dir = data_path / "viirs"
@@ -83,12 +84,14 @@ def download_data(
     viirs_data = download_viirs(date, bbox, viirs_data_dir)
     viirs_file_counts = {key: len(value) for key, value in viirs_data.items()}
     logger.info("VIIRS download complete: %s", viirs_file_counts)
+
     # Download Landsat data
     logger.info("Downloading Landsat data")
     landsat_data_dir = data_path / "landsat"
     landsat_data_dir.mkdir(parents=True, exist_ok=True)
     landsat_data = download_landsat(date, bbox, str(landsat_data_dir))
     logger.info("Landsat download complete for %d composite date(s)", len(landsat_data))
+
     # Download OSM data
     logger.info("Downloading OSM road network data")
     road_types = config.acquisition.road_types if config and config.acquisition.road_types else None
@@ -402,6 +405,215 @@ def generate_grid(
     return processing_crs, reference_transform, reference_shape
 
 
+def _collect_landsat_band_files(
+    landsat_data: dict[datetime, list[str]],
+) -> dict[str, list[str]]:
+    all_landsat_files: dict[str, list[str]] = {"B3": [], "B4": [], "B5": []}
+    for date_files in landsat_data.values():
+        grouped = _group_landsat_files_by_band(date_files)
+        for band in ("B3", "B4", "B5"):
+            if band in grouped:
+                band_paths, _, _, _ = grouped[band]
+                all_landsat_files[band].extend(band_paths)
+    return all_landsat_files
+
+
+def export_outputs(
+    output_path: str,
+    bbox: BBox,
+    date: datetime,
+    processing_crs: Any,
+    reference_transform: Affine,
+    ndui: ArrayLike,
+    ntl_colored: ArrayLike,
+    ntl_composite: ArrayLike,
+    ndvi: ArrayLike,
+    ndwi: ArrayLike,
+    landsat_data: dict[datetime, list[str]],
+    viirs_files: list[Path],
+    config: PipelineConfig | None,
+) -> dict[str, Any]:
+    validation_results: dict[str, Any] = {"valid": True, "errors": []}
+    if config is None or config.export.validate_before_export:
+        validation_results = export.validate_for_cog(
+            data=ntl_colored,
+            transform=reference_transform,
+            crs=processing_crs,
+            check_tiling=True,
+            check_compression=True,
+            check_overviews=True,
+        )
+        if not validation_results["valid"]:
+            logger.warning("Output validation failed: %s", validation_results["errors"])
+
+    metadata: dict[str, Any] = {}
+    if config is None or config.export.generate_metadata:
+        all_landsat_files = _collect_landsat_band_files(landsat_data)
+        road_types_for_metadata: list[str] = (
+            config.acquisition.road_types
+            if config and config.acquisition.road_types
+            else ["motorway", "trunk", "primary", "secondary"]
+        )
+        metadata = export.create_metadata(
+            data_sources={
+                "landsat": {
+                    "files": all_landsat_files["B5"]
+                    + all_landsat_files["B4"]
+                    + all_landsat_files["B3"],
+                    "date_range": f"{date.strftime('%Y-%m-%d')}",
+                    "sensor": "Landsat 8/9",
+                    "processing_level": "L2SP",
+                },
+                "viirs": {
+                    "files": [str(path) for path in viirs_files],
+                    "date_range": f"{date.strftime('%Y-%m-%d')}",
+                    "sensor": "VIIRS",
+                    "product": "VNP46A2",
+                },
+                "osm": {
+                    "date_accessed": datetime.now().strftime("%Y-%m-%d"),
+                    "road_types": road_types_for_metadata,
+                },
+            },
+            processing_steps=[
+                "cloud_masking",
+                "spatial_reprojection",
+                "index_calculation",
+                "urban_enhancement",
+                "road_enhancement",
+                "contrast_enhancement",
+                "colormap_application",
+            ],
+            indices_calculated=["ndvi", "ndwi", "ndui"],
+            date_processed=datetime.now(),
+            bbox=bbox,
+            crs=str(processing_crs),
+            resolution=30.0,
+        )
+
+    compress_setting = config.export.compress if config else "deflate"
+    valid_compressions: set[str] = {"deflate", "lzw", "jpeg", "webp", "zstd"}
+    if compress_setting not in valid_compressions:
+        compress_setting = "deflate"
+
+    exported_files: list[str] = []
+
+    export.create_cog(
+        data=ndui.astype(np.float32),
+        output_path=output_path,
+        transform=reference_transform,
+        crs=processing_crs,
+        metadata=metadata,
+        compress=compress_setting,  # type: ignore[arg-type]
+        tiled=config.export.tiled if config else True,
+        overviews=config.export.overview_levels if config else [2, 4, 8, 16],
+        nodata=np.nan,
+    )
+    exported_files.append(output_path)
+
+    colored_output_path = output_path.replace(".tif", "-colored.tif")
+    export.create_cog(
+        data=ntl_colored,
+        output_path=colored_output_path,
+        transform=reference_transform,
+        crs=processing_crs,
+        metadata=metadata,
+        compress=compress_setting,  # type: ignore[arg-type]
+        tiled=config.export.tiled if config else True,
+        overviews=config.export.overview_levels if config else [2, 4, 8, 16],
+    )
+    exported_files.append(colored_output_path)
+
+    urban_mask = ndui > 0.3
+    if config and config.export.generate_urban_mask:
+        single_band_compress = config.export.compress
+        valid_single_compressions: set[str] = {"deflate", "lzw"}
+        if single_band_compress not in valid_single_compressions:
+            single_band_compress = "deflate"
+
+        urban_mask_path = output_path.replace(".tif", "_urban_mask.tif")
+        export.create_cog(
+            data=urban_mask.astype(np.uint8),
+            output_path=urban_mask_path,
+            transform=reference_transform,
+            crs=processing_crs,
+            metadata={"band_name": "urban_mask"},
+            compress=single_band_compress,  # type: ignore[arg-type]
+        )
+        exported_files.append(urban_mask_path)
+
+    if config and config.export.generate_indices_file:
+        indices_dict = {"ndvi": ndvi, "ndwi": ndwi, "ndui": ndui}
+        multi_band_compress = config.export.compress
+        valid_multi_compressions: set[str] = {"deflate", "lzw"}
+        if multi_band_compress not in valid_multi_compressions:
+            multi_band_compress = "deflate"
+
+        band_names = list(indices_dict.keys())
+        bands_list = list(indices_dict.values())
+        indices_data = np.stack(bands_list, axis=0)
+
+        indices_metadata: dict[str, str] = {}
+        for i, name in enumerate(band_names):
+            indices_metadata[f"band_{i + 1}_name"] = name
+
+        indices_path = output_path.replace(".tif", "_indices.tif")
+        export.create_cog(
+            data=indices_data,
+            output_path=indices_path,
+            transform=reference_transform,
+            crs=processing_crs,
+            metadata=indices_metadata,
+            compress=multi_band_compress,  # type: ignore[arg-type]
+            nodata=np.nan,
+        )
+        exported_files.append(indices_path)
+
+    if config and getattr(config.export, "generate_wgs84", False):
+        logger.info("Creating EPSG:4326 version")
+        wgs84_data, wgs84_transform, _ = prepare.reproject_image(
+            data=ntl_colored,
+            src_transform=reference_transform,
+            src_crs=processing_crs,
+            dst_crs="EPSG:4326",
+            resampling="bilinear",
+        )
+
+        wgs84_path = output_path.replace(".tif", "_wgs84.tif")
+        wgs84_compress = (
+            config.export.compress if config.export.compress in {"deflate", "lzw"} else "deflate"
+        )
+        export.create_cog(
+            data=wgs84_data,
+            output_path=wgs84_path,
+            transform=wgs84_transform,
+            crs="EPSG:4326",
+            metadata=metadata,
+            compress=wgs84_compress,  # type: ignore[arg-type]
+            tiled=True,
+            overviews=[2, 4, 8, 16],
+        )
+        exported_files.append(wgs84_path)
+
+    statistics: dict[str, float | None] = {
+        "urban_area_km2": None,
+        "mean_radiance": None,
+        "road_length_km": None,
+    }
+
+    pixel_area_m2 = abs(reference_transform.a * reference_transform.e)
+    urban_pixels = np.sum(urban_mask)
+    statistics["urban_area_km2"] = float((urban_pixels * pixel_area_m2) / 1e6)
+    statistics["mean_radiance"] = float(np.nanmean(ntl_composite))
+
+    return {
+        "metadata": metadata,
+        "validation": validation_results,
+        "statistics": statistics,
+        "exported_files": exported_files,
+    }
+
+
 def pipeline(
     bbox: BBox,
     date: datetime,
@@ -466,10 +678,11 @@ def pipeline(
         logger.exception("Landsat processing failed")
         raise
 
+    buffer_meters: float | dict[str, float]
     if config and config.acquisition.osm_buffer_meters is not None:
         buffer_meters = config.acquisition.osm_buffer_meters
     else:
-        buffer_meters = DEFAULT_BUFFER_BY_TYPE
+        buffer_meters = cast(dict[str, float], DEFAULT_BUFFER_BY_TYPE.copy())
 
     if isinstance(buffer_meters, dict):
         buffer_meters = {key: float(value) for key, value in buffer_meters.items()}
@@ -520,18 +733,20 @@ def pipeline(
 
     logger.info("Exporting output COGs")
     try:
-        export.create_cog_local(
-            data=ndui.astype(np.float32),
+        export_results = export_outputs(
             output_path=output_path,
-            transform=reference_transform,
-            crs=processing_crs,
-        )
-
-        export.create_cog_local(
-            data=ntl_colored,
-            output_path=output_path.replace(".tif", "-colored.tif"),
-            transform=reference_transform,
-            crs=processing_crs,
+            bbox=bbox,
+            date=date,
+            processing_crs=processing_crs,
+            reference_transform=reference_transform,
+            ndui=ndui,
+            ntl_colored=ntl_colored,
+            ntl_composite=viirs_ntl,
+            ndvi=ndvi,
+            ndwi=ndwi,
+            landsat_data=data["landsat"],
+            viirs_files=viirs_files,
+            config=config,
         )
     except Exception:
         logger.exception("COG export failed")
@@ -540,10 +755,9 @@ def pipeline(
     logger.info("Pipeline complete: outputs written to %s", output_path)
 
     return {
-        "ndui": ndui,
-        "ntl_enhanced": ntl_enhanced,
-        "ndvi": ndvi,
-        "ndwi": ndwi,
-        "urban_field": urban_field,
+        "metadata": export_results.get("metadata", {}),
+        "validation": export_results.get("validation", {"valid": True, "errors": []}),
+        "statistics": export_results.get("statistics", {}),
+        "exported_files": export_results.get("exported_files", []),
         "output_path": output_path,
     }
