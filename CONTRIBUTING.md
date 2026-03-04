@@ -42,7 +42,7 @@ uv run pytest tests/test_file.py::test_function
 Ruff is used for code quality and formatting:
 
 ```bash
-uv run check --fix && uv run ruff format
+uv run ruff check --fix && uv run ruff format
 ```
 
 ### Pre-commit

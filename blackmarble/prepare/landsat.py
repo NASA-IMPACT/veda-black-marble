@@ -4,15 +4,17 @@ This module provides functions for processing Landsat data in the pipeline,
 including date-by-date processing with QA masking applied before temporal compositing.
 """
 
+import logging
 import os
 from typing import Any, Literal
 
 import numpy as np
-import numpy.typing as npt
 import rasterio
 import rasterio.windows
 from pyproj import Transformer
 from rasterio.warp import Resampling, reproject, transform_bounds
+
+from blackmarble.typing import ArrayLike, BBox
 
 from ..crs import create_processing_grid
 from ..logging_utils import get_logger
@@ -22,9 +24,6 @@ from .window_utils import calculate_window_offsets, round_window_offsets_correct
 
 logger = get_logger(__name__)
 
-# Type aliases
-ArrayLike = npt.NDArray[Any]
-BBox = tuple[float, float, float, float]
 
 MARGIN_PIXELS = 120  # ~3.6km at 30m resolution
 
@@ -327,8 +326,9 @@ def process_landsat_date(
 
             # Data is already cropped by windowed read, no need for additional cropping
 
-            # Print QA pixel summary for debugging
-            print_qa_pixel_summary(qa_data)
+            # Print QA pixel summary only in diagnostics/debug mode
+            if save_diagnostics or logger.isEnabledFor(logging.DEBUG):
+                print_qa_pixel_summary(qa_data)
 
             # Check if QA data is empty
             if qa_data.size == 0:

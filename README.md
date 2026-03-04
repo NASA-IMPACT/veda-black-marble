@@ -25,7 +25,7 @@ export EARTHDATA_TOKEN="your-token-here"
 
 # Process nighttime lights for San Francisco
 blackmarble \
-  --bbox 37.81,-122.55,37.69,-122.32 \
+  --bbox "-122.55,37.69,-122.32,37.81" \
   --date 2023-06-15 \
   --output-path san_francisco_lights.tif
 ```
@@ -52,8 +52,8 @@ Run `blackmarble --help` for complete options.
 ```bash
 # Paris with high quality settings and WGS84 export
 blackmarble \
-  --bbox 48.92,2.08,48.80,2.42 \
-  -dater 2023-08-01 \
+  --bbox "2.08,48.80,2.42,48.92" \
+  --date 2023-08-01 \
   --config high_quality \
   --wgs84 \
   --output-path paris_lights_hq.tif
@@ -63,7 +63,7 @@ blackmarble \
 ```bash
 # Kansas City with diagnostics for QA
 blackmarble \
-  --bbox "39.20 -94.74 38.97 -94.42" \
+  --bbox "-94.74,38.97,-94.42,39.20" \
   --date 2023-05-15 \
   --config fast \
   --save-diagnostics \
@@ -77,11 +77,11 @@ For detailed algorithm documentation (QA masking, temporal compositing, urban fi
 ## Python API
 
 ```python
-from blackmarble.pipeline import black_marble_pipeline_sync
+from blackmarble.pipeline import pipeline
 from datetime import datetime
 
 # Process a region
-result = black_marble_pipeline_sync(
+result = pipeline(
     bbox=(-122.55, 37.69, -122.32, 37.81),  # (min_lon, min_lat, max_lon, max_lat)
     date=datetime(2023, 6, 15),
     output_path="san_francisco.tif"

@@ -1,12 +1,10 @@
 """Contrast enhancement - ONLY WHAT'S USED."""
 
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
-import numpy.typing as npt
 
-
-ArrayLike = npt.NDArray[Any]
+from blackmarble.typing import ArrayLike
 
 
 def enhance_contrast(

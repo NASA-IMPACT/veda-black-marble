@@ -7,17 +7,17 @@ and averaging to get the fraction of sub-pixels covered.
 
 import logging
 import os
-from typing import Any
 
 import networkx as nx
 import numpy as np
-import numpy.typing as npt
 import osmnx as ox
 import rasterio
 import rasterio.features
 from rasterio.crs import CRS
 from rasterio.transform import Affine
 from shapely.geometry import mapping
+
+from blackmarble.typing import ArrayLike, BBox
 
 
 # Create logger for spatial debugging
@@ -29,9 +29,7 @@ if os.environ.get("BM_SPATIAL_DEBUG", "").lower() in ("1", "true", "yes"):
     log.setLevel(logging.DEBUG)
 
 # Type aliases
-ArrayLike = npt.NDArray[Any]
 Transform = Affine
-BBox = tuple[float, float, float, float]
 
 # Default buffer sizes by road type (in meters)
 DEFAULT_BUFFER_BY_TYPE = {
@@ -252,7 +250,8 @@ def buffer_and_rasterize_roads_fractional(
         log.warning("Consider using binary rasterization (osm_fractional: false) for large areas")
 
     # For extremely large areas, process in chunks
-    if memory_gb > 8.0 or len(shapes) > 1_000_000:
+    if memory_gb > 8.0 or len(shapes) > 2_000_000:
+        print("stats: ", memory_gb, len(shapes))
         log.error("Area too large for fractional rasterization")
         log.error("Please use binary rasterization instead (set osm_fractional: false)")
         return np.zeros(shape, dtype=np.float32)

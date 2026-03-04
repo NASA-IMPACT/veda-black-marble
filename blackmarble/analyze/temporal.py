@@ -5,18 +5,16 @@ This module provides the median composite function used in the pipeline.
 
 import logging
 import warnings
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
-import numpy.typing as npt
+
+from blackmarble.typing import ArrayLike
 
 from .streaming import streaming_percentile_85
 
 
 logger = logging.getLogger(__name__)
-
-# Type aliases
-ArrayLike = npt.NDArray[Any]
 
 
 def create_index_temporal_composite(

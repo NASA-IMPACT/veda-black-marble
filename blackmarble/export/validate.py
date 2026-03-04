@@ -3,10 +3,8 @@
 from typing import Any
 
 import numpy as np
-import numpy.typing as npt
 
-
-ArrayLike = npt.NDArray[Any]
+from blackmarble.typing import ArrayLike
 
 
 def validate_for_cog(

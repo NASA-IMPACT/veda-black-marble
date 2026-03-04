@@ -4,16 +4,15 @@ import os
 from typing import Any
 
 import numpy as np
-import numpy.typing as npt
 import rasterio
 from rasterio.transform import Affine
+
+from blackmarble.typing import ArrayLike
 
 from ..logging_utils import get_logger
 
 
 logger = get_logger(__name__)
-
-ArrayLike = npt.NDArray[Any]
 
 
 def save_diagnostic(

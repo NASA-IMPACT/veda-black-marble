@@ -7,21 +7,20 @@ from typing import Any, Literal
 
 import boto3
 import numpy as np
-import numpy.typing as npt
 import rasterio
 from boto3.s3.transfer import TransferConfig
 from rasterio.enums import Resampling
 from rasterio.io import MemoryFile
 from rasterio.shutil import copy
 
+from blackmarble.typing import ArrayLike
+
 
 logger = logging.getLogger(__name__)
 
 # Type aliases
-ArrayLike = npt.NDArray[Any]
 Transform = Any  # rasterio.transform.Affine
 CRS = Any  # rasterio.crs.CRS
-BBox = tuple[float, float, float, float]
 
 
 def create_cog_local(

@@ -12,7 +12,6 @@ from typing import Any, Literal
 import geopandas as gpd
 import networkx as nx
 import numpy as np
-import numpy.typing as npt
 import osmnx as ox
 import pyproj
 import rasterio
@@ -22,6 +21,8 @@ from rasterio.warp import transform_geom
 from shapely.geometry import mapping, shape
 from shapely.ops import transform
 
+from blackmarble.typing import ArrayLike, BBox
+
 from ..logging_utils import get_logger
 
 
@@ -30,8 +31,6 @@ logger = get_logger(__name__)
 # Import default buffer sizes from fractional module
 
 # Type aliases
-BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
-ArrayLike = npt.NDArray[Any]
 Transform = Any  # rasterio.transform.Affine
 
 
@@ -128,34 +127,18 @@ def fetch_road_network(
         if cache_path.exists():
             logger.info("Loading OSM data from cache: %s", cache_path.name)
             try:
-                # Load from GeoPackage
+                nodes_gdf = gpd.read_file(cache_path, layer="nodes")
                 edges_gdf = gpd.read_file(cache_path, layer="edges")
 
-                # Convert back to NetworkX graph
-                # Create empty graph
-                graph = nx.MultiDiGraph()
+                if "osmid" in nodes_gdf.columns:
+                    nodes_gdf = nodes_gdf.set_index("osmid")
+                if all(c in edges_gdf.columns for c in ("u", "v", "key")):
+                    edges_gdf = edges_gdf.set_index(["u", "v", "key"])
+                elif all(c in edges_gdf.columns for c in ("u", "v")):
+                    edges_gdf["key"] = 0
+                    edges_gdf = edges_gdf.set_index(["u", "v", "key"])
 
-                # Add edges from geodataframe
-                for _idx, row in edges_gdf.iterrows():
-                    # Extract nodes from geometry
-                    coords = list(row.geometry.coords)
-                    if len(coords) >= 2:
-                        # Get first and last coordinates
-                        u_coord = coords[0]  # (lon, lat) tuple
-                        v_coord = coords[-1]  # (lon, lat) tuple
-
-                        # Create node IDs (use coordinate tuples as IDs)
-                        u = u_coord
-                        v = v_coord
-
-                        # Add nodes with coordinates
-                        graph.add_node(u, x=u_coord[0], y=u_coord[1])
-                        graph.add_node(v, x=v_coord[0], y=v_coord[1])
-
-                        # Add edge with attributes
-                        edge_attrs = row.to_dict()
-                        edge_attrs.pop("geometry", None)  # Remove geometry from attributes
-                        graph.add_edge(u, v, **edge_attrs)
+                graph = ox.graph_from_gdfs(nodes_gdf, edges_gdf)
 
                 logger.info(
                     "Loaded %d nodes, %d edges from cache",
@@ -163,8 +146,8 @@ def fetch_road_network(
                     graph.number_of_edges(),
                 )
 
-                # Add CRS attribute to graph to avoid warnings
-                graph.graph["crs"] = "EPSG:4326"
+                # Ensure CRS attribute is present to avoid warnings
+                graph.graph.setdefault("crs", "EPSG:4326")
 
                 return graph
             except Exception as e:
@@ -178,11 +161,12 @@ def fetch_road_network(
     if use_cache and graph.number_of_edges() > 0:
         cache_path = get_osm_cache_path(bbox, network_type, custom_filter, cache_dir=cache_dir)
         try:
-            # Convert graph to GeoDataFrame
-            # Note: ox.graph_to_gdfs returns just the edges_gdf when nodes=False
-            edges_gdf = ox.graph_to_gdfs(graph, nodes=False, edges=True)
+            # Convert graph to GeoDataFrames and cache both layers.
+            # Storing nodes+edges preserves original node IDs and edge keys.
+            nodes_gdf, edges_gdf = ox.graph_to_gdfs(graph)
 
             # Save to GeoPackage - no size limitations!
+            nodes_gdf.to_file(cache_path, layer="nodes", driver="GPKG")
             edges_gdf.to_file(cache_path, layer="edges", driver="GPKG")
             logger.info("Saved OSM data to cache: %s", cache_path.name)
             logger.info("  Cached %d road segments", len(edges_gdf))

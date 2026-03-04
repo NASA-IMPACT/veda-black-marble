@@ -5,9 +5,10 @@ from pathlib import Path
 import geopandas as gpd
 from shapely.geometry import box
 
+from blackmarble.typing import BBox
+
 
 # Type alias
-BBox = tuple[float, float, float, float]
 
 
 def get_wrs_tiles_for_bbox_tuple(

@@ -17,7 +17,7 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
 ### 2. VIIRS Processing
 - Load VIIRS HDF5 and convert to GeoTIFF
 - **[Crop and Resample VIIRS](./viirs-preprocessing.md)** ⚙️
-  - Decisions: Target resolution (12m), resampling method
+  - Decisions: Target resolution (30m), resampling method
 - **[Reproject VIIRS](./viirs-preprocessing.md#reprojection)** ⚙️
   - Decisions: Target CRS selection
 
@@ -28,7 +28,7 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
 - **[Cloud Masking](./landsat-qa-masking.md)** ⚙️
   - Decisions: QA strategy (conservative/moderate/permissive), dilation
 - **[Temporal Compositing](./temporal-compositing.md)** ⚙️
-  - Decisions: Composite method (median), date range
+  - Decisions: Composite methods (NDVI 85th percentile, NDWI median)
 - Apply scaling factors (0.0000275, -0.2)
 - Reproject to target CRS
 
@@ -51,10 +51,7 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
 - **[Compute Urban Fields](./urban-field-enhancement.md)** ⚙️
   - Decisions: Multi-scale parameters, weighting
 - **[Enhance NTL](./urban-field-enhancement.md#ntl-enhancement)** ⚙️
-  - Decisions: Enhancement mode (multiplicative/additive/hybrid)
-- **Alternative: Legacy Burn-in Enhancement** ⚙️
-  - Direct road enhancement with major/minor factors
-  - Test: `tests/pipeline/test_missing_coverage.py::TestLegacyBurnInEnhancement`
+  - Decisions: Enhancement mode (current default: multiplicative)
 
 ### 8. Visualization
 - **Contrast Enhancement** ⚙️
@@ -67,12 +64,6 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
   - Decisions: Compression, tiling, overviews
 - Generate metadata
 - Optional: Export auxiliary products (urban mask, indices)
-
-### 10. Statistics Calculation (Post-processing) ⚙️
-- Calculate urban area (km²)
-- Calculate mean radiance
-- Generate summary statistics
-- Test: `tests/pipeline/test_missing_coverage.py::TestStatisticsCalculation`
 
 ## Legend
 
@@ -93,17 +84,14 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
 
 ## Running Tests
 
-To test a specific pipeline step:
+Run tests from the repository root:
 
 ```bash
-# Test VIIRS preprocessing
-uv run pytest tests/pipeline/test_pipeline_flow.py::test_03_viirs_processing -v
+# Run all tests
+uv run pytest
 
-# Test all spectral indices
-uv run pytest tests/analyze/test_indices.py -v
-
-# Run full pipeline test
-uv run pytest tests/pipeline/test_pipeline_flow.py -v
+# Run pipeline statistics tests
+uv run pytest tests/pipeline/test_statistics.py -v
 ```
 
 ## Reference Data

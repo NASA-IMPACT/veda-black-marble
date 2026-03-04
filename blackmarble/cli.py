@@ -8,10 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
+import earthaccess
 import typer
 
 from .config import PipelineConfig
-from .pipeline import black_marble_pipeline_sync
+from .pipeline import pipeline
 
 
 app = typer.Typer(help="Command-line interface for the VEDA Black Marble processing pipeline.")
@@ -61,7 +62,6 @@ def run(
             "-t",
             help="NASA Earthdata token for VIIRS downloads. "
             "If not provided, reads from EARTHDATA_TOKEN environment variable.",
-            envvar="EARTHDATA_TOKEN",
         ),
     ] = None,
     output_path: Annotated[
@@ -142,15 +142,19 @@ def run(
 
     bbox_parsed = typing.cast(tuple[float, float, float, float], bbox)
 
-    # Set as environment variable for compatibility
-    if earthdata_token:
-        os.environ["EARTHDATA_TOKEN"] = earthdata_token
+    # Resolve token from CLI option first, then explicit environment fallback
+    resolved_earthdata_token = earthdata_token or str(os.getenv("EARTHDATA_TOKEN")).strip()
+
+    # Set as environment variable for downstream compatibility
+    if resolved_earthdata_token:
+        os.environ["EARTHDATA_TOKEN"] = resolved_earthdata_token.strip()
     else:
         typer.echo(
             "Error: EARTHDATA_TOKEN env var not set or --earthdata-token not provided.",
             err=True,
         )
         raise typer.Exit(code=1)
+    earthaccess.login()
 
     # Ensure output directory exists (only for local paths)
     if not output_path.startswith("s3://"):
@@ -216,13 +220,12 @@ def run(
     try:
         typer.echo("\nRunning pipeline...")
 
-        result = black_marble_pipeline_sync(
+        result = pipeline(
             bbox=bbox_parsed,
             date=date,
             output_path=str(output_path_obj),
             data_dir=data_dir,
             config=config,
-            earthdata_token=earthdata_token,
         )
 
         typer.echo("\n✅ Pipeline completed successfully!")

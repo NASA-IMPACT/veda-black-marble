@@ -5,16 +5,13 @@ and derived products used in the Black Marble algorithm.
 """
 
 import logging
-from typing import Any
 
 import numpy as np
-import numpy.typing as npt
+
+from blackmarble.typing import ArrayLike
 
 
 logger = logging.getLogger(__name__)
-
-# Type aliases
-ArrayLike = npt.NDArray[Any]
 
 # Constants
 LANDSAT_EPSILON = 0.02  # 2% reflectance threshold for Landsat C2 SR data

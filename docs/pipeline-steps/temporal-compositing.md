@@ -45,7 +45,7 @@ if index_stacks["ndvi"]:
         index_stacks["ndvi"],
         method="percentile",
         percentile=85.0,
-        min_valid_observations=config.analysis.min_valid_observations,
+      min_valid_observations=1,
     )
 
 if index_stacks["ndwi"]:
@@ -53,26 +53,15 @@ if index_stacks["ndwi"]:
     ndwi_composite = analyze.create_index_temporal_composite(
         index_stacks["ndwi"],
         method="median",
-        min_valid_observations=config.analysis.min_valid_observations,
+      min_valid_observations=1,
     )
 ```
-
-## Test Coverage
-
-**Unit Tests**: `tests/analyze/test_temporal.py`
-- Composite generation with multiple dates
-- Handling of different array sizes
-- Edge cases: no data, single observation
-- Percentile calculations
-
-**Integration**: Pipeline tests verify end-to-end compositing
 
 ## Configuration
 
 ```python
-# In PipelineConfig
-config.analysis.min_valid_observations = 1  # Minimum observations per pixel
-# Note: Composite methods are hardcoded (85th percentile for NDVI, median for NDWI)
+# Composite methods are hardcoded (85th percentile for NDVI, median for NDWI)
+# Minimum valid observations currently set to 1 in pipeline.py
 ```
 
 ## Common Issues

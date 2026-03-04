@@ -6,14 +6,9 @@ Black Marble pipeline, with clear separation of concerns across phases.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal, Self
+from typing import Literal, Self
 
-import numpy.typing as npt
-
-
-# Type aliases
-BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
-ArrayLike = npt.NDArray[Any]
+from blackmarble.typing import BBox
 
 
 @dataclass

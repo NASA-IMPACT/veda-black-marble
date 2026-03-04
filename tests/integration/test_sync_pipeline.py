@@ -5,13 +5,11 @@ import asyncio
 import os
 from datetime import datetime
 
-import nest_asyncio
 import pytest
 import rasterio
-from rasterio.env import Env
 
 from blackmarble.config import PipelineConfig
-from blackmarble.pipeline import black_marble_pipeline_sync
+from blackmarble.pipeline import pipeline as black_marble_pipeline_sync
 
 
 @pytest.mark.integration
@@ -42,23 +40,22 @@ def test_sync_pipeline_with_wgs84_export():
     assert os.path.exists(wgs84_path), "WGS84 output file should be created"
 
     # Verify both are valid COGs
-    with Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR"):
-        # Check main output
-        with rasterio.open(output_path) as src:
-            assert src.profile.get("tiled"), "Main output should be tiled (COG)"
-            assert hasattr(src, "overviews") and src.overviews(1), (
-                "Main output should have overviews (COG)"
-            )  # type: ignore[attr-defined]
-            assert src.profile.get("compress"), "Main output should be compressed"
+    # Check main output
+    with rasterio.open(output_path) as src:
+        assert src.profile.get("tiled"), "Main output should be tiled (COG)"
+        assert hasattr(src, "overviews") and src.overviews(1), (
+            "Main output should have overviews (COG)"
+        )  # type: ignore[attr-defined]
+        assert src.profile.get("compress"), "Main output should be compressed"
 
-        # Check WGS84 output
-        with rasterio.open(wgs84_path) as src:
-            assert src.profile.get("tiled"), "WGS84 output should be tiled (COG)"
-            assert hasattr(src, "overviews") and src.overviews(1), (
-                "WGS84 output should have overviews (COG)"
-            )  # type: ignore[attr-defined]
-            assert src.profile.get("compress"), "WGS84 output should be compressed"
-            assert src.crs and src.crs.to_epsg() == 4326, "WGS84 output should be in EPSG:4326"
+    # Check WGS84 output
+    with rasterio.open(wgs84_path) as src:
+        assert src.profile.get("tiled"), "WGS84 output should be tiled (COG)"
+        assert hasattr(src, "overviews") and src.overviews(1), (
+            "WGS84 output should have overviews (COG)"
+        )  # type: ignore[attr-defined]
+        assert src.profile.get("compress"), "WGS84 output should be compressed"
+        assert src.crs and src.crs.to_epsg() == 4326, "WGS84 output should be in EPSG:4326"
 
     # Cleanup
     if os.path.exists(output_path):
@@ -71,9 +68,6 @@ def test_sync_pipeline_with_wgs84_export():
 @pytest.mark.skip(reason="Integration test - run manually with pytest -m integration")
 def test_sync_pipeline_in_notebook_context():
     """Test the sync pipeline wrapper simulating a notebook context with existing event loop."""
-
-    # Apply nest_asyncio to allow nested event loops
-    nest_asyncio.apply()  # type: ignore[no-untyped-call]
 
     # Create and set a running event loop (simulating notebook environment)
     loop = asyncio.new_event_loop()

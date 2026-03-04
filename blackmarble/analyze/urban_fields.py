@@ -4,19 +4,17 @@ This module implements anisotropic urban density fields that capture
 the spatial influence of road infrastructure at multiple scales.
 """
 
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
-import numpy.typing as npt
 from scipy.ndimage import gaussian_filter
+
+from blackmarble.typing import ArrayLike
 
 from ..logging_utils import get_logger
 
 
 logger = get_logger(__name__)
-
-# Type aliases
-ArrayLike = npt.NDArray[Any]
 
 
 def compute_urban_fields(

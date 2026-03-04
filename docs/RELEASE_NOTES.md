@@ -4,7 +4,7 @@
 
 - Fixed bug where Landsat scene paths were not covering entire area of interest
 - Use gap-filled NTL data that has already been corrected for lunar luminance rather than attempting to correct values ourselves
-- No longer gather the median reflectance value per band and then apply NDVI calculations on top of those median values - instead, the NDVI is calculated per month of data, and the 80th percentile of those calculated NDVI values are taken (median of ratios ≠ ratio of medians; 80th percentile captures vegetation potential in areas with dramatic seasonal differences where median would mislead)
+- No longer derive NDVI from composited reflectance bands; NDVI is calculated per date, then composited using the 85th percentile (median of ratios ≠ ratio of medians)
 
 ## Performance
 

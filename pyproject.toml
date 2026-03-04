@@ -9,31 +9,19 @@ description = "Black Marble NDUI processing"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "aiofiles>=24.1.0",
-    "aiohttp>=3.11.10",
-    "aioboto3>=14.3.0",
     "boto3<1.38",
-    "fiona>=1.10.1,<2.0",
-    "gdal==3.10.3",
-    "geopy>=2.4.1,<3.0",
-    "h5py>=3.14.0",
-    "mypy-boto3-s3>=1.38.0,<2.0",
+    "earthaccess>=0.16.0",
+    "geopandas>=1.1.1",
+    "matplotlib>=3.10.3",
     "numpy<2",
+    "obstore>=0.9.1",
     "osmnx>=2.0.2,<3.0",
-    "pytest>=8.3.5,<9.0",
+    "pystac-client>=0.9.0",
     "rasterio>=1.4.3,<2.0",
-    "requests>=2.32.3,<3.0",
-    "rio-cogeo>=5.4.1,<6.0",
     "scipy>=1.15.3",
     "shapely>=2.1.0,<3.0",
-    "typer>=0.15.3,<1.0",
-    "utm>=0.8.1,<1.0",
-    "matplotlib>=3.10.3",
     "tqdm>=4.67.1",
-    "pandas==2.1.1",
-    "nest-asyncio>=1.6.0",
-    "psutil>=7.0.0",
-    "geopandas>=1.1.1",
+    "typer>=0.15.3,<1.0",
 ]
 
 [project.scripts]
@@ -50,21 +38,15 @@ include = [
 # ───────────────────────────────────────────────────────────────
 [dependency-groups]
 dev = [
-  "scalene>=1.5.51",
   "pre-commit>=4.2.0",
-  "pytest>=8.3.5",
   "pyright[nodejs]>=1.1.402",
+  "pytest>=8.3.5",
   "ruff>=0.15.0",
-  "vulture==2.14",
-  "types-requests",
-  "radon>=6.0.1",
-  "interrogate>=1.5.0",
-  "hypothesis>=6.136.1",
-  "pytest-asyncio>=1.1.0",
-  "types-shapely>=2.1.0.20250917",
-  "types-geopandas>=1.1.1",
   "scipy-stubs>=1.15.3",
+  "types-geopandas>=1.1.1",
   "types-networkx>=3.6.1.20251220",
+  "types-shapely>=2.1.0.20250917",
+  "vulture==2.14",
 ]
 
 [tool.pytest.ini_options]
@@ -78,7 +60,7 @@ markers = [
 [tool.pyright]
 # Docker utility files may have dependencies not available during type checking
 exclude = ["docker/"]
-pythonVersion = "3.11"
+pythonVersion = "3.12"
 typeCheckingMode = "strict"
 stubPath = "blackmarble-stubs"
 reportMissingImports = "warning"
@@ -96,7 +78,7 @@ reportUntypedClassDecorator = "error"
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 exclude = [
     ".git",
     ".pytest_cache",

@@ -143,15 +143,8 @@ ntl_enhanced = enhance_ntl_with_urban_field(
 
 ## Test Coverage
 
-**Integration Test**: `tests/pipeline/test_pipeline_flow.py::test_10_urban_field_enhancement`
-- End-to-end urban field creation and enhancement
-- Verifies enhancement increases values appropriately
-
-**Unit Tests**: `tests/analyze/test_urban_fields.py`
-- Multi-scale field computation
-- Weight array validation
-- Edge cases: no roads, all roads
-- Dynamic range preservation
+- Unit coverage exists in `tests/analyze/`.
+- Pipeline-level behavior is validated in repository integration tests.
 
 ## Key Decisions
 

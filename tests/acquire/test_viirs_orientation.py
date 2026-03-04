@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pytest
-from osgeo import gdal
+import rasterio
 
 
 class TestVIIRSOrientation:
@@ -49,29 +49,25 @@ class TestVIIRSOrientation:
 
         # Check each file
         for tif_file in tif_files:
-            ds = gdal.Open(str(tif_file))
-            assert ds is not None, f"Failed to open {tif_file}"
+            with rasterio.open(tif_file) as ds:
+                y_pixel_size = ds.transform.e
 
-            geotransform = ds.GetGeoTransform()
-            y_pixel_size = geotransform[5]
+                # Y pixel size MUST be negative for north-up orientation
+                assert y_pixel_size < 0, (
+                    f"File {tif_file.name} has positive Y pixel size ({y_pixel_size}), "
+                    f"indicating south-up raster!"
+                )
 
-            # Y pixel size MUST be negative for north-up orientation
-            assert y_pixel_size < 0, (
-                f"File {tif_file.name} has positive Y pixel size ({y_pixel_size}), "
-                f"indicating south-up raster!"
-            )
+                # Also verify corner coordinates make sense
+                cols = ds.width
+                rows = ds.height
 
-            # Also verify corner coordinates make sense
-            cols = ds.RasterXSize
-            rows = ds.RasterYSize
+                # Calculate corners from transform
+                transform = ds.transform
+                ulx = transform.c
+                uly = transform.f
+                _lrx = ulx + transform.a * cols
+                lry = uly + transform.e * rows  # Note: transform.e is negative
 
-            # Calculate corners from geotransform
-            ulx = geotransform[0]
-            uly = geotransform[3]
-            ulx + geotransform[1] * cols
-            lry = uly + geotransform[5] * rows  # Note: geotransform[5] is negative
-
-            # Upper should have higher Y than Lower
-            assert uly > lry, f"Upper Y ({uly}) should be > Lower Y ({lry})"
-
-            ds = None
+                # Upper should have higher Y than Lower
+                assert uly > lry, f"Upper Y ({uly}) should be > Lower Y ({lry})"

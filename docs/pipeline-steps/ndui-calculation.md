@@ -170,19 +170,8 @@ config.analysis.ndui_floor = 0.02     # Min NDUI value to keep
 
 ## Test Coverage
 
-**Integration Tests**: `tests/pipeline/test_pipeline_flow.py`
-- End-to-end NDUI calculation in pipeline context
-- Alignment verification before calculation
-- Urban mask generation
-
-**Unit Tests**: `tests/analyze/test_indices.py`
-- Basic NDUI calculation verification
-- Water masking behavior (NDWI >= 0 → NDUI = 0)
-- Floor/ceiling parameter effects
-- Edge cases: all zeros, all NaN
-- DN to radiance conversion (÷10.0)
-- Range transformation verification
-- Shape mismatch error handling
+- Unit coverage exists in `tests/analyze/`.
+- Pipeline-level behavior is validated in repository integration tests.
 
 ## Performance Notes
 
