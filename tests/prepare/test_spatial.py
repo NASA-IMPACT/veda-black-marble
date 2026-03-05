@@ -4,6 +4,7 @@ This module tests only the essential spatial functionality needed for bm.py pari
 """
 
 import numpy as np
+import pytest
 from rasterio.crs import CRS
 from rasterio.transform import from_bounds
 
@@ -33,6 +34,48 @@ def test_reproject_image():
     assert not np.all(np.isnan(reprojected_data))
     assert new_transform is not None
     assert new_bounds is not None
+
+
+def test_reproject_image_with_explicit_dst_transform_and_shape():
+    """Allows explicit destination transform+shape without raising."""
+    data = np.ones((10, 10), dtype=np.float32)
+    src_transform = from_bounds(0, 0, 10, 10, 10, 10)
+    src_crs = CRS.from_epsg(4326)
+    dst_crs = CRS.from_epsg(4326)
+
+    dst_shape = (8, 8)
+    dst_transform = from_bounds(0, 0, 10, 10, dst_shape[1], dst_shape[0])
+
+    reprojected_data, new_transform, new_bounds = reproject_image(
+        data,
+        src_transform,
+        src_crs,
+        dst_crs,
+        dst_shape=dst_shape,
+        dst_transform=dst_transform,
+        resampling="nearest",
+    )
+
+    assert reprojected_data.shape == dst_shape
+    assert new_transform == dst_transform
+    assert new_bounds is not None
+
+
+def test_reproject_image_rejects_dst_transform_without_dst_shape():
+    """Raises when destination transform is provided without output shape."""
+    data = np.ones((10, 10), dtype=np.float32)
+    src_transform = from_bounds(0, 0, 10, 10, 10, 10)
+    src_crs = CRS.from_epsg(4326)
+    dst_crs = CRS.from_epsg(3857)
+
+    with pytest.raises(ValueError, match="dst_shape must be provided"):
+        reproject_image(
+            data,
+            src_transform,
+            src_crs,
+            dst_crs,
+            dst_transform=src_transform,
+        )
 
 
 def test_crop_to_bounds():

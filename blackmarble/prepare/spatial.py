@@ -76,8 +76,12 @@ def reproject_image(
     source_crs = str(src_crs) if not isinstance(src_crs, str) else src_crs
     target_crs = str(dst_crs) if not isinstance(dst_crs, str) else dst_crs
 
-    # Calculate transform for target CRS if not provided
-    if dst_transform is None or dst_shape is None:
+    # Calculate transform for target CRS if not provided.
+    # If a destination transform is explicitly supplied, require an explicit shape too.
+    if dst_transform is not None and dst_shape is None:
+        raise ValueError("dst_shape must be provided when dst_transform is provided")
+
+    if dst_transform is None:
         if resolution is not None:
             dst_transform, dst_width, dst_height = calculate_default_transform(
                 source_crs, target_crs, width, height, *source_bounds, resolution=resolution
@@ -88,9 +92,6 @@ def reproject_image(
             )
         if dst_shape is None:
             dst_shape = (int(dst_height), int(dst_width))
-    else:
-        # dst_transform was provided but dst_shape was not
-        raise ValueError("dst_shape must be provided when dst_transform is provided")
 
     # Create output array
     assert dst_shape is not None  # Type checker hint
