@@ -88,7 +88,7 @@ def save_diagnostic(
 
     # Write file
     try:
-        with rasterio.open(output_path, "w", **profile) as dst:
+        with rasterio.open(output_path, mode="w", **profile) as dst:
             dst.write(data, 1)
             if description:
                 dst.set_band_description(1, description)

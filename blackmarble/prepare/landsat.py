@@ -6,7 +6,7 @@ including date-by-date processing with QA masking applied before temporal compos
 
 import logging
 import os
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 import numpy as np
 import rasterio
@@ -25,6 +25,17 @@ logger = get_logger(__name__)
 
 
 MARGIN_PIXELS = 120  # ~3.6km at 30m resolution
+
+
+class RasterProfile(TypedDict):
+    driver: str
+    dtype: str
+    width: int
+    height: int
+    count: int
+    crs: Any
+    transform: Any
+    nodata: float | int | None
 
 
 def _load_and_mask_tile(
@@ -85,7 +96,7 @@ def process_landsat_date(
     save_diagnostics: bool = False,
     date_str: str | None = None,
     diagnostics_dir: str | None = None,
-) -> dict[str, tuple[ArrayLike, dict[str, Any]]]:
+) -> dict[str, tuple[ArrayLike, Any]]:
     """Process all Landsat bands for a single date with QA masking.
 
     This function loads and processes multiple Landsat bands from the same
@@ -120,7 +131,7 @@ def process_landsat_date(
         ... )
         >>> b2_masked = processed['B2'][0]  # Masked Band 2 data
     """
-    result = {}
+    result: dict[str, tuple[ArrayLike, Any]] = {}
 
     output_crs = processing_crs
     transform = reference_transform
@@ -128,8 +139,8 @@ def process_landsat_date(
 
     # First, process QA_PIXEL if available and masking is requested
     cloud_mask = None
-    qa_profile = None
-    qa_files = []
+    qa_profile: RasterProfile | None = None
+    qa_files: list[str] = []
 
     if apply_qa_mask and "QA_PIXEL" in bands_data:
         qa_files, _, _, _ = bands_data["QA_PIXEL"]
@@ -159,19 +170,21 @@ def process_landsat_date(
                 }
 
                 # Process each file with windowed read and reproject
-                for i, qa_file in enumerate(qa_files):
+                for i, qa_tile_file in enumerate(qa_files):
                     logger.debug(
                         "Processing QA tile %d/%d: %s",
                         i + 1,
                         len(qa_files),
-                        os.path.basename(qa_file),
+                        os.path.basename(qa_tile_file),
                     )
 
                     # Read window from source file
-                    with rasterio.open(qa_file) as src:
+                    with rasterio.open(qa_tile_file) as src:
                         # Transform bbox to source CRS
                         if src.crs and src.crs.to_epsg() != 4326:
-                            transformer = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
+                            transformer = Transformer.from_crs(
+                                "EPSG:4326", str(src.crs), always_xy=True
+                            )
                             minx, miny = transformer.transform(bbox[0], bbox[1])
                             maxx, maxy = transformer.transform(bbox[2], bbox[3])
                             bbox_src = (minx, miny, maxx, maxy)
@@ -206,8 +219,13 @@ def process_landsat_date(
                         src_window_bounds = rasterio.windows.bounds(window_expanded, src.transform)
 
                         # Transform to output CRS
+                        if src.crs is None:
+                            raise ValueError(f"Missing CRS for QA source tile: {qa_tile_file}")
+
                         dst_bounds = transform_bounds(
-                            src.crs, qa_profile["crs"], *src_window_bounds
+                            src.crs,
+                            qa_profile["crs"],
+                            *src_window_bounds,
                         )
                         dst_window = rasterio.windows.from_bounds(
                             *dst_bounds, transform=qa_profile["transform"]
@@ -220,8 +238,8 @@ def process_landsat_date(
                         )
 
                         # Reproject to a temporary array matching the destination window size
-                        dst_height = dst_window_int.height
-                        dst_width = dst_window_int.width
+                        dst_height = int(dst_window_int.height)
+                        dst_width = int(dst_window_int.width)
                         tile_data = np.zeros((dst_height, dst_width), dtype=qa_data.dtype)
 
                         # Calculate transform for the expanded window
@@ -252,8 +270,8 @@ def process_landsat_date(
                         )
 
                         # Use the already-rounded window offsets
-                        dst_row_off = dst_window_int.row_off
-                        dst_col_off = dst_window_int.col_off
+                        dst_row_off = int(dst_window_int.row_off)
+                        dst_col_off = int(dst_window_int.col_off)
 
                         logger.debug("Final dst_row_off = %d", dst_row_off)
                         logger.debug("Final dst_col_off = %d", dst_col_off)
@@ -370,7 +388,7 @@ def process_landsat_date(
 
                     # Save as GeoTIFF
                     mask_path = f"{diag_dir}/cloud_mask_{date_str}.tif"
-                    with rasterio.open(mask_path, "w", **qa_profile) as dst:
+                    with rasterio.open(mask_path, mode="w", **qa_profile) as dst:
                         dst.write(cloud_mask.astype(np.uint8), 1)
                     logger.debug("Saved cloud mask to: %s", mask_path)
 
@@ -380,7 +398,6 @@ def process_landsat_date(
             continue
 
         logger.debug("Processing %s from %d tiles", band_name, len(band_files))
-
         # For multiple tiles, always use windowed mosaic approach
         if len(band_files) > 1:
             logger.debug("Creating windowed mosaic from %d tiles...", len(band_files))
@@ -388,9 +405,16 @@ def process_landsat_date(
             # Use the same grid as QA_PIXEL if available
             if qa_profile is not None:
                 # Reuse the same grid
-                band_profile = qa_profile.copy()
-                band_profile["dtype"] = "float32"
-                band_profile["nodata"] = 0
+                band_profile: RasterProfile = {
+                    "driver": qa_profile["driver"],
+                    "dtype": "float32",
+                    "width": qa_profile["width"],
+                    "height": qa_profile["height"],
+                    "count": qa_profile["count"],
+                    "crs": qa_profile["crs"],
+                    "transform": qa_profile["transform"],
+                    "nodata": 0,
+                }
                 width = band_profile["width"]
                 height = band_profile["height"]
             else:
@@ -419,15 +443,17 @@ def process_landsat_date(
                     os.path.basename(band_file),
                 )
 
-                qa_file = qa_files[i] if i < len(qa_files) else None
-                if qa_file is None:
+                matched_qa_file: str | None = qa_files[i] if i < len(qa_files) else None
+                if matched_qa_file is None:
                     logger.warning("No matching QA_PIXEL file for %s - skipping tile", band_file)
                     continue
 
                 with rasterio.open(band_file) as src:
                     # Transform bbox to source CRS
                     if src.crs and src.crs.to_epsg() != 4326:
-                        transformer = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
+                        transformer = Transformer.from_crs(
+                            "EPSG:4326", str(src.crs), always_xy=True
+                        )
                         minx, miny = transformer.transform(bbox[0], bbox[1])
                         maxx, maxy = transformer.transform(bbox[2], bbox[3])
                         bbox_src = (minx, miny, maxx, maxy)
@@ -446,8 +472,8 @@ def process_landsat_date(
                     )
 
                 # --- NEW: load + mask this tile BEFORE any reprojection ---
-                tile_data, window_transform = _load_and_mask_tile(
-                    qa_path=qa_file,
+                band_tile_data, window_transform = _load_and_mask_tile(
+                    qa_path=matched_qa_file,
                     band_path=band_file,
                     window_expanded=window_expanded,
                     dilate_pixels=dilate_pixels,
@@ -455,6 +481,9 @@ def process_landsat_date(
                 )
 
                 # Calculate the destination window in output grid (for EXPANDED window)
+                if src.crs is None:
+                    raise ValueError(f"Missing CRS for source tile: {band_file}")
+
                 dst_bounds = transform_bounds(
                     src.crs,
                     band_profile["crs"],
@@ -468,16 +497,16 @@ def process_landsat_date(
                     dst_window, band_profile["transform"]
                 )
 
-                dst_height = dst_window_int.height
-                dst_width = dst_window_int.width
+                dst_height = int(dst_window_int.height)
+                dst_width = int(dst_window_int.width)
                 tile_data_reprojected = np.zeros((dst_height, dst_width), dtype=band_data.dtype)
 
                 reproject(
-                    source=tile_data,
+                    source=band_tile_data,
                     destination=tile_data_reprojected,
                     src_transform=window_transform,
                     src_crs=src.crs,
-                    dst_transform=rasterio.windows.transform(dst_window, band_profile["transform"]),
+                    dst_transform=band_profile["transform"],
                     dst_crs=band_profile["crs"],
                     resampling=Resampling.nearest,
                     src_nodata=np.nan,
@@ -495,8 +524,8 @@ def process_landsat_date(
                 )
 
                 # Use the already-rounded window offsets
-                dst_row_off = dst_window_int.row_off
-                dst_col_off = dst_window_int.col_off
+                dst_row_off = int(dst_window_int.row_off)
+                dst_col_off = int(dst_window_int.col_off)
 
                 logger.debug("Final dst_row_off = %d", dst_row_off)
                 logger.debug("Final dst_col_off = %d", dst_col_off)
@@ -507,12 +536,12 @@ def process_landsat_date(
                 )
 
                 # Extract slices
-                mosaic_slice = band_data[
+                band_mosaic_slice = band_data[
                     offsets.mosaic_row_start : offsets.mosaic_row_end,
                     offsets.mosaic_col_start : offsets.mosaic_col_end,
                 ]
 
-                tile_data_cropped = tile_data_reprojected[
+                band_tile_data_cropped = tile_data_reprojected[
                     offsets.tile_row_start : offsets.tile_row_start
                     + (offsets.mosaic_row_end - offsets.mosaic_row_start),
                     offsets.tile_col_start : offsets.tile_col_start
@@ -520,21 +549,21 @@ def process_landsat_date(
                 ]
 
                 # Fill only where we don't have data
-                if tile_data_cropped.shape == mosaic_slice.shape:
+                if band_tile_data_cropped.shape == band_mosaic_slice.shape:
                     # 0 or NaN in the mosaic means "needs data"
-                    nodata_mask = (mosaic_slice == 0) | np.isnan(mosaic_slice)
+                    nodata_mask = (band_mosaic_slice == 0) | np.isnan(band_mosaic_slice)
                     # any finite (non-NaN) value from the tile is valid
-                    valid_tile_mask = ~np.isnan(tile_data_cropped)
+                    valid_tile_mask = ~np.isnan(band_tile_data_cropped)
                     fill_mask = nodata_mask & valid_tile_mask
 
                     if fill_mask.any():
-                        mosaic_slice[fill_mask] = tile_data_cropped[fill_mask]
+                        band_mosaic_slice[fill_mask] = band_tile_data_cropped[fill_mask]
                         logger.debug("Filled %d pixels", fill_mask.sum())
                 else:
                     logger.warning(
                         "Shape mismatch after cropping - mosaic: %s, tile: %s",
-                        mosaic_slice.shape,
-                        tile_data_cropped.shape,
+                        band_mosaic_slice.shape,
+                        band_tile_data_cropped.shape,
                     )
 
             logger.debug(f"    Final mosaic has {(band_data > 0).sum()} valid pixels")
@@ -546,9 +575,16 @@ def process_landsat_date(
             # Use the same grid as QA_PIXEL if available
             if qa_profile is not None:
                 # Reuse the same grid
-                band_profile = qa_profile.copy()
-                band_profile["dtype"] = "float32"
-                band_profile["nodata"] = 0
+                band_profile = {
+                    "driver": qa_profile["driver"],
+                    "dtype": "float32",
+                    "width": qa_profile["width"],
+                    "height": qa_profile["height"],
+                    "count": qa_profile["count"],
+                    "crs": qa_profile["crs"],
+                    "transform": qa_profile["transform"],
+                    "nodata": 0,
+                }
                 width = band_profile["width"]
                 height = band_profile["height"]
             else:
@@ -633,16 +669,13 @@ def process_landsat_date(
     # Log summary of processed data
     logger.debug("Processing summary:")
     for band_name, (data, _profile) in result.items():
-        if data is not None:
-            valid_pixels = ~np.isnan(data) if np.issubdtype(data.dtype, np.floating) else data != 0
-            coverage = np.sum(valid_pixels) / data.size * 100 if data.size > 0 else 0
-            logger.debug(
-                f"  {band_name}: shape={data.shape}, dtype={data.dtype}, coverage={coverage:.1f}%"
-            )
-            if coverage > 0:
-                valid_data = data[valid_pixels]
-                logger.debug(f"    Range: [{np.min(valid_data):.3f}, {np.max(valid_data):.3f}]")
-        else:
-            logger.debug(f"  {band_name}: None")
+        valid_pixels = ~np.isnan(data) if np.issubdtype(data.dtype, np.floating) else data != 0
+        coverage = np.sum(valid_pixels) / data.size * 100 if data.size > 0 else 0
+        logger.debug(
+            f"  {band_name}: shape={data.shape}, dtype={data.dtype}, coverage={coverage:.1f}%"
+        )
+        if coverage > 0:
+            valid_data = data[valid_pixels]
+            logger.debug(f"    Range: [{np.min(valid_data):.3f}, {np.max(valid_data):.3f}]")
 
     return result

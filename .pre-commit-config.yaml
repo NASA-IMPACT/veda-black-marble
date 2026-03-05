@@ -18,9 +18,9 @@ repos:
         types_or: [python, pyi]
         require_serial: true
 
-      - id: pyright
-        name: pyright
-        entry: uv run pyright
+      - id: basedpyright
+        name: basedpyright
+        entry: uv run basedpyright
         language: system
         pass_filenames: true      # only check changed files
         types: [python]

@@ -715,7 +715,7 @@ def pipeline(
 
     logger.info("Calculating NDUI")
     try:
-        ndui, ntl_enhanced = calculate_ndui(
+        ndui, _ = calculate_ndui(
             viirs_ntl,
             ndvi,
             ndwi,

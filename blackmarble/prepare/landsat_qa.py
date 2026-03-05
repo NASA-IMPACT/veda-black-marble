@@ -69,7 +69,7 @@ def create_landsat_cloud_mask(
 
     # Apply dilation if requested
     if dilate_pixels > 0:
-        structure = np.ones((2 * dilate_pixels + 1, 2 * dilate_pixels + 1))
+        structure = np.ones((2 * dilate_pixels + 1, 2 * dilate_pixels + 1), dtype=np.int32)
         # Invert for dilation (dilate the bad pixels), then invert back
         mask = ~binary_dilation(~mask, structure=structure)
 
@@ -160,12 +160,12 @@ def composite_masked(
     # Handle different input shapes
     if image_stack.ndim == 3:
         # Single band time series: (time, height, width)
-        n_times, height, width = image_stack.shape
+        n_times, _, _ = image_stack.shape
         n_bands = 1
         image_stack = image_stack[:, np.newaxis, :, :]  # Add band dimension
     else:
         # Multi-band: (time, bands, height, width)
-        n_times, n_bands, height, width = image_stack.shape
+        n_times, n_bands, _, _ = image_stack.shape
 
     # Create masked copy
     masked_stack = image_stack.copy().astype(np.float32)

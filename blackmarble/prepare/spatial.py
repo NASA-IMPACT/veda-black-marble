@@ -7,7 +7,6 @@ of raster data to prepare it for analysis.
 from typing import Any, Literal
 
 import numpy as np
-import rasterio  # noqa: F401
 from rasterio import MemoryFile
 from rasterio.transform import Affine
 from rasterio.warp import Resampling, calculate_default_transform, reproject
@@ -88,12 +87,9 @@ def reproject_image(
                 source_crs, target_crs, width, height, *source_bounds
             )
         if dst_shape is None:
-            if dst_height is not None and dst_width is not None:
-                dst_shape = (int(dst_height), int(dst_width))
-            else:
-                raise ValueError("Could not calculate destination shape")
-    # Ensure dst_shape is set if it was None but dst_transform was provided
-    elif dst_shape is None:
+            dst_shape = (int(dst_height), int(dst_width))
+    else:
+        # dst_transform was provided but dst_shape was not
         raise ValueError("dst_shape must be provided when dst_transform is provided")
 
     # Create output array
@@ -225,7 +221,7 @@ def resample_image(
         "nodata": nodata,
     }
 
-    with MemoryFile() as memfile, memfile.open(**profile) as src:
+    with MemoryFile() as memfile, memfile.open(**profile, mode="w") as src:
         # Write all bands
         for i in range(bands):
             src.write(data_3d[i], i + 1)
@@ -386,10 +382,10 @@ def align_rasters(
             # Handle 2D or 3D data
             if raster.ndim == 2:
                 bands = 1
-                height, width = raster.shape
+                _, _ = raster.shape
                 raster_3d = raster[np.newaxis, ...]
             else:
-                bands, height, width = raster.shape
+                bands, _, _ = raster.shape
                 raster_3d = raster
 
             # Create aligned array

@@ -11,7 +11,6 @@ from typing import Any, Literal
 
 import geopandas as gpd
 import networkx as nx
-import numpy as np
 import osmnx as ox
 import pyproj
 import rasterio
@@ -40,7 +39,7 @@ def download_osm_roads(
     east: float,
     west: float,
     road_filter: str | None = None,
-) -> nx.MultiDiGraph:
+) -> "nx.MultiDiGraph[Any]":
     """Download OSM road network for a bounding box."""
     logger.info("Downloading roads for bbox: N=%s, S=%s, E=%s, W=%s", north, south, east, west)
     if road_filter:
@@ -219,12 +218,8 @@ def rasterize_road_shapes_with_crs(
     should_transform = src_crs != dst_crs
     rasterize_shapes = []
     for shape_dict in shapes:
-        if isinstance(shape_dict, dict) and "geometry" in shape_dict:
-            geom = shape_dict["geometry"]
-            value = shape_dict.get("value", 1)
-        else:
-            geom = shape_dict
-            value = 1
+        geom = shape_dict["geometry"]
+        value = shape_dict.get("value", 1)
 
         if should_transform:
             geom = transform_geom(src_crs, dst_crs, geom)
@@ -238,5 +233,5 @@ def rasterize_road_shapes_with_crs(
         transform=reference_transform,
         fill=0,
         all_touched=all_touched,
-        dtype=np.uint8,
+        dtype="uint8",
     )

@@ -37,7 +37,7 @@ def convert_to_tiff(
     dst_profile.update(
         driver="GTiff", predictor=3, compress="deflate", blockxsize=256, blockysize=256
     )
-    with rasterio.open(output_path, "w", **dst_profile) as dst:
+    with rasterio.open(output_path, mode="w", **dst_profile) as dst:
         dst.write(data, 1)
 
     return Path(output_path)

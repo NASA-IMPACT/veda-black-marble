@@ -7,6 +7,7 @@ and averaging to get the fraction of sub-pixels covered.
 
 import logging
 import os
+from typing import Any
 
 import networkx as nx
 import numpy as np
@@ -59,7 +60,7 @@ DEFAULT_BUFFER_BY_TYPE = {
 
 
 def buffer_and_rasterize_roads_fractional(
-    graph: nx.MultiDiGraph,
+    graph: "nx.MultiDiGraph[Any]",
     bbox: BBox,
     transform: Transform,
     crs: str | CRS,
@@ -144,7 +145,7 @@ def buffer_and_rasterize_roads_fractional(
         default_buffer = 3.0  # Default for unknown types
 
         # Apply buffer based on highway type
-        def apply_buffer(row):
+        def apply_buffer(row: Any) -> Any:
             highway_type = row.get("highway", "unclassified")
             if isinstance(highway_type, list):
                 highway_type = highway_type[0]
@@ -268,7 +269,7 @@ def buffer_and_rasterize_roads_fractional(
             transform=transform_6m,
             fill=0,
             all_touched=False,
-            dtype=np.uint8,
+            dtype="uint8",
         )
     except MemoryError:
         log.error("Out of memory during rasterization!")

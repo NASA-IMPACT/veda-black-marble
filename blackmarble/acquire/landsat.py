@@ -176,7 +176,7 @@ def search_landsat_grouped(
     # ── Select result ─────────────────────────────────────────────────────────────
     if complete_groups:
         # Best temporally-consistent group: lowest average cloud cover
-        best_base, best_scenes, best_cloud, best_dates = min(complete_groups, key=lambda g: g[2])
+        _, best_scenes, _, _ = min(complete_groups, key=lambda g: g[2])
         result = best_per_tile(best_scenes)
     else:
         result = best_per_tile(all_items) if allow_incomplete else []

@@ -28,9 +28,9 @@ def validate_for_cog(
     Returns:
         Validation results dictionary
     """
-    errors = []
-    warnings = []
-    info = []
+    errors: list[Any] = []
+    warnings: list[Any] = []
+    info: list[Any] = []
 
     # Check data shape
     if data.ndim not in (2, 3):
