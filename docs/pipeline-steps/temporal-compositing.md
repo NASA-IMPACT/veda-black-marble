@@ -35,34 +35,15 @@ Temporal compositing combines multiple observations to create a single, represen
 - **85th Percentile for NDVI**: Captures peak vegetation conditions which better represent the vegetation's potential to dim nighttime lights
 - **Median for NDWI**: Provides typical water presence, filtering out temporary flooding or drought conditions
 
-## Pipeline Implementation
+## Pipeline Behavior
 
-```python
-# From blackmarble/pipeline.py
-if index_stacks["ndvi"]:
-    logger.info("Creating NDVI composite from %d dates", len(index_stacks['ndvi']))
-    ndvi_composite = analyze.create_index_temporal_composite(
-        index_stacks["ndvi"],
-        method="percentile",
-        percentile=85.0,
-      min_valid_observations=1,
-    )
-
-if index_stacks["ndwi"]:
-    logger.info("Creating NDWI composite from %d dates", len(index_stacks['ndwi']))
-    ndwi_composite = analyze.create_index_temporal_composite(
-        index_stacks["ndwi"],
-        method="median",
-      min_valid_observations=1,
-    )
-```
+- NDVI composites use the 85th percentile method.
+- NDWI composites use median compositing.
+- Composites are generated from per-date index stacks after QA masking.
 
 ## Configuration
 
-```python
-# Composite methods are hardcoded (85th percentile for NDVI, median for NDWI)
-# Minimum valid observations currently set to 1 in pipeline.py
-```
+Composite methods are fixed to 85th percentile for NDVI and median for NDWI. Minimum valid observations currently defaults to 1.
 
 ## Common Issues
 

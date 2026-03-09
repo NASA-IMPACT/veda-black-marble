@@ -4,7 +4,7 @@ Nighttime lights processing pipeline for NASA VEDA, combining VIIRS nighttime li
 
 ## Installation
 
-Requires Python 3.11+ and GDAL 3.6+.
+Requires Python 3.11+.
 
 ```bash
 # Clone the repository
@@ -124,7 +124,6 @@ The pipeline produces:
 ## Requirements
 
 - Python 3.11+
-- GDAL 3.6+
 - NASA Earthdata account (free) for VIIRS data
 - ~8GB RAM for typical 100x100km regions
 

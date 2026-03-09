@@ -119,9 +119,6 @@ quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
 
-# Pyright is configured in the existing [tool.pyright] section above
-# We'll use pyright instead of mypy for type checking
-
 [tool.vulture]
 min_confidence = 80
 sort_by_size = true

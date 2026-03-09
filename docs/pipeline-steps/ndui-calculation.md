@@ -40,18 +40,13 @@ The result is then clamped to [-1, 1].
 
 Water bodies are masked using NDWI:
 
-```python
-if ndwi >= 0.0:
-    ndui = -1.0  # Water pixels set to -1
-```
+- Pixels with `NDWI >= 0.0` are treated as water and mapped to the minimum NDUI state.
 
 ### 4. Range Transformation
 
 Convert from [-1, 1] to [0, 1] range using the bm.py formula:
 
-```python
-ndui = np.abs(ndui + 1.0) / 2.0
-```
+`ndui = abs(ndui + 1.0) / 2.0`
 
 This transformation:
 - Maps water pixels (-1) → 0
@@ -62,10 +57,7 @@ This transformation:
 
 Remove noise and spurious low values:
 
-```python
-if ndui < ndui_floor:
-    ndui = 0.0  # Default floor = 0.02
-```
+- Values below `ndui_floor` (default `0.02`) are set to `0.0`.
 
 ## Value Interpretation
 
@@ -77,53 +69,11 @@ After all transformations, NDUI values represent:
 - `0.6-0.8`: Urban areas
 - `0.8-1.0`: Dense urban cores/bright industrial
 
-## Implementation
+## Pipeline Behavior
 
-### Pipeline Usage
-
-The pipeline calculates NDUI after aligning all inputs to the same grid:
-
-```python
-# From blackmarble/pipeline.py
-if ntl_composite is not None and ndvi is not None:
-    # Verify shapes match before calculating NDUI
-    if ntl_composite.shape != ndvi.shape:
-        raise ValueError(
-            f"NTL and NDVI shapes don't match: "
-            f"{ntl_composite.shape} vs {ndvi.shape}"
-        )
-    
-    # Calculate NDUI with configuration parameters
-    ndui = analyze.calculate_ndui(
-        ntl=ntl_composite,      # Enhanced NTL (raw DN values)
-        ndvi=ndvi,              # NDVI composite (clamped to [0,1])
-        ndwi=ndwi,              # NDWI composite (optional water masking)
-        ntl_floor=config.analysis.ntl_floor,      # Default: 0.1
-        ntl_ceiling=config.analysis.ntl_ceiling,  # Default: 10.0
-        ndui_floor=config.analysis.ndui_floor,    # Default: 0.02
-        epsilon=1e-6
-    )
-    
-    # Create urban mask for statistics
-    urban_mask = ndui > 0.3
-```
-
-### Function Interface
-
-```python
-from blackmarble.analyze.indices import calculate_ndui
-
-# Example standalone usage
-ndui = calculate_ndui(
-    ntl=viirs_dn_values,    # Raw VIIRS DN values (NOT radiance)
-    ndvi=ndvi_composite,    # NDVI from Landsat (range [0, 1])
-    ndwi=ndwi_composite,    # Optional NDWI for water masking
-    ntl_floor=0.1,          # Min NTL radiance threshold
-    ntl_ceiling=10.0,       # Max NTL for normalization
-    ndui_floor=0.02,        # Min NDUI value to keep
-    epsilon=1e-6            # Numerical stability
-)
-```
+- NDUI is computed only after NTL and Landsat-derived indices are spatially aligned.
+- The pipeline validates shape compatibility before NDUI calculation.
+- Urban mask derivation for summary metrics uses the configured NDUI threshold.
 
 ## Key Differences from Standard NDVI-like Indices
 
@@ -134,12 +84,9 @@ ndui = calculate_ndui(
 
 ## Configuration Parameters
 
-```python
-# In PipelineConfig
-config.analysis.ntl_floor = 0.1      # Min NTL radiance (nW/cm²/sr)
-config.analysis.ntl_ceiling = 10.0    # Max NTL for normalization
-config.analysis.ndui_floor = 0.02     # Min NDUI value to keep
-```
+- `config.analysis.ntl_floor` (default `0.1`)
+- `config.analysis.ntl_ceiling` (default `10.0`)
+- `config.analysis.ndui_floor` (default `0.02`)
 
 ## Common Issues and Solutions
 

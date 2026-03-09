@@ -7,7 +7,6 @@ Thank you for your interest in contributing! This guide will help you get starte
 ### Prerequisites
 
 - Python 3.11 or higher
-- GDAL 3.6 or higher
 - Git
 
 ### Development Setup
@@ -58,11 +57,11 @@ uv run pre-commit run --all-files
 
 ### Type Checking
 
-Pyright is used for type checking:
+Basedpyright is used for type checking:
 
 ```bash
 # Check the entire codebase
-uv run pyright blackmarble/ tests/
+uv run basedpyright blackmarble/ tests/
 ```
 
 ## Code Guidelines

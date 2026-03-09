@@ -22,16 +22,8 @@ The pipeline finds the best Landsat scenes for temporal consistency by searching
 
 ## Configuration
 
-```python
-config = LandsatAcquisitionConfig(
-    window_days=7,        # Search window
-    tolerance_days=12.0,  # Grouping tolerance
-)
-
-# Customize for larger/smaller areas
-config.acquisition.landsat_acquisition.window_days = 10
-config.acquisition.landsat_acquisition.tolerance_days = 15.0
-```
+- Defaults: `window_days=7`, `tolerance_days=12.0`.
+- Larger areas or sparse coverage can use broader windows and tolerance.
 
 ## Decision Trade-offs
 

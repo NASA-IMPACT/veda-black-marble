@@ -9,11 +9,9 @@ Reference formulas for summary metrics used in tests and optional reporting.
 
 ## Formula Reference
 
-```python
-pixel_area_m2 = abs(transform.a * transform.e)
-urban_area_km2 = (np.sum(urban_mask) * pixel_area_m2) / 1e6
-mean_value = float(np.nanmean(ntl_data))
-```
+- `pixel_area_m2 = abs(transform.a * transform.e)`
+- `urban_area_km2 = (urban_pixels * pixel_area_m2) / 1e6`
+- `mean_value = nanmean(ntl_data)`
 
 ## Current Behavior
 

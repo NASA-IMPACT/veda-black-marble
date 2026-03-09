@@ -34,7 +34,7 @@ The QA_PIXEL band uses 16-bit integers where each bit represents a quality flag:
 We provide three pre-configured strategies:
 
 #### 1. Conservative Strategy
-- **Implementation**: Only accepts known clear values (21824, 21888) OR pixels with CLEAR_BIT set
+- **Behavior**: Accepts known clear values (21824, 21888) or pixels with CLEAR bit set
   - 21824 = 0b0101010101000000 (clear land, high confidence clear)
   - 21888 = 0b0101010110000000 (clear water, high confidence clear)
 - **Keeps**: Maximum data retention, accepts lower quality pixels
@@ -42,7 +42,7 @@ We provide three pre-configured strategies:
 
 #### 2. Moderate Strategy (Default)
 - **Masks**: Fill, dilated cloud, cirrus, cloud, shadow, snow, water
-- **Implementation**: Rejects pixels if ANY problematic bits are set
+- **Behavior**: Rejects pixels if any problematic bits are set
 - **Use Case**: Balance between quality and coverage
 
 #### 3. Permissive Strategy  
@@ -68,19 +68,6 @@ The pipeline applies QA masking during the `process_landsat_date()` function:
 3. **Per-date Masking**: Applies masks before temporal compositing
 4. **Diagnostic Output**: Optionally saves cloud masks as GeoTIFFs
 
-```python
-# In process_landsat_date() - actual pipeline code
-processed_data = prepare.process_landsat_date(
-    bands_data=bands_data,
-    bbox=bbox,
-    apply_qa_mask=True,
-    dilate_pixels=3,
-    cloud_strategy="moderate",
-    save_diagnostics=True,
-    date_str=target_date.strftime('%Y-%m-%d'),
-)
-```
-
 The function:
 - Processes QA_PIXEL first to create cloud mask
 - Applies mask to all spectral bands (B3, B4, B5)
@@ -95,10 +82,8 @@ The function:
 
 ## Configuration
 
-```python
-config.preparation.qa_cloud_strategy = "moderate"  # conservative | moderate | permissive
-config.preparation.qa_dilation_radius = 3
-```
+- `config.preparation.qa_cloud_strategy` (default `moderate`; options: `conservative`, `moderate`, `permissive`)
+- `config.preparation.qa_dilation_radius` (default `3`)
 
 ## Notes
 

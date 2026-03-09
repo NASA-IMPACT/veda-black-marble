@@ -50,46 +50,16 @@ NDWI = (Green - NIR) / (Green + NIR)
 - `-0.5 to -0.2`: Dry vegetation
 - `-1.0 to -0.5`: Dry soil, built-up areas
 
-## Pipeline Implementation
+## Pipeline Behavior
 
 ### Index-First Calculation
 
-The pipeline calculates indices per-date, immediately after QA masking:
+The pipeline computes indices per date immediately after QA masking:
 
-```python
-# For each Landsat date
-for target_date in landsat_dates:
-    # Process bands with QA masking
-    processed_data = prepare.process_landsat_date(
-        bands_data=bands_data,
-        apply_qa_mask=True,
-        cloud_strategy="moderate"
-    )
-    
-    # Calculate indices immediately
-    if all bands present:
-        # Calculate NDVI
-        ndvi_date = analyze.calculate_ndvi(
-            nir=b5_data, 
-            red=b4_data, 
-            mask_low_denom=True  # Return NaN for low denominators
-        )
-        
-        # Clamp negative NDVI to 0 (water/bare soil)
-        # Note: Only NDVI is clamped, not NDWI
-        ndvi_date = np.maximum(ndvi_date, 0.0)
-        
-        # Calculate NDWI (NOT clamped)
-        ndwi_date = analyze.calculate_ndwi(
-            green=b3_data, 
-            nir=b5_data, 
-            mask_low_denom=True
-        )
-        
-        # Add to stacks for temporal compositing
-        index_stacks["ndvi"].append(ndvi_date)
-        index_stacks["ndwi"].append(ndwi_date)
-```
+- NDVI and NDWI are derived from masked reflectance inputs.
+- NDVI is clamped to `>= 0` before NDUI-related downstream use.
+- NDWI is not clamped and preserves negative values.
+- Per-date index arrays are then stacked for temporal compositing.
 
 ### Mathematical Correctness
 
@@ -104,19 +74,7 @@ for target_date in landsat_dates:
 
 ## Default Parameters
 
-The indices functions use these defaults:
-
-```python
-# From indices.py
-LANDSAT_EPSILON = 0.02  # 2% reflectance threshold
-
-# Function signatures (note: mask_low_denom defaults to False)
-calculate_ndvi(nir, red, epsilon=LANDSAT_EPSILON, mask_low_denom=False)
-calculate_ndwi(green, nir, epsilon=LANDSAT_EPSILON, mask_low_denom=False)
-
-# But pipeline always passes mask_low_denom=True:
-ndvi = calculate_ndvi(nir, red, mask_low_denom=True)
-```
+The index functions use `LANDSAT_EPSILON = 0.02` (2% reflectance threshold), and pipeline processing enables low-denominator masking so unstable pixels are excluded from compositing.
 
 ## Notes
 

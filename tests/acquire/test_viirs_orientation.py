@@ -22,7 +22,6 @@ class TestVIIRSOrientation:
         east = west + 10  # -100
         south = north - 10  # 40
 
-        # The CORRECT order for gdal.TranslateOptions outputBounds is:
         # [ulx, uly, lrx, lry] = [west, north, east, south]
         correct_bounds = [west, north, east, south]
 

@@ -10,26 +10,16 @@ VIIRS (Visible Infrared Imaging Radiometer Suite) provides nighttime lights data
 
 ### 1. Data Acquisition and Mosaicking
 
-**Function**: `blackmarble.acquire.viirs` + `gdal.BuildVRT()`
+**Function**: `blackmarble.acquire.viirs` + `blackmarble.pipeline.mosaic_viirs`
 
-**Purpose**: Download VIIRS gap-filled NTL data and create mosaic if multiple tiles
+**Purpose**: Download VIIRS gap-filled NTL data and mosaic tiles when multiple files are returned
 
 **Key Points**:
 - Uses NASA's gap-filled product (VNP46A2) that already incorporates quality filtering
 - Lunar irradiance is already removed in VNP46A2 (pipeline does NOT subtract it)
 - Data is in DN units with 0.1 scale factor (converted to radiance later in NDUI calculation)
-- Creates VRT mosaic for multiple tiles
-- Fill value: -999.9 (handled during mosaicking)
-
-**Implementation**:
-```python
-if len(viirs_ntl_files) > 1:
-    vrt_options = gdal.BuildVRTOptions(
-        separate=False,  # Mosaic tiles together
-        resolution='highest'  # Use highest resolution from input files
-    )
-    gdal.BuildVRT(viirs_ntl_vrt, [str(f) for f in viirs_ntl_files], options=vrt_options)
-```
+- Mosaicking is handled in the pipeline when multiple tiles are present
+- Fill value: -999.9 is preserved and handled as nodata in downstream processing
 
 ### 2. Crop to Bounds
 
@@ -40,15 +30,6 @@ if len(viirs_ntl_files) > 1:
 **Parameters**:
 - `bounds`: Target bounding box in WGS84
 - `buffer_distance`: Optional buffer around bounds
-
-**Implementation**:
-```python
-viirs_ntl, viirs_transform, viirs_bounds = prepare.crop_to_bounds(
-    data=viirs_ntl,
-    src_transform=viirs_profile["transform"],
-    bounds=bbox
-)
-```
 
 ### 3. Reprojection to Processing CRS {#reprojection}
 
@@ -63,24 +44,6 @@ viirs_ntl, viirs_transform, viirs_bounds = prepare.crop_to_bounds(
   - Resolution: 30m default (can override via config.preparation.target_resolution)
 - **Resampling During Reprojection**: Bilinear
   - Maintains smooth radiance gradients
-
-**Implementation**:
-```python
-# Get processing CRS and grid
-processing_crs = get_processing_crs(bbox)
-processing_crs, reference_transform, reference_shape = create_processing_grid(bbox, 30.0)
-
-# Reproject VIIRS to processing CRS
-viirs_reprojected, viirs_transform, viirs_bounds = prepare.reproject_image(
-    data=viirs_corrected,
-    src_transform=viirs_profile["transform"],
-    src_crs=viirs_profile["crs"],
-    dst_crs=processing_crs,
-    dst_transform=reference_transform,
-    dst_shape=reference_shape,
-    resampling="bilinear"
-)
-```
 
 ### 4. Grid Alignment
 
@@ -106,8 +69,8 @@ viirs_reprojected, viirs_transform, viirs_bounds = prepare.reproject_image(
 ## Common Issues
 
 1. **Memory Usage**: Processing large areas at 30m resolution
-   - Solution: Use VRT mosaics to handle tiles efficiently
-   - Pipeline automatically creates VRTs for multiple tiles
+  - Solution: Mosaic multi-tile inputs before downstream processing
+  - Pipeline handles tile combination automatically
 
 2. **Nodata Handling**: VIIRS uses fill value of -999.9
    - Solution: Gap-filled product handles this automatically
@@ -118,20 +81,16 @@ viirs_reprojected, viirs_transform, viirs_bounds = prepare.reproject_image(
    - Ensures minimal distortion for the area of interest
 
 4. **Multiple Tiles**: VIIRS data may span multiple tiles
-   - Solution: Automatic VRT mosaicking handles this seamlessly
+  - Solution: Automatic mosaicking combines tiles before downstream processing
 
 ## Configuration
 
-```python
-# No configuration needed - pipeline handles automatically
-# Processing CRS is determined by get_processing_crs(bbox)
-# Resolution is fixed at 30m to match Landsat
-```
+No manual configuration is required. The pipeline determines processing CRS from the area of interest and uses 30m resolution to match Landsat.
 
 ## Performance Notes
 
 - Cropping first reduces processing time significantly
-- VRT mosaics avoid loading all tiles into memory
+- Mosaicking handles multi-tile scenes for downstream processing
 - Bilinear resampling preserves smooth radiance gradients
 - Single reprojection step (no separate resampling)
 

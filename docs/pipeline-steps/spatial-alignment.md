@@ -38,28 +38,11 @@ Spatial alignment is critical for combining datasets from different sources (VII
    - Processes bands individually to reduce memory usage
    - Uses rasterio's windowed operations internally
 
-## Pipeline Implementation
+## Pipeline Behavior
 
-```python
-# From blackmarble/pipeline.py
-if viirs_reprojected is not None and reference_band is not None:
-    # Align VIIRS to Landsat reference grid
-    aligned_rasters = prepare.align_rasters(
-        rasters=[reference_band, viirs_reprojected],
-        transforms=[reference_transform, viirs_transform],
-        reference_idx=0,  # Use Landsat as reference
-        resampling="bilinear",  # Smooth resampling for VIIRS
-    )
-    
-    # Extract aligned VIIRS
-    viirs_reprojected = aligned_rasters[1][0]
-    viirs_transform = aligned_rasters[1][1]
-    
-    # Verify alignment success
-    nonzero_pct = (viirs_reprojected > 0).sum() / viirs_reprojected.size * 100
-    if nonzero_pct < 10.0:
-        raise RuntimeError(f"VIIRS alignment failed - only {nonzero_pct:.1f}% non-zero pixels")
-```
+- Landsat-aligned data provides the reference grid for final VIIRS alignment.
+- Continuous inputs use bilinear resampling during alignment.
+- The pipeline performs sanity checks on aligned outputs to detect sparse or failed alignment.
 
 ## Practical Notes
 
