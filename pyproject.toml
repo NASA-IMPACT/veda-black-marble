@@ -5,7 +5,7 @@ description = "Black Marble NDUI processing"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "boto3>1.38",
+    "boto3>=1.38",
     "earthaccess>=0.16.0",
     "geopandas>=1.1.1",
     "matplotlib>=3.10.3",
@@ -66,7 +66,7 @@ markers = [
     "integration: mark test as integration test requiring real data downloads (skip by default)",
 ]
 
-[tool.pyright]
+[tool.basedpyright]
 # Docker utility files may have dependencies not available during type checking
 exclude = ["docker/"]
 pythonVersion = "3.12"
