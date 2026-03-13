@@ -22,6 +22,42 @@ LANDSAT_EPSILON = 0.02  # 2% reflectance threshold for Landsat C2 SR data
 INDEX_EPSILON = 0.05  # 5% of signal magnitude
 
 
+def _calculate_normalized_difference(
+    band_a: ArrayLike,
+    band_b: ArrayLike,
+    epsilon: float = LANDSAT_EPSILON,
+    mask_low_denom: bool = False,
+) -> ArrayLike:
+    """Calculate normalized-difference index: (A - B) / (A + B)."""
+    numerator = band_a - band_b
+    denominator = band_a + band_b
+
+    if mask_low_denom:
+        # Preserve NaN over low-denominator pixels and avoid eager invalid divisions.
+        valid_mask = np.abs(denominator) >= epsilon
+        index = np.full_like(denominator, np.nan, dtype=denominator.dtype)
+        np.divide(numerator, denominator, out=index, where=valid_mask)
+    else:
+        # Adaptive denominator floor to reduce instability around near-zero sums.
+        signal_magnitude = (np.abs(band_a) + np.abs(band_b)) / 2
+        adaptive_floor = np.maximum(epsilon, INDEX_EPSILON * signal_magnitude)
+        safe_denominator = np.where(
+            np.abs(denominator) < adaptive_floor,
+            np.copysign(adaptive_floor, denominator),
+            denominator,
+        )
+        index = numerator / safe_denominator
+
+    # Keep output inside the theoretical normalized-difference bounds.
+    if mask_low_denom:
+        mask = ~np.isnan(index)
+        index[mask] = np.clip(index[mask], -1.0, 1.0)
+    else:
+        index = np.clip(index, -1.0, 1.0)
+
+    return index
+
+
 def calculate_ndvi(
     nir: ArrayLike, red: ArrayLike, epsilon: float = LANDSAT_EPSILON, mask_low_denom: bool = False
 ) -> ArrayLike:
@@ -81,41 +117,12 @@ def calculate_ndvi(
     if nir.shape != red.shape:
         raise ValueError(f"NIR and Red arrays must have same shape: {nir.shape} vs {red.shape}")
 
-    # Calculate numerator and denominator
-    numerator = nir - red
-    denominator = nir + red
-
-    if mask_low_denom:
-        # Return NaN for low denominators to preserve mathematical correctness
-        # This is crucial for index-first temporal compositing
-        ndvi = np.where(np.abs(denominator) < epsilon, np.nan, numerator / denominator)
-    else:
-        # Calculate adaptive floor based on signal magnitude
-        signal_magnitude = (np.abs(nir) + np.abs(red)) / 2
-        adaptive_floor = np.maximum(epsilon, INDEX_EPSILON * signal_magnitude)
-
-        # Apply floor to denominator while preserving sign
-        safe_denominator = np.where(
-            np.abs(denominator) < adaptive_floor,
-            np.copysign(adaptive_floor, denominator),
-            denominator,
-        )
-
-        # Calculate NDVI using the safe denominator
-        ndvi = numerator / safe_denominator
-
-    # Clamp to valid NDVI range [-1, 1]
-    # This handles any remaining edge cases where the calculation
-    # produces values slightly outside the theoretical bounds
-    # Important: preserve NaN values during clipping
-    if mask_low_denom:
-        # Only clip non-NaN values
-        mask = ~np.isnan(ndvi)
-        ndvi[mask] = np.clip(ndvi[mask], -1.0, 1.0)
-    else:
-        ndvi = np.clip(ndvi, -1.0, 1.0)
-
-    return ndvi
+    return _calculate_normalized_difference(
+        band_a=nir,
+        band_b=red,
+        epsilon=epsilon,
+        mask_low_denom=mask_low_denom,
+    )
 
 
 def calculate_ndwi(
@@ -181,39 +188,12 @@ def calculate_ndwi(
     if green.shape != nir.shape:
         raise ValueError(f"Green and NIR arrays must have same shape: {green.shape} vs {nir.shape}")
 
-    # Calculate numerator and denominator
-    numerator = green - nir
-    denominator = green + nir
-
-    if mask_low_denom:
-        # Return NaN for low denominators to preserve mathematical correctness
-        # This is crucial for index-first temporal compositing
-        ndwi = np.where(np.abs(denominator) < epsilon, np.nan, numerator / denominator)
-    else:
-        # Calculate adaptive floor based on signal magnitude
-        signal_magnitude = (np.abs(green) + np.abs(nir)) / 2
-        adaptive_floor = np.maximum(epsilon, INDEX_EPSILON * signal_magnitude)
-
-        # Apply floor to denominator while preserving sign
-        safe_denominator = np.where(
-            np.abs(denominator) < adaptive_floor,
-            np.copysign(adaptive_floor, denominator),
-            denominator,
-        )
-
-        # Calculate NDWI using the safe denominator
-        ndwi = numerator / safe_denominator
-
-    # Clamp to valid NDWI range [-1, 1]
-    # Important: preserve NaN values during clipping
-    if mask_low_denom:
-        # Only clip non-NaN values
-        mask = ~np.isnan(ndwi)
-        ndwi[mask] = np.clip(ndwi[mask], -1.0, 1.0)
-    else:
-        ndwi = np.clip(ndwi, -1.0, 1.0)
-
-    return ndwi
+    return _calculate_normalized_difference(
+        band_a=green,
+        band_b=nir,
+        epsilon=epsilon,
+        mask_low_denom=mask_low_denom,
+    )
 
 
 def calculate_ndui(
@@ -291,6 +271,9 @@ def calculate_ndui(
     if ndwi is not None and ndwi.shape != ntl.shape:
         raise ValueError(f"NDWI shape {ndwi.shape} must match NTL shape {ntl.shape}")
 
+    if ntl_ceiling <= 0:
+        raise ValueError(f"ntl_ceiling must be > 0, got {ntl_ceiling}")
+
     # Step 1: Scale NTL (no longer needed in BM v2)
     logger.debug(f"NDUI DEBUG: ntl_ceiling = {ntl_ceiling}, ntl_floor = {ntl_floor}")
 
@@ -312,7 +295,11 @@ def calculate_ndui(
 
     # Step 2: Calculate NDUI using original Black Marble formula
     # Original formula: (ntl - ndvi) / (ntl + ndvi + epsilon)
-    ndui = (ntl_normalized - ndvi) / (ntl_normalized + ndvi + epsilon)
+    numerator = ntl_normalized - ndvi
+    denominator = ntl_normalized + ndvi + epsilon
+    valid_mask = np.isfinite(numerator) & np.isfinite(denominator) & (denominator != 0)
+    ndui = np.full_like(denominator, np.nan, dtype=denominator.dtype)
+    np.divide(numerator, denominator, out=ndui, where=valid_mask)
 
     # Step 3: Clamp to [-1, 1]
     ndui = np.where(ndui > 1.0, 1.0, ndui)
