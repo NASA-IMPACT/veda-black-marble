@@ -1,11 +1,136 @@
-# veda-black-marble
-Veda Implementation of Black Marble Data Processing
+# VEDA Black Marble
 
-## Docker image build and push commands
+Nighttime lights processing pipeline for NASA VEDA, combining VIIRS nighttime lights with Landsat data to create urban-focused imagery.
+
+## Installation
+
+Requires Python 3.11+.
+
+```bash
+# Clone the repository
+git clone https://github.com/NASA-IMPACT/veda-black-marble.git
+cd veda-black-marble
+
+# Install in editable mode
+pip install -e .
+# or with uv
+uv pip install -e .
 ```
-cd docker
-aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 018923174646.dkr.ecr.us-west-2.amazonaws.com
-docker build --platform linux/amd64 -t black-marble .
-docker tag black-marble:latest 018923174646.dkr.ecr.us-west-2.amazonaws.com/black-marble:latest
-docker push 018923174646.dkr.ecr.us-west-2.amazonaws.com/black-marble:latest
+
+## Quick Start
+
+```bash
+# Set your NASA Earthdata token (required for VIIRS data)
+export EARTHDATA_TOKEN="your-token-here"
+
+# Process nighttime lights for San Francisco
+blackmarble \
+  --bbox "-122.55,37.69,-122.32,37.81" \
+  --date 2023-06-15 \
+  --output-path san_francisco_lights.tif
 ```
+
+## CLI Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--bbox` | required | Bounding box for processing (WGS84) |
+| `--date` | required | Target date for processing |
+| `--output-path`, `-o` | `black_marble_output.tif` | Output COG file path |
+| `--data-dir` | `./data` | Directory to store/cache data |
+| `--config`, `-c` | `default` | Preset: `default`, `high_quality`, or `fast` |
+| `--save-diagnostics`, `-d` | False | Save intermediate outputs to `{data-dir}/diagnostics/` |
+| `--wgs84`, `-w` | False | Also export EPSG:4326 version |
+| `--earthdata-token`, `-t` | ENV_VAR | NASA Earthdata token (or use EARTHDATA_TOKEN) |
+| `--log-level`, `-l` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+
+Run `blackmarble --help` for complete options.
+
+## Examples
+
+### High-Quality Urban Analysis
+```bash
+# Paris with high quality settings and WGS84 export
+blackmarble \
+  --bbox "2.08,48.80,2.42,48.92" \
+  --date 2023-08-01 \
+  --config high_quality \
+  --wgs84 \
+  --output-path paris_lights_hq.tif
+```
+
+### Quick Diagnostic Run
+```bash
+# Kansas City with diagnostics for QA
+blackmarble \
+  --bbox "-94.74,38.97,-94.42,39.20" \
+  --date 2023-05-15 \
+  --config fast \
+  --save-diagnostics \
+  --output-path kansas_test.tif
+```
+
+## Documentation
+
+For detailed algorithm documentation (QA masking, temporal compositing, urban field enhancement), see [`docs/pipeline-steps/`](docs/pipeline-steps/). Start with [`README.md`](docs/pipeline-steps/README.md) for an overview.
+
+## Python API
+
+```python
+from blackmarble.pipeline import pipeline
+from datetime import datetime
+
+# Process a region
+result = pipeline(
+    bbox=(-122.55, 37.69, -122.32, 37.81),  # (min_lon, min_lat, max_lon, max_lat)
+    date=datetime(2023, 6, 15),
+    output_path="san_francisco.tif"
+)
+```
+
+## Module Organization
+
+The pipeline follows a clear data flow from acquisition through export:
+
+```
+blackmarble/
+├── acquire/          # Async downloads: Landsat, VIIRS, OSM roads
+│   ├── landsat.py      # Scene selection with date-grouped approach
+│   ├── viirs.py        # VIIRS nighttime lights (VNP46A2)
+│   └── osm.py          # OpenStreetMap road networks
+├── prepare/          # Data preparation and quality control
+│   ├── landsat_qa.py   # Cloud/shadow masking with QA bands
+│   └── spatial.py      # Reprojection to common grid
+├── analyze/          # Core algorithms
+│   ├── indices.py      # NDVI, NDWI calculation
+│   ├── temporal.py     # Temporal compositing (85th percentile NDVI)
+│   └── urban_fields.py # Multi-scale urban enhancement
+├── enhance/          # Visualization
+│   ├── contrast.py     # Dynamic range adjustment
+│   └── visualize.py    # Colormap application
+└── export/           # Output generation
+    ├── cog.py          # Cloud-Optimized GeoTIFF creation
+    └── metadata.py     # Processing metadata
+```
+
+## Output
+
+The pipeline produces:
+- **Cloud-Optimized GeoTIFF** with embedded metadata
+- **RGB visualization** using the inferno colormap
+- **Optional EPSG:4326 version** for web mapping (use `--wgs84`)
+- **Optional diagnostics** including intermediate processing steps
+
+## Requirements
+
+- Python 3.11+
+- NASA Earthdata account (free) for VIIRS data
+- ~8GB RAM for typical 100x100km regions
+
+## License
+
+[Apache License 2.0](LICENSE)
+
+## Contributing
+
+Issues and pull requests welcome! Report bugs and request features at https://github.com/NASA-IMPACT/veda-black-marble/issues
