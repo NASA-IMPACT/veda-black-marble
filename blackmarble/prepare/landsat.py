@@ -129,7 +129,7 @@ def process_landsat_date(
         ...     reference_transform,
         ...     reference_shape,
         ... )
-        >>> b2_masked = processed['B2'][0]  # Masked Band 2 data
+        >>> b2_masked, b2_profile = processed['B2']
     """
     result: dict[str, tuple[ArrayLike, Any]] = {}
 

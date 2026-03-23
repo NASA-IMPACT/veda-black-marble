@@ -50,7 +50,7 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
 ### 7. Urban Enhancement
 - **[Compute Urban Fields](./urban-field-enhancement.md)** ⚙️
   - Decisions: Multi-scale parameters, weighting
-- **[Enhance NTL](./urban-field-enhancement.md#ntl-enhancement)** ⚙️
+- **[Enhance NTL](./urban-field-enhancement.md#step-2-enhance-ntl-with-urban-field)** ⚙️
   - Decisions: Enhancement mode (current default: multiplicative)
 
 ### 8. Visualization
@@ -81,39 +81,3 @@ The Black Marble pipeline processes nighttime lights (VIIRS), daytime imagery (L
 | Analysis | [Spectral Indices](./spectral-indices.md), [NDUI](./ndui-calculation.md) | Epsilon handling, water masking |
 | Enhancement | [Urban Fields](./urban-field-enhancement.md) | Scale parameters, enhancement mode |
 | Visualization | Contrast Enhancement, Colormap Application | Percentiles, color range |
-
-## Running Tests
-
-Run tests from the repository root:
-
-```bash
-# Run all tests
-uv run pytest
-
-# Run pipeline statistics tests
-uv run pytest tests/pipeline/test_statistics.py -v
-```
-
-## Reference Data
-
-Test data is committed to the repository in `tests/data/reference/` including:
-- VIIRS nighttime lights (150×150 px, ~7.4m resolution)
-- Landsat 8 bands B3/B4/B5/QA_PIXEL (150×150 px, 30m resolution) 
-- OSM road network (12 segments)
-
-**Data Characteristics:**
-- Synthetic but realistic patterns (deterministic generation)
-- Small size suitable for version control (~500 KB total)
-- Includes test scenarios: clouds, water, vegetation, urban areas
-- SHA-256 checksums in `manifest.json` for integrity verification
-
-**Verification:**
-```bash
-# Verify data integrity (default mode)
-uv run python tools/fetch_reference_data.py
-
-# Force regeneration (uses fixed seeds)
-uv run python tools/fetch_reference_data.py --force
-```
-
-See [Reference Data README](../../tests/data/reference/README.md) for details.
