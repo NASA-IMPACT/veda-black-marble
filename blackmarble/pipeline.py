@@ -112,9 +112,8 @@ def download_data(
     )
 
     logger.info(
-        "OSM road network downloaded: %d nodes, %d edges",
-        len(road_network.nodes),
-        len(road_network.edges),
+        "OSM road segments downloaded: %d",
+        len(road_network),
     )
 
     return {
