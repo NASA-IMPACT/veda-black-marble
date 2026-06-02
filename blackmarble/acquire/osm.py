@@ -5,12 +5,12 @@ and converting it to raster format for integration with satellite imagery.
 """
 
 import hashlib
-import shutil
+import os
+import re
 from pathlib import Path
 from typing import Any, Literal
 
 import geopandas as gpd
-import networkx as nx
 import osmnx as ox
 import pyproj
 import rasterio
@@ -33,13 +33,135 @@ logger = get_logger(__name__)
 Transform = Any  # rasterio.transform.Affine
 
 
+LAYERCAKE_DEFAULT_URL = "https://data.openstreetmap.us/layercake/highways.parquet"
+
+
+def _get_osm_source_from_env() -> str:
+    """Return configured OSM source backend."""
+    source = os.environ.get("BLACKMARBLE_OSM_SOURCE", "overpass")
+    source_normalized = str(source).strip().lower()
+    return source_normalized if source_normalized else "overpass"
+
+
+def _parse_highway_types_from_filter(custom_filter: str | None) -> set[str] | None:
+    """Extract highway types from filter like ["highway"~"a|b|c"]."""
+    if not custom_filter:
+        return None
+
+    match = re.search(r'\["highway"~"([^"]+)"\]', custom_filter)
+    if not match:
+        return None
+
+    parsed = {item.strip() for item in match.group(1).split("|") if item.strip()}
+    return parsed or None
+
+
+def _prepare_lines_geodataframe(lines_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Normalize road line features for downstream buffering and rasterization."""
+    cleaned = lines_gdf[lines_gdf.geometry.notna() & (~lines_gdf.geometry.is_empty)].copy()
+    cleaned = cleaned.explode(index_parts=False)
+    cleaned = cleaned[cleaned.geometry.geom_type == "LineString"].copy()
+
+    if cleaned.crs is None:
+        cleaned = cleaned.set_crs("EPSG:4326")
+    elif cleaned.crs.to_string() != "EPSG:4326":
+        cleaned = cleaned.to_crs("EPSG:4326")
+
+    return cleaned.reset_index(drop=True)
+
+
+def download_layercake_roads(
+    north: float,
+    south: float,
+    east: float,
+    west: float,
+    road_filter: str | None,
+) -> gpd.GeoDataFrame:
+    """Download roads from Layercake parquet with DuckDB spatial filtering."""
+    try:
+        import duckdb
+    except ImportError as e:
+        raise ImportError(
+            "Layercake source requires duckdb. Install dependencies including duckdb "
+            "or set BLACKMARBLE_OSM_SOURCE=overpass."
+        ) from e
+
+    min_lon, min_lat, max_lon, max_lat = west, south, east, north
+    allowed_types = _parse_highway_types_from_filter(road_filter)
+
+    logger.info("Fetching OSM roads from Layercake source: %s", LAYERCAKE_DEFAULT_URL)
+
+    conn = duckdb.connect()
+    try:
+        conn.execute("INSTALL spatial;")
+        conn.execute("LOAD spatial;")
+
+        filters = [
+            f"bbox.xmax >= {min_lon}",
+            f"bbox.xmin <= {max_lon}",
+            f"bbox.ymax >= {min_lat}",
+            f"bbox.ymin <= {max_lat}",
+        ]
+
+        if allowed_types:
+            safe_values = ", ".join(
+                f"'{value.replace("'", "''")}'" for value in sorted(allowed_types)
+            )
+            filters.append(f"highway IN ({safe_values})")
+
+        query = (
+            "SELECT type AS osm_type, id AS osm_id, highway, name, "
+            "ST_AsWKB(geometry) AS geometry "
+            f"FROM '{LAYERCAKE_DEFAULT_URL}' "
+            f"WHERE {' AND '.join(filters)}"
+        )
+
+        table = conn.execute(query).fetch_arrow_table()
+    finally:
+        conn.close()
+
+    if table.num_rows == 0:
+        logger.warning(
+            "Layercake query returned no roads for bbox %s",
+            (min_lon, min_lat, max_lon, max_lat),
+        )
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    dataframe = table.to_pandas()
+    geometries = gpd.array.from_wkb(table["geometry"].to_numpy())
+    lines_gdf = gpd.GeoDataFrame(dataframe, geometry=geometries, crs="EPSG:4326")
+    lines_gdf = _prepare_lines_geodataframe(lines_gdf)
+    logger.info(
+        "Loaded %d road segments from Layercake",
+        len(lines_gdf),
+    )
+    return lines_gdf
+
+
+def download_roads(
+    north: float,
+    south: float,
+    east: float,
+    west: float,
+    road_filter: str | None = None,
+) -> gpd.GeoDataFrame:
+    """Download OSM road network for a bounding box."""
+    source = _get_osm_source_from_env()
+    if source == "layercake":
+        return download_layercake_roads(north, south, east, west, road_filter)
+    if source != "overpass":
+        logger.warning("Unknown BLACKMARBLE_OSM_SOURCE=%r. Falling back to overpass.", source)
+
+    return download_osm_roads(north, south, east, west, road_filter)
+
+
 def download_osm_roads(
     north: float,
     south: float,
     east: float,
     west: float,
     road_filter: str | None = None,
-) -> "nx.MultiDiGraph[Any]":
+) -> gpd.GeoDataFrame:
     """Download OSM road network for a bounding box."""
     logger.info("Downloading roads for bbox: N=%s, S=%s, E=%s, W=%s", north, south, east, west)
     if road_filter:
@@ -48,7 +170,7 @@ def download_osm_roads(
     logger.info("Fetching OSM road network...")
     try:
         # osmnx expects bbox as (west, south, east, north)
-        G = ox.graph_from_bbox(
+        graph = ox.graph_from_bbox(
             bbox=(west, south, east, north),
             retain_all=True,
             truncate_by_edge=True,
@@ -57,23 +179,19 @@ def download_osm_roads(
             custom_filter=road_filter if road_filter else None,
         )
 
-        logger.info("Downloaded %d nodes, %d edges", G.number_of_nodes(), G.number_of_edges())
+        edges_gdf = ox.graph_to_gdfs(graph, nodes=False)
+        if edges_gdf.crs is None:
+            edges_gdf = edges_gdf.set_crs("EPSG:4326")
 
-        # Add CRS attribute to graph to avoid warnings
-        G.graph["crs"] = "EPSG:4326"
+        logger.info(
+            "Downloaded %d road segments from Overpass",
+            len(edges_gdf),
+        )
 
-        return G
+        return edges_gdf.reset_index()
     except Exception as e:
         logger.error("Error downloading roads: %s: %s", type(e).__name__, e)
         raise
-
-
-def clear_osm_cache(cache_dir: str | Path = "data/osm_cache") -> None:
-    """Clear all cached OSM data."""
-    cache_dir_path = Path(cache_dir)
-    if cache_dir_path.exists():
-        shutil.rmtree(cache_dir_path)
-        logger.info("Cleared OSM cache directory: %s", cache_dir_path)
 
 
 def get_osm_cache_path(
@@ -105,7 +223,7 @@ def fetch_road_network(
     custom_filter: str | None = None,
     use_cache: bool = True,
     cache_dir: str | Path = "data/osm_cache",
-) -> Any:  # Returns networkx graph
+) -> gpd.GeoDataFrame:
     """Fetch road network from OpenStreetMap with caching support.
 
     Args:
@@ -115,10 +233,8 @@ def fetch_road_network(
         use_cache: Whether to use cached data if available
 
     Returns:
-        NetworkX graph of the road network
+        GeoDataFrame of road segments
     """
-    min_lon, min_lat, max_lon, max_lat = bbox
-
     # Check cache first
     if use_cache:
         cache_path = get_osm_cache_path(bbox, network_type, custom_filter, cache_dir=cache_dir)
@@ -126,54 +242,36 @@ def fetch_road_network(
         if cache_path.exists():
             logger.info("Loading OSM data from cache: %s", cache_path.name)
             try:
-                nodes_gdf = gpd.read_file(cache_path, layer="nodes")
                 edges_gdf = gpd.read_file(cache_path, layer="edges")
+                edges_gdf = _prepare_lines_geodataframe(edges_gdf)
 
-                if "osmid" in nodes_gdf.columns:
-                    nodes_gdf = nodes_gdf.set_index("osmid")
-                if all(c in edges_gdf.columns for c in ("u", "v", "key")):
-                    edges_gdf = edges_gdf.set_index(["u", "v", "key"])
-                elif all(c in edges_gdf.columns for c in ("u", "v")):
-                    edges_gdf["key"] = 0
-                    edges_gdf = edges_gdf.set_index(["u", "v", "key"])
-
-                graph = ox.graph_from_gdfs(nodes_gdf, edges_gdf)
-
-                logger.info(
-                    "Loaded %d nodes, %d edges from cache",
-                    graph.number_of_nodes(),
-                    graph.number_of_edges(),
-                )
-
-                # Ensure CRS attribute is present to avoid warnings
-                graph.graph.setdefault("crs", "EPSG:4326")
-
-                return graph
+                logger.info("Loaded %d road segments from cache", len(edges_gdf))
+                return edges_gdf
             except Exception as e:
                 logger.warning("Failed to load cache: %s. Downloading fresh data...", e)
 
-    # Download fresh data
-    logger.info("Downloading OSM data from server...")
-    graph = download_osm_roads(max_lat, min_lat, max_lon, min_lon, custom_filter)
+    # Download fresh data using the configured road source backend.
+    logger.info("Downloading road network data")
+    roads_gdf = download_roads(
+        bbox[3],
+        bbox[1],
+        bbox[2],
+        bbox[0],
+        custom_filter,
+    )
 
     # Save to cache
-    if use_cache and graph.number_of_edges() > 0:
+    if use_cache and len(roads_gdf) > 0:
         cache_path = get_osm_cache_path(bbox, network_type, custom_filter, cache_dir=cache_dir)
         try:
-            # Convert graph to GeoDataFrames and cache both layers.
-            # Storing nodes+edges preserves original node IDs and edge keys.
-            nodes_gdf, edges_gdf = ox.graph_to_gdfs(graph)
-
-            # Save to GeoPackage - no size limitations!
-            nodes_gdf.to_file(cache_path, layer="nodes", driver="GPKG")
-            edges_gdf.to_file(cache_path, layer="edges", driver="GPKG")
+            roads_gdf.to_file(cache_path, layer="edges", driver="GPKG")
             logger.info("Saved OSM data to cache: %s", cache_path.name)
-            logger.info("  Cached %d road segments", len(edges_gdf))
+            logger.info("  Cached %d road segments", len(roads_gdf))
         except Exception as e:
             logger.warning("Failed to save cache: %s", e)
             # Continue without caching - the download succeeded
 
-    return graph
+    return roads_gdf
 
 
 def calculate_utm_zone(lon: float, lat: float) -> tuple[int, Literal["north", "south"]]:

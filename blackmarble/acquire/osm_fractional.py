@@ -9,9 +9,8 @@ import logging
 import os
 from typing import Any
 
-import networkx as nx
+import geopandas as gpd
 import numpy as np
-import osmnx as ox
 import rasterio
 import rasterio.features
 from rasterio.crs import CRS
@@ -28,9 +27,6 @@ log = logging.getLogger("bm.spatial")
 
 if os.environ.get("BM_SPATIAL_DEBUG", "").lower() in ("1", "true", "yes"):
     log.setLevel(logging.DEBUG)
-
-# Type aliases
-Transform = Affine
 
 # Default buffer sizes by road type (in meters)
 DEFAULT_BUFFER_BY_TYPE = {
@@ -60,9 +56,9 @@ DEFAULT_BUFFER_BY_TYPE = {
 
 
 def buffer_and_rasterize_roads_fractional(
-    graph: "nx.MultiDiGraph[Any]",
+    roads_gdf: gpd.GeoDataFrame,
     bbox: BBox,
-    transform: Transform,
+    transform: Affine,
     crs: str | CRS,
     shape: tuple[int, int],
     buffer_meters: float | dict[str, float] = 30.0,
@@ -77,7 +73,7 @@ def buffer_and_rasterize_roads_fractional(
     these 25 sub-pixels.
 
     Args:
-        graph: NetworkX graph of road network
+        roads_gdf: GeoDataFrame of road segments
         bbox: Bounding box (min_lon, min_lat, max_lon, max_lat)
         transform: Target transform for 30m output
         crs: Target CRS
@@ -100,25 +96,12 @@ def buffer_and_rasterize_roads_fractional(
             "Set hierarchical=False to use binary fractional coverage."
         )
 
-    # Get edges from graph
-    try:
-        log.debug("Converting graph to GeoDataFrame...")
+    edges_gdf = roads_gdf.copy()
+    if edges_gdf.crs is None:
+        log.warning("Road GeoDataFrame missing CRS, assuming EPSG:4326")
+        edges_gdf = edges_gdf.set_crs("EPSG:4326")
 
-        # Check if graph has CRS info
-        if not hasattr(graph, "graph") or "crs" not in graph.graph:
-            log.warning("Graph missing CRS attribute, assuming EPSG:4326")
-            # Add CRS to graph for osmnx compatibility
-            if not hasattr(graph, "graph"):
-                graph.graph = {}
-            graph.graph["crs"] = "EPSG:4326"
-
-        # Only get edges - we don't need nodes and this avoids MultiIndex issues
-        edges_gdf = ox.graph_to_gdfs(graph, nodes=False)
-        log.debug(f"Got {len(edges_gdf)} edges with CRS: {edges_gdf.crs}")
-    except (ValueError, KeyError) as e:
-        # Empty graph or other error
-        log.error(f"Failed to convert graph to GeoDataFrame: {e}")
-        return np.zeros(shape, dtype=np.float32)
+    log.debug(f"Got {len(edges_gdf)} edges with CRS: {edges_gdf.crs}")
 
     if len(edges_gdf) == 0:
         log.error("No edges in GeoDataFrame")
@@ -258,7 +241,7 @@ def buffer_and_rasterize_roads_fractional(
         return np.zeros(shape, dtype=np.float32)
 
     # Scale transform for 6m resolution
-    transform_6m = transform * transform.scale(1 / sub_pixels, 1 / sub_pixels)
+    transform_6m = transform * Affine.scale(1 / sub_pixels, 1 / sub_pixels)
 
     # Rasterize at 6m resolution
     # Use all_touched=False for more precise sub-pixel coverage
