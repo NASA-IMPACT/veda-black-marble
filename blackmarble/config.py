@@ -41,6 +41,7 @@ class AcquisitionConfig:
     landsat_acquisition: LandsatAcquisitionConfig = field(default_factory=LandsatAcquisitionConfig)
 
     # OSM settings
+    osm_source: Literal["overpass", "layercake"] = "overpass"
     road_types: list[str] = field(
         default_factory=lambda: ["motorway", "trunk", "primary", "secondary"]
     )

@@ -145,13 +145,14 @@ def download_roads(
     east: float,
     west: float,
     road_filter: str | None = None,
+    source: str | None = None,
 ) -> gpd.GeoDataFrame:
     """Download OSM road network for a bounding box."""
-    source = _get_osm_source_from_env()
-    if source == "layercake":
+    selected_source = source.strip().lower() if source else _get_osm_source_from_env()
+    if selected_source == "layercake":
         return download_layercake_roads(north, south, east, west, road_filter)
-    if source != "overpass":
-        logger.warning("Unknown BLACKMARBLE_OSM_SOURCE=%r. Falling back to overpass.", source)
+    if selected_source != "overpass":
+        logger.warning("Unknown OSM source=%r. Falling back to overpass.", selected_source)
 
     return download_osm_roads(north, south, east, west, road_filter)
 
@@ -224,6 +225,7 @@ def fetch_road_network(
     custom_filter: str | None = None,
     use_cache: bool = True,
     cache_dir: str | Path = "data/osm_cache",
+    source: str | None = None,
 ) -> gpd.GeoDataFrame:
     """Fetch road network from OpenStreetMap with caching support.
 
@@ -232,6 +234,7 @@ def fetch_road_network(
         network_type: Type of road network to fetch
         custom_filter: Custom OSM filter string
         use_cache: Whether to use cached data if available
+        source: OSM backend source ('overpass' or 'layercake')
 
     Returns:
         GeoDataFrame of road segments
@@ -259,6 +262,7 @@ def fetch_road_network(
         bbox[2],
         bbox[0],
         custom_filter,
+        source=source,
     )
 
     # Save to cache
