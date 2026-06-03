@@ -101,6 +101,7 @@ def download_layercake_roads(
             f"bbox.xmin <= {max_lon}",
             f"bbox.ymax >= {min_lat}",
             f"bbox.ymin <= {max_lat}",
+            "type = 'way'",
         ]
 
         if allowed_types:
