@@ -109,6 +109,7 @@ def download_data(
         custom_filter=custom_filter,
         use_cache=True,
         cache_dir=data_path / "osm_cache",
+        source=(config.acquisition.osm_source if config else None),
     )
 
     logger.info(
