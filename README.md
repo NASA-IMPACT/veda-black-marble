@@ -43,8 +43,19 @@ blackmarble \
 | `--wgs84`, `-w` | False | Also export EPSG:4326 version |
 | `--earthdata-token`, `-t` | ENV_VAR | NASA Earthdata token (or use EARTHDATA_TOKEN) |
 | `--log-level`, `-l` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `--osm-source` | `overpass` | OSM backend source: `overpass` or `layercake` |
 
 Run `blackmarble --help` for complete options.
+
+## OSM Sources
+
+Road data can be fetched from either:
+
+- `overpass` (default): Overpass API queries via OSMnx
+- `layercake`: OpenStreetMap US [Layercake parquet](https://openstreetmap.us/our-work/layercake/) source
+
+Layercake fetches directly from parquet extracts and can be faster to retrieve data, not timeout over large areas or areas of high density, but is experimental and may not be as fresh.
+
 
 ## Examples
 
@@ -68,6 +79,16 @@ blackmarble \
   --config fast \
   --save-diagnostics \
   --output-path kansas_test.tif
+```
+
+### Using Layercake for OSM data
+
+```bash
+blackmarble \
+  --bbox "-122.55,37.69,-122.32,37.81" \
+  --date 2023-06-15 \
+  --osm-source layercake \
+  --output-path sf_layercake.tif
 ```
 
 ## Documentation
