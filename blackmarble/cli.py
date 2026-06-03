@@ -110,6 +110,13 @@ def run(
             help="Logging level: DEBUG, INFO, WARNING, ERROR",
         ),
     ] = "INFO",
+    osm_source: Annotated[
+        str,
+        typer.Option(
+            "--osm-source",
+            help="OSM backend source: overpass or layercake.",
+        ),
+    ] = "overpass",
 ):
     """
     Runs the Black Marble processing pipeline for a given area and date.
@@ -159,22 +166,19 @@ def run(
 
     # Ensure output directory exists (only for local paths)
     if not output_path.startswith("s3://"):
-        output_path_obj = Path(output_path)
-        output_path_obj.parent.mkdir(parents=True, exist_ok=True)
-    else:
-        # For S3 URLs, use the string directly (Path mangles the URL)
-        output_path_obj = output_path
+        output_path_path = Path(output_path)
+        output_path_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Create configuration based on preset
     match config_preset:
         case "high_quality":
             config = PipelineConfig.for_enhanced_quality(
-                bbox=bbox_parsed, date=date, output_path=str(output_path_obj)
+                bbox=bbox_parsed, date=date, output_path=output_path
             )
         case "fast":
             # For fast processing, use basic mode with minimal enhancements
             config = PipelineConfig.for_bm_parity(
-                bbox=bbox_parsed, date=date, output_path=str(output_path_obj)
+                bbox=bbox_parsed, date=date, output_path=output_path
             )
             # Disable optional outputs for speed
             config.export.generate_urban_mask = False
@@ -182,7 +186,7 @@ def run(
             config.export.validate_before_export = False
         case "default":
             config = PipelineConfig.for_bm_parity(
-                bbox=bbox_parsed, date=date, output_path=str(output_path_obj)
+                bbox=bbox_parsed, date=date, output_path=output_path
             )
         case _:
             typer.echo(
@@ -206,6 +210,15 @@ def run(
 
     # Configure NTL enhancement - always use multiplicative mode
     config.analysis.ntl_enhancement_mode = "multiplicative"
+    osm_source_normalized = osm_source.strip().lower()
+    if osm_source_normalized not in {"overpass", "layercake"}:
+        typer.echo(
+            f"Error: Unknown --osm-source '{osm_source}'. Use 'overpass' or 'layercake'.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    config.acquisition.osm_source = typing.cast(typing.Literal["overpass", "layercake"], osm_source_normalized)
+
     typer.echo("🌃 NTL enhancement: Urban field (multiplicative mode)")
     typer.echo(f"   Urban field scales: {config.analysis.urban_field_sigmas} pixels")
 
@@ -215,8 +228,9 @@ def run(
     typer.echo(f"  Date: {date.strftime('%Y-%m-%d')}")
     typer.echo(f"  Config Preset: {config_preset}")
     typer.echo("  Road Rasterization: Fractional (5x5)")
+    typer.echo(f"  OSM Source: {config.acquisition.osm_source}")
     typer.echo("  NTL Enhancement: multiplicative")
-    typer.echo(f"  Output Path: {output_path_obj}")
+    typer.echo(f"  Output Path: {output_path}")
 
     try:
         typer.echo("\nRunning pipeline...")
@@ -224,7 +238,7 @@ def run(
         result = pipeline(
             bbox=bbox_parsed,
             date=date,
-            output_path=str(output_path_obj),
+            output_path=output_path,
             data_dir=data_dir,
             config=config,
         )
