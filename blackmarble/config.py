@@ -31,6 +31,10 @@ class LandsatAcquisitionConfig:
 class AcquisitionConfig:
     """Configuration for data acquisition phase."""
 
+    # VIIRS settings
+    # VJ146A2 = NOAA-20 (default), VNP46A2 = Suomi NPP (delivery ceases 2026-11-01)
+    viirs_product: Literal["VJ146A2", "VNP46A2"] = "VJ146A2"
+
     # Landsat settings
     cloud_cover_max: float = 50.0  # More permissive to accept T2 scenes
     composite_months: int = (

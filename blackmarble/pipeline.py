@@ -15,7 +15,7 @@ from blackmarble.acquire.osm_fractional import (
     DEFAULT_BUFFER_BY_TYPE,
     buffer_and_rasterize_roads_fractional,
 )
-from blackmarble.acquire.viirs import download_viirs
+from blackmarble.acquire.viirs import DEFAULT_VIIRS_PRODUCT, download_viirs, get_viirs_product
 from blackmarble.typing import ArrayLike, BBox
 
 from . import analyze, enhance, export, prepare
@@ -81,7 +81,8 @@ def download_data(
     logger.info("Downloading VIIRS data")
     viirs_data_dir = data_path / "viirs"
     viirs_data_dir.mkdir(parents=True, exist_ok=True)
-    viirs_data = download_viirs(date, bbox, viirs_data_dir)
+    viirs_product = config.acquisition.viirs_product if config else DEFAULT_VIIRS_PRODUCT
+    viirs_data = download_viirs(date, bbox, viirs_data_dir, product=viirs_product)
     viirs_file_counts = {key: len(value) for key, value in viirs_data.items()}
     logger.info("VIIRS download complete: %s", viirs_file_counts)
 
@@ -454,6 +455,9 @@ def export_outputs(
     metadata: dict[str, Any] = {}
     if config is None or config.export.generate_metadata:
         all_landsat_files = _collect_landsat_band_files(landsat_data)
+        viirs_product = get_viirs_product(
+            config.acquisition.viirs_product if config else DEFAULT_VIIRS_PRODUCT
+        )
         road_types_for_metadata: list[str] = (
             config.acquisition.road_types
             if config and config.acquisition.road_types
@@ -472,8 +476,9 @@ def export_outputs(
                 "viirs": {
                     "files": [str(path) for path in viirs_files],
                     "date_range": f"{date.strftime('%Y-%m-%d')}",
-                    "sensor": "VIIRS",
-                    "product": "VNP46A2",
+                    "sensor": viirs_product.sensor,
+                    "product": viirs_product.short_name,
+                    "version": viirs_product.version,
                 },
                 "osm": {
                     "date_accessed": datetime.now().strftime("%Y-%m-%d"),
