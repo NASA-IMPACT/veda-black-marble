@@ -10,6 +10,7 @@ from typing import Annotated
 
 import typer
 
+from .acquire.viirs import DEFAULT_VIIRS_PRODUCT, VIIRS_PRODUCTS, get_viirs_product
 from .config import PipelineConfig
 from .pipeline import pipeline
 
@@ -117,6 +118,14 @@ def run(
             help="OSM backend source: overpass or layercake.",
         ),
     ] = "overpass",
+    viirs_product: Annotated[
+        str,
+        typer.Option(
+            "--viirs-product",
+            help="VIIRS nighttime lights product: VJ146A2 (NOAA-20) or VNP46A2 (Suomi NPP; "
+            "delivery ceases 2026-11-01).",
+        ),
+    ] = DEFAULT_VIIRS_PRODUCT,
 ):
     """
     Runs the Black Marble processing pipeline for a given area and date.
@@ -217,7 +226,29 @@ def run(
             err=True,
         )
         raise typer.Exit(code=1)
-    config.acquisition.osm_source = typing.cast(typing.Literal["overpass", "layercake"], osm_source_normalized)
+    config.acquisition.osm_source = typing.cast(
+        typing.Literal["overpass", "layercake"], osm_source_normalized
+    )
+
+    try:
+        resolved_viirs_product = get_viirs_product(viirs_product)
+    except ValueError:
+        typer.echo(
+            f"Error: Unknown --viirs-product '{viirs_product}'. "
+            f"Use one of: {', '.join(VIIRS_PRODUCTS)}.",
+            err=True,
+        )
+        raise typer.Exit(code=1) from None
+    if date.date() < resolved_viirs_product.start_date.date():
+        typer.echo(
+            f"Error: {resolved_viirs_product.short_name} has no data before "
+            f"{resolved_viirs_product.start_date:%Y-%m-%d}.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    config.acquisition.viirs_product = typing.cast(
+        typing.Literal["VJ146A2", "VNP46A2"], resolved_viirs_product.short_name
+    )
 
     typer.echo("🌃 NTL enhancement: Urban field (multiplicative mode)")
     typer.echo(f"   Urban field scales: {config.analysis.urban_field_sigmas} pixels")
@@ -228,6 +259,9 @@ def run(
     typer.echo(f"  Date: {date.strftime('%Y-%m-%d')}")
     typer.echo(f"  Config Preset: {config_preset}")
     typer.echo("  Road Rasterization: Fractional (5x5)")
+    typer.echo(
+        f"  VIIRS Product: {resolved_viirs_product.short_name} ({resolved_viirs_product.platform})"
+    )
     typer.echo(f"  OSM Source: {config.acquisition.osm_source}")
     typer.echo("  NTL Enhancement: multiplicative")
     typer.echo(f"  Output Path: {output_path}")

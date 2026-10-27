@@ -2,6 +2,10 @@
 
 ## Bug Fixes
 
+- Fixed ~3.6 km north-west misregistration of Landsat bands in multi-tile mosaics. The band
+  reprojection used the full-mosaic transform for a window-sized destination array, applying
+  the window offset (`MARGIN_PIXELS`) twice. Cloud masks were unaffected, so masks and bands
+  were also on different grids.
 - Fixed bug where Landsat scene paths were not covering entire area of interest
 - Use gap-filled NTL data that has already been corrected for lunar luminance rather than attempting to correct values ourselves
 - No longer derive NDVI from composited reflectance bands; NDVI is calculated per date, then composited using the 85th percentile (median of ratios ≠ ratio of medians)
@@ -14,6 +18,7 @@
 
 ## Algorithms
 
+- Default VIIRS product is now VJ146A2 (NOAA-20) because Suomi NPP (VNP46A2) acquisitions stop on 2026-11-01. VNP46A2 remains selectable via `--viirs-product VNP46A2` / `config.acquisition.viirs_product`, and the COG `data_sources` metadata records the product actually used
 - Moved to VNP46A2 v2 product as v1 is no longer published
 - Remove scaling from ntl product, as data now is published as uint32 
 - Binary road rasterization has been replaced with fractional road rasterization
