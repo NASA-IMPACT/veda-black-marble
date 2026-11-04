@@ -15,8 +15,13 @@ VIIRS (Visible Infrared Imaging Radiometer Suite) provides nighttime lights data
 **Purpose**: Download VIIRS gap-filled NTL data and mosaic tiles when multiple files are returned
 
 **Key Points**:
-- Uses NASA's gap-filled product (VNP46A2) that already incorporates quality filtering
-- Lunar irradiance is already removed in VNP46A2 (pipeline does NOT subtract it)
+- Uses NASA's gap-filled Black Marble product that already incorporates quality filtering:
+  VJ146A2 (NOAA-20, default) or VNP46A2 (Suomi NPP), selected with
+  `config.acquisition.viirs_product` / `--viirs-product`
+- The two products share version, tiling, HDF-EOS5 layer path, and fill value; only the
+  platform and temporal coverage differ (VJ146A2 from 2018-01-19; VNP46A2 from 2012-01-19,
+  with delivery ceasing 2026-11-01). Dates outside a product's coverage fail before download.
+- Lunar irradiance is already removed in the gap-filled product (pipeline does NOT subtract it)
 - Data is in DN units with 0.1 scale factor (converted to radiance later in NDUI calculation)
 - Mosaicking is handled in the pipeline when multiple tiles are present
 - Fill value: -999.9 is preserved and handled as nodata in downstream processing

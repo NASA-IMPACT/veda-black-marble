@@ -44,6 +44,7 @@ blackmarble \
 | `--earthdata-token`, `-t` | ENV_VAR | NASA Earthdata token (or use EARTHDATA_TOKEN) |
 | `--log-level`, `-l` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `--osm-source` | `overpass` | OSM backend source: `overpass` or `layercake` |
+| `--viirs-product` | `VJ146A2` | VIIRS nighttime lights product: `VJ146A2` (NOAA-20) or `VNP46A2` (Suomi NPP) |
 
 Run `blackmarble --help` for complete options.
 
@@ -55,6 +56,17 @@ Road data can be fetched from either:
 - `layercake`: OpenStreetMap US [Layercake parquet](https://openstreetmap.us/our-work/layercake/) source
 
 Layercake fetches directly from parquet extracts and can be faster to retrieve data, not timeout over large areas or areas of high density, but is experimental and may not be as fresh.
+
+## VIIRS Products
+
+| Product | Platform | Available from | Notes |
+|---------|----------|----------------|-------|
+| `VJ146A2` (default) | NOAA-20 / JPSS-1 | 2018-01-19 | |
+| `VNP46A2` | Suomi NPP | 2012-01-19 | Product delivery ceases 2026-11-01; archive remains available |
+
+Both are version 2 daily gap-filled, BRDF-corrected Black Marble products with identical
+tiling, layers, and fill values, so the pipeline treats them the same. Use `VNP46A2` for
+dates before 2018-01-19.
 
 
 ## Examples
@@ -117,7 +129,7 @@ The pipeline follows a clear data flow from acquisition through export:
 blackmarble/
 ├── acquire/          # Async downloads: Landsat, VIIRS, OSM roads
 │   ├── landsat.py      # Scene selection with date-grouped approach
-│   ├── viirs.py        # VIIRS nighttime lights (VNP46A2)
+│   ├── viirs.py        # VIIRS nighttime lights (VJ146A2 / VNP46A2)
 │   └── osm.py          # OpenStreetMap road networks
 ├── prepare/          # Data preparation and quality control
 │   ├── landsat_qa.py   # Cloud/shadow masking with QA bands

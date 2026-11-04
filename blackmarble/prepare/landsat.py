@@ -501,12 +501,20 @@ def process_landsat_date(
                 dst_width = int(dst_window_int.width)
                 tile_data_reprojected = np.zeros((dst_height, dst_width), dtype=band_data.dtype)
 
+                # dst_transform must describe pixel (0, 0) of the *window-sized* destination
+                # array, not the full mosaic. Using the mosaic transform here applied the
+                # window offset twice (once in reproject, once when pasting at
+                # dst_window_int's offsets), shifting band content by the window origin --
+                # ~MARGIN_PIXELS (~3.6 km) to the north-west. Use the rounded window, since
+                # it also sizes the array and supplies the paste offsets below.
                 reproject(
                     source=band_tile_data,
                     destination=tile_data_reprojected,
                     src_transform=window_transform,
                     src_crs=src.crs,
-                    dst_transform=band_profile["transform"],
+                    dst_transform=rasterio.windows.transform(
+                        dst_window_int, band_profile["transform"]
+                    ),
                     dst_crs=band_profile["crs"],
                     resampling=Resampling.nearest,
                     src_nodata=np.nan,
